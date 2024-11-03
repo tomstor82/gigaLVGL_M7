@@ -13,27 +13,10 @@ Arduino_GigaDisplayTouch TouchDetector;
 #define DHTPIN3 4
 #define DHTPIN4 40
 
-
-
 // Define relay pins
 #define RELAY1 64   // living space
 #define RELAY2 62   // shower room
 #define RELAY3 60   // water heater
-
-// CANBUS variables ** TEST - read in loop
-//long unsigned int rxId;     // Stores 4 bytes 32 bits
-//unsigned char len = 0;      // Stores at least 1 byte
-//unsigned char rxBuf[8];     // Stores 8 bytes, 1 character  = 1 byte
-
-//  CANBUS data Identifier List
-
-// CAN data Orion2jr ECU ID 0x7E3
-// ID    Byte  1     2     3     4     5     6     7     8
-// 0x6B0       Amps  "     Volt  "     SOC   Relay "     CRC
-// 0x6B1       DCL   "     "     "     HighT LowT  free  CRC
-// 0x252       CCL   "     LowC HighC  Helth Count Cycl  CRC
-
-// INVESTIGATE ABS_AMP FROM ORION
 
 // CAN RX INFO DISPLAY DATA
 int pos_x = 100;
@@ -307,15 +290,14 @@ void display_temp(lv_timer_t *timer) {
 
 // CLEAR CAN EVENT HANDLER ////////////////////////////////////////////////////////////////
 void clear_bms_fault(lv_event_t * e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    lv_obj_t * obj = lv_event_get_target(e);
-    if ( lv_obj_has_state(obj, LV_EVENT_CLICKED) ) {
-      if ( RPC.available() ) {
+  lv_event_code_t code = lv_event_get_code(e);
+  if ( code == LV_EVENT_CLICKED ) {
+    if ( RPC.available() ) {
       auto sendCanResponse = RPC.call("sendCan");
       Serial.println("Sending CAN message through M4 core");
-      }
     }
   }
+}
 // REFRESH CAN LABEL DATA //////////////////////////////////////////////////////////////////////
 void refresh_data(lv_timer_t* timer) {
     CombinedData *data = (CombinedData *)timer->user_data;
@@ -344,10 +326,41 @@ void retrieve_M4_data() {
     if ( RPC.available() ) {
       auto sensorResponse = RPC.call("getSensorData").as<SensorData>();
       auto canResponse = RPC.call("getCanData").as<CanData>();
+      Serial.println("Retrieving M4 data");
     }
     else { Serial.println("Waiting for RPC to become available"); }
 }
 
+// CREATE NON CLICK ARC //////////////////////////////////////////////////////////////////////////
+/*void create_arc() {
+  //data->userData.label_obj = lv_label_create(parent);
+  //data->userData.canDataProperty = canDataProperty;
+  //data->userData.label_prefix = label_prefix;
+  //data->userData.label_unit = label_unit;
+  lv_obj_t * arc = lv_arc_create(lv_scr_act());
+  lv_arc_set_rotation(arc, 300);
+  lv_arc_set_bg_angles(arc, 120, 60);
+  // remove clickable functionality
+  lv_obj_remove_style(arc, NULL, LV_PART_KNOB);   // Be sure the knob is not displayed
+  lv_obj_clear_flag(arc, LV_OBJ_FLAG_CLICKABLE);  // To not allow adjusting by click
+  lv_obj_center(arc);
+  // start animation
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, arc);
+
+  // initialise struct instance
+  static CombinedData combinedData;  // OBSOLETE ONCE THIS FUNCTION IS CALLED FROM SETUP
+  byte extractedValue = &combinedData.canData.soc;
+  
+  lv_anim_set_exec_cb(&a, extractedValue);
+  lv_anim_set_time(&a, 200);
+  
+  lv_anim_set_values(&a, 0, 100);
+  lv_anim_start(&a);
+
+}*/
+    
 // VOID SETUP //////////////////////////////////////////////////////////////////////////
 void setup() {
   
@@ -355,6 +368,8 @@ void setup() {
 
   Serial.begin(115200); // Initialize Serial Monitor
   while (!Serial);
+  Serial.println("Starting Serial Communication");
+
   // Boot M4 & Initialize RPC protocol
   if ( RPC.begin() ) {
     Serial.println("Booting M4 Core");
@@ -367,7 +382,7 @@ void setup() {
   Display.begin();
   TouchDetector.begin();
 
-  // Assuming we have a CombinedData instance called combinedData
+  // Initialise struct instance combinedData
   static CombinedData combinedData;
 
   // Create a container with grid 2x1
@@ -388,17 +403,19 @@ void setup() {
                         LV_GRID_ALIGN_STRETCH, 0, 1);
 
   // Create labels for CAN data
-  create_can_label(cont, "SOC", "\u0025", &combinedData.canData.soc, 20, 20);
+  /*create_can_label(cont, "SOC", "\u0025", &combinedData.canData.soc, 20, 20);
   create_can_label(cont, "Amperage", "A", &combinedData.canData.rawI, 200, 20);
   create_can_label(cont, "Voltage", "V", &combinedData.canData.rawU, 20, 50);
-  create_can_label(cont, "Power", "W", &combinedData.canData.p, 200, 50);
+  create_can_label(cont, "Power", "W", &combinedData.canData.p, 200, 50);*/
     
   // Create button to clear faults
-  /*lv_obj_t* btn1 = lv_btn_create(cont);
-  lv_obj_set_pos(btn1, 200, 600);
-  lv_label_create(btn1);
-  lv_label_set_text(btn1, "Clear Fault"); 
-  lv_obj_add_event_cb(btn1, clear_bms_fault, LV_EVENT_CLICKED, NULL);*/
+  /*lv_obj_t* bms_btn = lv_btn_create(cont);
+  lv_obj_add_event_cb(bms_btn, clear_bms_fault, LV_EVENT_ALL, NULL);
+  lv_obj_align_to(bms_btn, cont, LV_ALIGN_OUT_BOTTOM_MID, 0, 0);
+  
+  lv_obj_t* bms_btn_label = lv_label_create(bms_btn);
+  lv_label_set_text(bms_btn_label, "Clear Fault"); 
+  lv_obj_center(bms_btn_label);*/
 
   
   // create right column
@@ -425,7 +442,7 @@ void loop() {
    
   delay(5); // calming loop
 
-  // call func to get sensors and can data from M4 core
+  // call func to get sensors and can data from M4 core // call after delay to allow bootup
   retrieve_M4_data();
 
 }
