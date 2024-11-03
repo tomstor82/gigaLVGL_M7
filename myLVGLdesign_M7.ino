@@ -7,31 +7,16 @@
 Arduino_H7_Video Display(800, 480, GigaDisplayShield);
 Arduino_GigaDisplayTouch TouchDetector;
 
-// Define DHT22 pins
+// Define DHT22 pins // OBSOLETE BUT USED FOR CREATING BUTTON REF
 #define DHTPIN1 2
 #define DHTPIN2 3
 #define DHTPIN3 4
-#define DHTPIN4 40
-
-
+#define DHTPIN4 5
 
 // Define relay pins
 #define RELAY1 64   // living space
 #define RELAY2 62   // shower room
 #define RELAY3 60   // water heater
-
-// CANBUS variables ** TEST - read in loop
-//long unsigned int rxId;     // Stores 4 bytes 32 bits
-//unsigned char len = 0;      // Stores at least 1 byte
-//unsigned char rxBuf[8];     // Stores 8 bytes, 1 character  = 1 byte
-
-//  CANBUS data Identifier List
-
-// CAN data Orion2jr ECU ID 0x7E3
-// ID    Byte  1     2     3     4     5     6     7     8
-// 0x6B0       Amps  "     Volt  "     SOC   Relay "     CRC
-// 0x6B1       DCL   "     "     "     HighT LowT  free  CRC
-// 0x252       CCL   "     LowC HighC  Helth Count Cycl  CRC
 
 // INVESTIGATE ABS_AMP FROM ORION
 
@@ -307,7 +292,7 @@ void display_temp(lv_timer_t *timer) {
 
 // CLEAR CAN EVENT HANDLER ////////////////////////////////////////////////////////////////
 void clear_bms_fault(lv_event_t * e) {
-    lv_event_code_t code = lv_event_get_code(e);
+    //lv_event_code_t code = lv_event_get_code(e);
     lv_obj_t * obj = lv_event_get_target(e);
     if ( lv_obj_has_state(obj, LV_EVENT_CLICKED) ) {
       if ( RPC.available() ) {
@@ -394,11 +379,13 @@ void setup() {
   create_can_label(cont, "Power", "W", &combinedData.canData.p, 200, 50);
     
   // Create button to clear faults
-  /*lv_obj_t* btn1 = lv_btn_create(cont);
-  lv_obj_set_pos(btn1, 200, 600);
-  lv_label_create(btn1);
-  lv_label_set_text(btn1, "Clear Fault"); 
-  lv_obj_add_event_cb(btn1, clear_bms_fault, LV_EVENT_CLICKED, NULL);*/
+  lv_obj_t* btn1 = lv_btn_create(cont);
+  lv_obj_add_event_cb(btn1, clear_bms_fault, LV_EVENT_CLICKED, NULL);
+  lv_obj_set_pos(btn1, 110, 600);
+  
+  lv_obj_t* btn1_label = lv_label_create(btn1);
+  lv_label_set_text(btn1_label, "Clear Faults"); 
+  lv_obj_center(btn1_label);
 
   
   // create right column
