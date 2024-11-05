@@ -3,31 +3,38 @@
 #include <Arduino_H7_Video.h>
 #include "lvgl.h"
 #include "Arduino_GigaDisplayTouch.h"
+#include <Arduino_CAN.h>
 
 Arduino_H7_Video Display(800, 480, GigaDisplayShield);
 Arduino_GigaDisplayTouch TouchDetector;
 
-// Define DHT22 pins
+// Define DHT22 pins // OBSOLETE BUT USED FOR CREATING BUTTON REF
 #define DHTPIN1 2
 #define DHTPIN2 3
 #define DHTPIN3 4
-#define DHTPIN4 40
+#define DHTPIN4 5
 
 // Define relay pins
 #define RELAY1 64   // living space
 #define RELAY2 62   // shower room
 #define RELAY3 60   // water heater
 
+// INVESTIGATE ABS_AMP FROM ORION
+
+// CANBUS receive data
+uint32_t rxId;
+uint8_t len = 0;
+uint8_t rxBuf[8];
+
+// CANBUS send data MPI through MPO
+static uint8_t const CAN_ID = 0x20; // Must be different from other devices on CANbus
+uint8_t const msg_data[] = {0x002, 0x01, 0, 0, 0, 0, 0, 0};
+static uint8_t msg_cnt = 0;
+
 // CAN RX INFO DISPLAY DATA
 int pos_x = 100;
 int pos_y = 20;
 int line_gap = 50;
-
-//////////////////////////////////// ********************************* //////////////////////////////////
-//
-//  
-//
-//////////////////////////////////// ********************************* //////////////////////////////////
 
 // Define named structs as data types
 struct SensorData {
@@ -73,6 +80,7 @@ struct CanData {
 
     MSGPACK_DEFINE_ARRAY(rawU, rawI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, ct, st, cc, fs, avgI, kw, cap, p);
 };
+
 // define struct for function user-data
 typedef struct user_data_t {
   lv_obj_t *container;
@@ -91,41 +99,15 @@ typedef struct user_data_t {
   const char* label_unit;
 };
 
-<<<<<<< Updated upstream
-SensorData sensorData;
-CanData canData;
-user_data_t userData;
-
-struct CombinedData {
-  SensorData sensorData;
-  CanData canData;
-  user_data_t userData;
-};
-
-CombinedData combinedData;
-=======
 // declare global instances
 static SensorData sensorData;
 static CanData canData;
 static user_data_t userData;
->>>>>>> Stashed changes
 
 // Variables
-//unsigned long delay = 10000; // duration water heater stays on (ms)
+unsigned long hot_water_timer = 10000; // duration water heater stays on (ms)
 
 
-<<<<<<< Updated upstream
-// CREATE SWITCH AND DISABLE ON CONDITIONS //////////////////////////////////////////////
-void create_switch(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms = 0, uint8_t sensor1_pin = 0, uint8_t sensor2_pin = 0) {
-  CombinedData * data = (CombinedData *)malloc(sizeof(CombinedData));
-  // update userdata in struct
-  data->userData.relay_pin = relay_pin;
-  data->userData.y_offset = y_offset;
-  data->userData.dcl_limit = dcl_limit;
-  data->userData.timeout_ms = timeout_ms;
-  data->userData.sensor1_pin = sensor1_pin;
-  data->userData.sensor2_pin = sensor2_pin;
-=======
 // CREATE BUTTON INSTANCE
 void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms = 0, uint8_t sensor1_pin = 0, uint8_t sensor2_pin = 0) {
   // Allocate memory for every switch's new instance
@@ -137,7 +119,6 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   userData.timeout_ms = timeout_ms;
   userData.sensor1_pin = sensor1_pin;
   userData.sensor2_pin = sensor2_pin;
->>>>>>> Stashed changes
 
   // create button object and add to struct
   userData.my_btn = lv_btn_create(parent); // IMPORTANT TO STORE BUTTON IN USERDATA STRUCT - ELSE CLEARING BUTTONS WON'T WORK
@@ -151,15 +132,9 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   if ( ! timeout_ms ) {
     create_temperature_dropdown(parent);
     // create timed labels
-<<<<<<< Updated upstream
-    data->userData.label_obj = lv_label_create(lv_obj_get_parent(data->userData.my_btn));
-    lv_timer_t *timer = lv_timer_create(display_temp, 10000, data);
-    lv_obj_set_pos(data->userData.label_obj, 180, y_offset + 13);
-=======
     userData.label_obj = lv_label_create(lv_obj_get_parent(userData.my_btn));
     lv_timer_create(display_temp, 10000, NULL);
     lv_obj_set_pos(userData.label_obj, 180, y_offset + 13);
->>>>>>> Stashed changes
   }
   
   // lets set label text
@@ -167,7 +142,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     lv_obj_add_state(userData.my_btn, LV_STATE_DISABLED);
     lv_obj_t *label2low = lv_label_create(parent);
     lv_label_set_long_mode(label2low, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_label_set_text(label2low, "Please Charge Battery                                            ");
+    lv_label_set_text(label2low, "Please Charge Battery                                            "); // spaces to allow a pause
     lv_obj_set_width(label2low, 150);
     lv_obj_set_pos(label2low, 10, y_offset + 50);
   }
@@ -199,11 +174,7 @@ static void timer_event_handler(lv_event_t * e) {
     if ( lv_obj_has_state(userData.my_btn, LV_STATE_CHECKED) ) {
       digitalWrite(userData.relay_pin, HIGH);
       // Start timer
-<<<<<<< Updated upstream
-      lv_timer_t * timer = lv_timer_create(switch_off, 10000, data); // want to disable timer once excess solar to hot water is activated
-=======
       lv_timer_create(switch_off, hot_water_timer, NULL); // want to disable timer once excess solar to hot water is activated
->>>>>>> Stashed changes
     }
     else {
       digitalWrite(userData.relay_pin, LOW);
@@ -322,65 +293,39 @@ void thermostat_timer(lv_timer_t * timer) {
 void display_temp(lv_timer_t *timer) {
   //CombinedData * data = (CombinedData *)timer->user_data;
   char buf[10];
-<<<<<<< Updated upstream
-  if ( data->userData.sensor2_pin ) {
-    snprintf(buf, sizeof(buf), "%.1f\u00B0C", data->sensorData.avg_temp);
-  }
-  else {
-    snprintf(buf, sizeof(buf), "%.1f\u00B0C", data->sensorData.temp4); // SENSOR 4 SELECTED FOR TESTING ///////// data-> doesn't work
-=======
   if ( userData.sensor2_pin ) {
     snprintf(buf, sizeof(buf), "%.1f\u00B0C", sensorData.avg_temp); // use the global shared instance for temp and humidity
   }
   else {
     snprintf(buf, sizeof(buf), "%.1f\u00B0C", sensorData.temp3);
->>>>>>> Stashed changes
   }
   lv_label_set_text(userData.label_obj, buf);
 }
 
 // CLEAR CAN EVENT HANDLER ////////////////////////////////////////////////////////////////
 void clear_bms_fault(lv_event_t * e) {
-  lv_event_code_t code = lv_event_get_code(e);
-  if ( code == LV_EVENT_CLICKED ) {
-    if ( RPC.available() ) {
-      auto sendCanResponse = RPC.call("sendCan");
-      Serial.println("Sending CAN message through M4 core");
+    //lv_event_code_t code = lv_event_get_code(e);
+    lv_obj_t * obj = lv_event_get_target(e);
+    if ( lv_obj_has_state(obj, LV_EVENT_CLICKED) ) {
+      //if ( RPC.available() ) {
+      //RPC.call("sendCan");
+      msg_cnt = 1;
+      Serial.println("Sending CAN message");
+      //}
     }
   }
-}
 // REFRESH CAN LABEL DATA //////////////////////////////////////////////////////////////////////
-<<<<<<< Updated upstream
-void refresh_data(lv_timer_t* timer) {
-    CombinedData *data = (CombinedData *)timer->user_data;
-    char buf[50];
-    
-    // Determine the type of property and format accordingly
-    snprintf(buf, sizeof(buf), "%s %d %s", data->userData.label_prefix, *(int*)(data->userData.canDataProperty),data->userData.label_unit); // try without data->
-=======
 void refresh_can_data(lv_timer_t* timer) {
     //CombinedData *data = (CombinedData *)timer->user_data;
     char buf[50];
     
     // Determine the type of property and format accordingly
     snprintf(buf, sizeof(buf), "%s %d %s", userData.label_prefix, *(int*)(userData.canDataProperty),userData.label_unit);
->>>>>>> Stashed changes
 
     lv_label_set_text(userData.label_obj, buf);
 }
 
 void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* label_unit, void* canDataProperty, int x_pos, int y_pos) {
-<<<<<<< Updated upstream
-    CombinedData *data = (CombinedData *)parent->user_data;
-    data->userData.label_obj = lv_label_create(parent);
-    data->userData.canDataProperty = canDataProperty;
-    data->userData.label_prefix = label_prefix;
-    data->userData.label_unit = label_unit;
-
-    lv_obj_set_pos(data->userData.label_obj, x_pos, y_pos);
-    lv_timer_t* timer = lv_timer_create(refresh_data, 200, data);
-} 
-=======
     // Allocate memory for new user data instance
     //CombinedData * data = (CombinedData *)malloc(sizeof(CombinedData));
     //if (data) {
@@ -395,101 +340,65 @@ void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* la
     //}
 }
 
->>>>>>> Stashed changes
-  
+// SORT CANBUS MSG
+void sort_can() {
+    if (rxId == 0x6B0) {
+        canData.rawI = ((rxBuf[0] << 8) + rxBuf[1]) / 10;
+        canData.rawU = ((rxBuf[2] << 8) + rxBuf[3]) / 10;
+        canData.soc = rxBuf[4] / 2;
+        canData.ry = rxBuf[5];
+        canData.st = rxBuf[6];
+    }
+    if (rxId == 0x6B1) {
+        canData.dcl = ((rxBuf[0] << 8) + rxBuf[1]);
+        canData.ccl = ((rxBuf[2] << 8) + rxBuf[3]);
+        canData.hT = rxBuf[4];
+        canData.lT = rxBuf[5];
+        canData.fu = rxBuf[6];
+    }
+    if (rxId == 0x001) {
+        canData.hC = rxBuf[0] / 1000.0;
+        canData.lC = rxBuf[1] / 1000.0;
+        canData.h = rxBuf[2];
+        canData.ah = rxBuf[3];
+        canData.avgI = rxBuf[4];
+        canData.kw = rxBuf[5];
+        canData.cap = rxBuf[6];
+    }
+    canData.p = (abs(canData.rawI) / 10.0) * canData.rawU / 10.0;
+}
+
 // RETRIEVE DATA FROM M4 CORE
 void retrieve_M4_data() {
     // Call the RPC function to get sensor data
-<<<<<<< Updated upstream
-    if ( RPC.available() ) {
-<<<<<<< Updated upstream
-      auto sensorResponse = RPC.call("getSensorData").as<SensorData>();
-      auto canResponse = RPC.call("getCanData").as<CanData>();
-      Serial.println("Retrieving M4 data");
-=======
-      try {
-        combinedData.sensorData = RPC.call("getSensorData").as<SensorData>();
-        combinedData.canData = RPC.call("getCanData").as<CanData>();
-      } 
-      catch (const std::exception& e) {
-        Serial.print("Error: ");
-        Serial.println(e.what());
-      }
->>>>>>> Stashed changes
-    }
-    else Serial.println("Waiting for RPC to become available");
-=======
       sensorData = RPC.call("getSensorData").as<SensorData>();
       //canData = RPC.call("getCanData").as<CanData>(); // until can issue on m4 is solved marked out as it causes crash
->>>>>>> Stashed changes
 }
 
-// CREATE NON CLICK ARC //////////////////////////////////////////////////////////////////////////
-/*void create_arc() {
-  //data->userData.label_obj = lv_label_create(parent);
-  //data->userData.canDataProperty = canDataProperty;
-  //data->userData.label_prefix = label_prefix;
-  //data->userData.label_unit = label_unit;
-  lv_obj_t * arc = lv_arc_create(lv_scr_act());
-  lv_arc_set_rotation(arc, 300);
-  lv_arc_set_bg_angles(arc, 120, 60);
-  // remove clickable functionality
-  lv_obj_remove_style(arc, NULL, LV_PART_KNOB);   // Be sure the knob is not displayed
-  lv_obj_clear_flag(arc, LV_OBJ_FLAG_CLICKABLE);  // To not allow adjusting by click
-  lv_obj_center(arc);
-  // start animation
-  lv_anim_t a;
-  lv_anim_init(&a);
-  lv_anim_set_var(&a, arc);
-
-  // initialise struct instance
-  static CombinedData combinedData;  // OBSOLETE ONCE THIS FUNCTION IS CALLED FROM SETUP
-  byte extractedValue = &combinedData.canData.soc;
-  
-  lv_anim_set_exec_cb(&a, extractedValue);
-  lv_anim_set_time(&a, 200);
-  
-  lv_anim_set_values(&a, 0, 100);
-  lv_anim_start(&a);
-
-}*/
-    
 // VOID SETUP //////////////////////////////////////////////////////////////////////////
 void setup() {
   
   lv_init();
 
   Serial.begin(115200); // Initialize Serial Monitor
-<<<<<<< Updated upstream
   while (!Serial);
-  Serial.println("Starting Serial Communication");
-
   // Boot M4 & Initialize RPC protocol
   if ( RPC.begin() ) {
-    Serial.println("Booting M4 Core");
-=======
-  while (!Serial); // Prevents code from going further until Serial Connection establishded for Debugging all serial messages
-  Serial.println("Starting Serial Communication at 115200kbps");
- 
-  // Boot M4 & Initialise RPC protocol
-  /*if ( RPC.begin() ) {
-    Serial.println("Sent Boot command to M4 Core");
->>>>>>> Stashed changes
+    Serial.println("M7 Booting M4 Core");
   }
   else {
-    Serial.println("Failed to boot M4 Core");
-  }*/
+    Serial.println("M7 Failed to boot M4 Core");
+  }
+
+  if (!CAN.begin(CanBitRate::BR_500k)) {
+        RPC.println("CAN.begin(...) failed.");
+        for (;;) {}
+  }
   
   // Initialise display and touch
   Display.begin();
   TouchDetector.begin();
 
-<<<<<<< Updated upstream
-  // Initialise struct instance combinedData
-  static CombinedData combinedData;
-
-=======
->>>>>>> Stashed changes
   // Create a container with grid 2x1
   static lv_coord_t col_dsc[] = {370, 370, LV_GRID_TEMPLATE_LAST};
   static lv_coord_t row_dsc[] = {430, 430, LV_GRID_TEMPLATE_LAST};
@@ -508,26 +417,19 @@ void setup() {
                         LV_GRID_ALIGN_STRETCH, 0, 1);
 
   // Create labels for CAN data
-<<<<<<< Updated upstream
-  /*create_can_label(cont, "SOC", "\u0025", &combinedData.canData.soc, 20, 20);
-  create_can_label(cont, "Amperage", "A", &combinedData.canData.rawI, 200, 20);
-  create_can_label(cont, "Voltage", "V", &combinedData.canData.rawU, 20, 50);
-  create_can_label(cont, "Power", "W", &combinedData.canData.p, 200, 50);*/
-=======
   create_can_label(cont, "SOC", "\u0025", &canData.soc, 20, 20);
   create_can_label(cont, "Amperage", "A", &canData.rawI, 200, 20);
   create_can_label(cont, "Voltage", "V", &canData.rawU, 20, 50);
   create_can_label(cont, "Power", "W", &canData.p, 200, 50);
->>>>>>> Stashed changes
     
   // Create button to clear faults
-  /*lv_obj_t* bms_btn = lv_btn_create(cont);
-  lv_obj_add_event_cb(bms_btn, clear_bms_fault, LV_EVENT_ALL, NULL);
-  lv_obj_align_to(bms_btn, cont, LV_ALIGN_OUT_BOTTOM_MID, 0, 0);
+  lv_obj_t* btn1 = lv_btn_create(cont);
+  lv_obj_add_event_cb(btn1, clear_bms_fault, LV_EVENT_CLICKED, NULL);
+  lv_obj_set_pos(btn1, 110, 600);
   
-  lv_obj_t* bms_btn_label = lv_label_create(bms_btn);
-  lv_label_set_text(bms_btn_label, "Clear Fault"); 
-  lv_obj_center(bms_btn_label);*/
+  lv_obj_t* btn1_label = lv_label_create(btn1);
+  lv_label_set_text(btn1_label, "Clear Faults"); 
+  lv_obj_center(btn1_label);
 
   
   // create right column
@@ -551,37 +453,39 @@ void loop() {
   // Handle screen events
   lv_timer_handler();
   lv_task_handler();
-   
-  delay(5); // calming loop
 
-  // call func to get sensors and can data from M4 core // call after delay to allow bootup
-  retrieve_M4_data();
-  
+  // CANBUS READ AND WRITE
+  if (CAN.available()) {
+    CanMsg const msg = CAN.read();
+    rxId = msg.id;
+    len = msg.data_length;
+    memcpy(rxBuf, msg.data, len);
+    sort_can();
+
+    // send CAN if commanded
+    if ( msg_cnt && msg_cnt < 3 ) {
+      memcpy((void *)(msg_data + 4), &msg_cnt, sizeof(msg_cnt));
+      CanMsg msg(CanStandardId(CAN_ID), sizeof(msg_data), msg_data);
+
+      // retry if send failed
+      if ( int const rc = CAN.write(msg); rc <= 0 ) {
+        Serial.print("CAN.write(...) failed with error code ");
+        Serial.println(rc);
+        msg_cnt++;
+      }
+      else msg_cnt = 0; // sent successfully
+    }
+  }
+  else { Serial.println("CAN not available"); }
 
   // write messages from M4 core
   String buffer = "";
   while (RPC.available()) {
+    // call func to get sensors and can data from M4 core
+    retrieve_M4_data();
     buffer += (char)RPC.read();  // Fill the buffer with characters
   }
-  if (buffer.length() > 0) {
-    Serial.print(buffer);
-
-<<<<<<< Updated upstream
-    Serial.print("SOC: ");
-    Serial.println(combinedData.canData.soc);
-    /*Serial.print("Current: ");
-    Serial.println(combinedData.canData.rawI);
-    Serial.print("Temperature and Humidity: ");
-    Serial.println(combinedData.sensorData.temp4);
-    Serial.println(combinedData.sensorData.humi4);*/
-=======
-  //  Serial.print("M7 SOC: ");
-//    Serial.println(canData.soc);
-    //Serial.print("M7 Current: ");
-    //Serial.println(canData.rawI);
-    Serial.print("M7 Temperature and Humidity: ");
-    Serial.println(sensorData.temp3);
-    Serial.println(sensorData.humi3);
->>>>>>> Stashed changes
-  }
+  if (buffer.length() > 0) Serial.print(buffer);
+  
+  delay(5); // calming loop
 }
