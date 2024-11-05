@@ -25,12 +25,6 @@ int pos_x = 100;
 int pos_y = 20;
 int line_gap = 50;
 
-//////////////////////////////////// ********************************* //////////////////////////////////
-//
-//  RUN SINGLE TIMER EVERY 10 SECONDS TO UPDATE ALL REQUIRED LABELS
-//
-//////////////////////////////////// ********************************* //////////////////////////////////
-
 // Define named structs as data types
 struct SensorData {
     float temp1;
@@ -93,14 +87,18 @@ struct CombinedData {
   user_data_t userData;
 };
 
+// Declare instance globally, all included struct instances need not be declared
+static CombinedData combinedData;
+
 // Variables
-//unsigned long delay = 10000; // duration water heater stays on (ms)
+unsigned long hot_water_timer = 10000; // duration water heater stays on (ms)
 
 
 // CREATE SWITCH AND DISABLE ON CONDITIONS //////////////////////////////////////////////
 void create_switch(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms = 0, uint8_t sensor1_pin = 0, uint8_t sensor2_pin = 0) {
+  // Allocate memory for every switch's new instance
   CombinedData * data = (CombinedData *)malloc(sizeof(CombinedData));
-  // update userdata in struct
+  // Update instance with user data
   data->userData.relay_pin = relay_pin;
   data->userData.y_offset = y_offset;
   data->userData.dcl_limit = dcl_limit;
@@ -121,7 +119,7 @@ void create_switch(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     create_temperature_dropdown(parent, data);
     // create timed labels
     data->userData.label_obj = lv_label_create(lv_obj_get_parent(data->userData.my_btn));
-    lv_timer_t *update_temp = lv_timer_create(display_temp, 10000, data);
+    lv_timer_create(display_temp, 10000, data);
     lv_obj_set_pos(data->userData.label_obj, 180, y_offset + 13);
   }
   
@@ -130,7 +128,7 @@ void create_switch(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     lv_obj_add_state(data->userData.my_btn, LV_STATE_DISABLED);
     lv_obj_t *label2low = lv_label_create(parent);
     lv_label_set_long_mode(label2low, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_label_set_text(label2low, "Please Charge Battery                                            ");
+    lv_label_set_text(label2low, "Please Charge Battery                                            "); // spaces to allow a pause
     lv_obj_set_width(label2low, 150);
     lv_obj_set_pos(label2low, 10, y_offset + 50);
   }
@@ -162,7 +160,7 @@ static void timer_event_handler(lv_event_t * e) {
     if ( lv_obj_has_state(data->userData.my_btn, LV_STATE_CHECKED) ) {
       digitalWrite(relay_pin, HIGH);
       // Start timer
-      lv_timer_t * timer = lv_timer_create(switch_off, 10000, data); // want to disable timer once excess solar to hot water is activated
+      lv_timer_create(switch_off, hot_water_timer, data); // want to disable timer once excess solar to hot water is activated
     }
     else {
       digitalWrite(relay_pin, LOW);
@@ -281,11 +279,11 @@ void thermostat_timer(lv_timer_t * timer) {
 void display_temp(lv_timer_t *timer) {
   CombinedData * data = (CombinedData *)timer->user_data;
   char buf[10];
-  if ( data->userData.sensor1_pin ) {
-    snprintf(buf, sizeof(buf), "%.1f\u00B0C", data->sensorData.avg_temp);
+  if ( data->userData.sensor2_pin ) {
+    snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp); // use the global shared instance for temp and humidity
   }
   else {
-    snprintf(buf, sizeof(buf), "%.1f\u00B0C", data->sensorData.temp3); ///////////// SHOULD BE SENSOR 3
+    snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp3);
   }
   lv_label_set_text(data->userData.label_obj, buf);
 }
@@ -296,13 +294,13 @@ void clear_bms_fault(lv_event_t * e) {
     lv_obj_t * obj = lv_event_get_target(e);
     if ( lv_obj_has_state(obj, LV_EVENT_CLICKED) ) {
       if ( RPC.available() ) {
-      auto sendCanResponse = RPC.call("sendCan");
-      Serial.println("Sending CAN message through M4 core");
+      RPC.call("sendCan");
+      Serial.println("M7 Sending CAN message through M4");
       }
     }
   }
 // REFRESH CAN LABEL DATA //////////////////////////////////////////////////////////////////////
-void refresh_data(lv_timer_t* timer) {
+void refresh_can_data(lv_timer_t* timer) {
     CombinedData *data = (CombinedData *)timer->user_data;
     char buf[50];
     
@@ -313,24 +311,26 @@ void refresh_data(lv_timer_t* timer) {
 }
 
 void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* label_unit, void* canDataProperty, int x_pos, int y_pos) {
-    CombinedData *data = (CombinedData *)malloc(sizeof(CombinedData));
-    data->userData.label_obj = lv_label_create(parent);
-    data->userData.canDataProperty = canDataProperty;
-    data->userData.label_prefix = label_prefix;
-    data->userData.label_unit = label_unit;
+    // Allocate memory for new user data instance
+    CombinedData * data = (CombinedData *)malloc(sizeof(CombinedData));
+    if (data) {
+        // Update instance with user data
+        data->userData.label_obj = lv_label_create(parent);
+        data->userData.canDataProperty = canDataProperty;
+        data->userData.label_prefix = label_prefix;
+        data->userData.label_unit = label_unit;
 
-    lv_obj_set_pos(data->userData.label_obj, x_pos, y_pos);
-    lv_timer_t* timer = lv_timer_create(refresh_data, 200, data);
-} 
+        lv_obj_set_pos(data->userData.label_obj, x_pos, y_pos);
+        lv_timer_create(refresh_can_data, 200, data);
+    }
+}
+
   
 // RETRIEVE DATA FROM M4 CORE
 void retrieve_M4_data() {
     // Call the RPC function to get sensor data
-    if ( RPC.available() ) {
-      auto sensorResponse = RPC.call("getSensorData").as<SensorData>();
-      auto canResponse = RPC.call("getCanData").as<CanData>();
-    }
-    else { Serial.println("Waiting for RPC to become available"); }
+      combinedData.sensorData = RPC.call("getSensorData").as<SensorData>();
+      //combinedData.canData = RPC.call("getCanData").as<CanData>(); // until can issue on m4 is solved marked out as it causes crash
 }
 
 // VOID SETUP //////////////////////////////////////////////////////////////////////////
@@ -342,18 +342,15 @@ void setup() {
   while (!Serial);
   // Boot M4 & Initialize RPC protocol
   if ( RPC.begin() ) {
-    Serial.println("Booting M4 Core");
+    Serial.println("M7 Booting M4 Core");
   }
   else {
-    Serial.println("Failed to boot M4 Core");
+    Serial.println("M7 Failed to boot M4 Core");
   }
   
   // Initialise display and touch
   Display.begin();
   TouchDetector.begin();
-
-  // Assuming we have a CombinedData instance called combinedData
-  static CombinedData combinedData;
 
   // Create a container with grid 2x1
   static lv_coord_t col_dsc[] = {370, 370, LV_GRID_TEMPLATE_LAST};
@@ -397,7 +394,7 @@ void setup() {
   create_switch(cont, "Ceiling Heater", RELAY1, 20, 70, 0, DHTPIN1, DHTPIN2);
 
   // Create Switch 2
-  create_switch(cont, "Shower Heater", RELAY2, 120, 10, 0, DHTPIN4); // 4 selected for test
+  create_switch(cont, "Shower Heater", RELAY2, 120, 10, 0, DHTPIN3);
 
   // Create Switch 3
   create_switch(cont, "Hot Water", RELAY3, 300, 60, 10000);
@@ -409,10 +406,24 @@ void loop() {
   // Handle screen events
   lv_timer_handler();
   lv_task_handler();
-   
+
+  // write messages from M4 core
+  String buffer = "";
+  while (RPC.available()) {
+    // call func to get sensors and can data from M4 core
+    retrieve_M4_data();
+    buffer += (char)RPC.read();  // Fill the buffer with characters
+  }
+  if (buffer.length() > 0) {
+    Serial.print(buffer);
+
+  //  Serial.print("M7 SOC: ");
+//    Serial.println(combinedData.canData.soc);
+    //Serial.print("M7 Current: ");
+    //Serial.println(combinedData.canData.rawI);
+    Serial.print("M7 Temperature and Humidity: ");
+    Serial.println(combinedData.sensorData.temp3);
+    Serial.println(combinedData.sensorData.humi3);
+  }
   delay(5); // calming loop
-
-  // call func to get sensors and can data from M4 core
-  retrieve_M4_data();
-
 }
