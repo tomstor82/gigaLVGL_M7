@@ -25,7 +25,7 @@ int line_gap = 50;
 
 //////////////////////////////////// ********************************* //////////////////////////////////
 //
-//  RUN SINGLE TIMER EVERY 10 SECONDS TO UPDATE ALL REQUIRED LABELS
+//  
 //
 //////////////////////////////////// ********************************* //////////////////////////////////
 
@@ -44,29 +44,35 @@ struct SensorData {
     MSGPACK_DEFINE_ARRAY(temp1, temp2, temp3, temp4, humi1, humi2, humi3, humi4, avg_temp);
 };
 // Define named structs as data types
+// CanData struct
 struct CanData {
     unsigned int rawU;
-    int rawI;
-    byte soc;
-    int hC;
-    int lC;
-    byte h;
+    unsigned int p;
+    
     int fu;
-    byte tH;
-    byte tL;
-    float ah;
+    int rawI;
+    int cc;
+    int fs;
+    int avgI;
+    int kw;
+    int cap;
+    
+    byte soc;
+    byte h;
+    byte hT;
+    byte lT;
     byte ry;
     byte dcl;
     byte ccl;
     byte ct;
     byte st;
-    int cc;
-    int fs;
-    int avgI;
-    unsigned int p;
-    MSGPACK_DEFINE_ARRAY(rawU, rawI, soc, hC, lC, h, fu, tH, tL, ah, ry, dcl, ccl, ct, st, cc, fs, avgI, p);
-};
+    
+    float hC;
+    float lC;
+    float ah;
 
+    MSGPACK_DEFINE_ARRAY(rawU, rawI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, ct, st, cc, fs, avgI, kw, cap, p);
+};
 // define struct for function user-data
 typedef struct user_data_t {
   lv_obj_t *container;
@@ -85,11 +91,17 @@ typedef struct user_data_t {
   const char* label_unit;
 };
 
+SensorData sensorData;
+CanData canData;
+user_data_t userData;
+
 struct CombinedData {
   SensorData sensorData;
   CanData canData;
   user_data_t userData;
 };
+
+CombinedData combinedData;
 
 // Variables
 //unsigned long delay = 10000; // duration water heater stays on (ms)
@@ -119,7 +131,7 @@ void create_switch(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     create_temperature_dropdown(parent, data);
     // create timed labels
     data->userData.label_obj = lv_label_create(lv_obj_get_parent(data->userData.my_btn));
-    lv_timer_t *update_temp = lv_timer_create(display_temp, 10000, data);
+    lv_timer_t *timer = lv_timer_create(display_temp, 10000, data);
     lv_obj_set_pos(data->userData.label_obj, 180, y_offset + 13);
   }
   
@@ -279,11 +291,11 @@ void thermostat_timer(lv_timer_t * timer) {
 void display_temp(lv_timer_t *timer) {
   CombinedData * data = (CombinedData *)timer->user_data;
   char buf[10];
-  if ( data->userData.sensor1_pin ) {
+  if ( data->userData.sensor2_pin ) {
     snprintf(buf, sizeof(buf), "%.1f\u00B0C", data->sensorData.avg_temp);
   }
   else {
-    snprintf(buf, sizeof(buf), "%.1f\u00B0C", data->sensorData.temp3); ///////////// SHOULD BE SENSOR 3
+    snprintf(buf, sizeof(buf), "%.1f\u00B0C", data->sensorData.temp4); // SENSOR 4 SELECTED FOR TESTING ///////// data-> doesn't work
   }
   lv_label_set_text(data->userData.label_obj, buf);
 }
@@ -304,13 +316,13 @@ void refresh_data(lv_timer_t* timer) {
     char buf[50];
     
     // Determine the type of property and format accordingly
-    snprintf(buf, sizeof(buf), "%s %d %s", data->userData.label_prefix, *(int*)(data->userData.canDataProperty),data->userData.label_unit);
+    snprintf(buf, sizeof(buf), "%s %d %s", data->userData.label_prefix, *(int*)(data->userData.canDataProperty),data->userData.label_unit); // try without data->
 
     lv_label_set_text(data->userData.label_obj, buf);
 }
 
 void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* label_unit, void* canDataProperty, int x_pos, int y_pos) {
-    CombinedData *data = (CombinedData *)malloc(sizeof(CombinedData));
+    CombinedData *data = (CombinedData *)parent->user_data;
     data->userData.label_obj = lv_label_create(parent);
     data->userData.canDataProperty = canDataProperty;
     data->userData.label_prefix = label_prefix;
@@ -324,11 +336,22 @@ void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* la
 void retrieve_M4_data() {
     // Call the RPC function to get sensor data
     if ( RPC.available() ) {
+<<<<<<< Updated upstream
       auto sensorResponse = RPC.call("getSensorData").as<SensorData>();
       auto canResponse = RPC.call("getCanData").as<CanData>();
       Serial.println("Retrieving M4 data");
+=======
+      try {
+        combinedData.sensorData = RPC.call("getSensorData").as<SensorData>();
+        combinedData.canData = RPC.call("getCanData").as<CanData>();
+      } 
+      catch (const std::exception& e) {
+        Serial.print("Error: ");
+        Serial.println(e.what());
+      }
+>>>>>>> Stashed changes
     }
-    else { Serial.println("Waiting for RPC to become available"); }
+    else Serial.println("Waiting for RPC to become available");
 }
 
 // CREATE NON CLICK ARC //////////////////////////////////////////////////////////////////////////
@@ -367,24 +390,36 @@ void setup() {
   lv_init();
 
   Serial.begin(115200); // Initialize Serial Monitor
+<<<<<<< Updated upstream
   while (!Serial);
   Serial.println("Starting Serial Communication");
 
   // Boot M4 & Initialize RPC protocol
   if ( RPC.begin() ) {
     Serial.println("Booting M4 Core");
+=======
+  while (!Serial); // Prevents code from going further until Serial Connection establishded for Debugging all serial messages
+  Serial.println("Starting Serial Communication at 115200kbps");
+ 
+  // Boot M4 & Initialise RPC protocol
+  /*if ( RPC.begin() ) {
+    Serial.println("Sent Boot command to M4 Core");
+>>>>>>> Stashed changes
   }
   else {
     Serial.println("Failed to boot M4 Core");
-  }
+  }*/
   
   // Initialise display and touch
   Display.begin();
   TouchDetector.begin();
 
+<<<<<<< Updated upstream
   // Initialise struct instance combinedData
   static CombinedData combinedData;
 
+=======
+>>>>>>> Stashed changes
   // Create a container with grid 2x1
   static lv_coord_t col_dsc[] = {370, 370, LV_GRID_TEMPLATE_LAST};
   static lv_coord_t row_dsc[] = {430, 430, LV_GRID_TEMPLATE_LAST};
@@ -427,7 +462,7 @@ void setup() {
   create_switch(cont, "Ceiling Heater", RELAY1, 20, 70, 0, DHTPIN1, DHTPIN2);
 
   // Create Switch 2
-  create_switch(cont, "Shower Heater", RELAY2, 120, 10, 0, DHTPIN4); // 4 selected for test
+  create_switch(cont, "Shower Heater", RELAY2, 120, 10, 0, DHTPIN3);
 
   // Create Switch 3
   create_switch(cont, "Hot Water", RELAY3, 300, 60, 10000);
@@ -444,5 +479,22 @@ void loop() {
 
   // call func to get sensors and can data from M4 core // call after delay to allow bootup
   retrieve_M4_data();
+  
 
+  // write messages from M4 core
+  String buffer = "";
+  while (RPC.available()) {
+    buffer += (char)RPC.read();  // Fill the buffer with characters
+  }
+  if (buffer.length() > 0) {
+    Serial.print(buffer);
+
+    Serial.print("SOC: ");
+    Serial.println(combinedData.canData.soc);
+    /*Serial.print("Current: ");
+    Serial.println(combinedData.canData.rawI);
+    Serial.print("Temperature and Humidity: ");
+    Serial.println(combinedData.sensorData.temp4);
+    Serial.println(combinedData.sensorData.humi4);*/
+  }
 }
