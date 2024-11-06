@@ -20,6 +20,12 @@ Arduino_GigaDisplayTouch TouchDetector;
 #define RELAY3 60   // water heater
 
 // INVESTIGATE ABS_AMP FROM ORION
+//  CANBUS data Identifier List
+//  ID 0x03B BYT0+1:INST_VOLT BYT2+3:INST_AMP BYT4+5:ABS_AMP BYT6:SOC **** ABS_AMP from OrionJr errendous ****
+//  ID 0x6B2 BYT0+1:LOW_CELL BYT2+3:HIGH_CELL BYT4:HEALTH BYT5+6:CYCLES
+//  ID 0x0A9 BYT0:RELAY_STATE BYT1:CCL BYT2:DCL BYT3+4:PACK_AH BYT5+6:AVG_AMP
+//  ID 0x0BD BYT0+1:CUSTOM_FLAGS BYT2:HI_TMP BYT3:LO_TMP BYT4:COUNTER BYT5:BMS_STATUS
+//  ID 0x0BE BYT0:HI_CLL_ID BYT1:LO_CLL_ID **** FUTURE ADDS: INT_HEATSINK
 
 // CANBUS receive data
 uint32_t rxId;
@@ -53,36 +59,47 @@ struct SensorData {
 // Define named structs as data types
 // CanData struct
 struct CanData {
-    unsigned int rawU;
-    unsigned int p;
-    
-    int fu;
-    int rawI;
-    int cc;
-    int fs;
-    int avgI;
-    int kw;
-    int cap;
-    
-    int soc;
-    byte h;
-    byte hT;
-    byte lT;
-    byte ry;
-    byte dcl;
-    byte ccl;
-    byte ct;
-    byte st;
-    
-    float hC;
-    float lC;
-    float ah;
 
-    MSGPACK_DEFINE_ARRAY(rawU, rawI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, ct, st, cc, fs, avgI, kw, cap, p);
+    float p;         // watt calculated by script
+
+    float rawU;             // Voltage - multiplied by 10
+    int rawI;             // Current - multiplied by 10 - negative value indicates charge
+    float avgI;             // Average current for clock and sun symbol calculations
+    float absI;             // Absolute Current
+    float ah;               // Amp hours
+    float hC;               // High Cell Voltage in 0,0001V
+    float lC;               // Low Cell Voltage in 0,0001V
+
+    byte soc;               // State of charge - multiplied by 2
+    byte hT;                // Highest cell temperature * was int
+    byte lT;                // Lowest cell temperature * was int
+    byte ry;                // Relay status
+    byte dcl;               // Discharge current limit * was unsigned int
+    byte ccl;               // Charge current limit * was unsigned int
+    byte ct;                // Counter to observe data received
+    byte st;                // BMS Status
+    byte h;                 // Health
+    byte hCid;              // High Cell ID
+    byte lCid;              // Low Cell ID
+
+    int fu;                 // BMS faults
+    int fs;                 // Fault messages & status from CANBus for displaying wrench icon
+    int cc;                 // Total pack cycles
+
+    /*int kw;
+    int cap;*/
+    
+    MSGPACK_DEFINE_ARRAY(rawU, rawI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, ct, st, cc, fs, avgI, hCid, lCid, p, absI);
 };
+// Define an enumeration for the different data types.
+typedef enum {
+    CAN_DATA_TYPE_INT,
+    CAN_DATA_TYPE_FLOAT,
+    CAN_DATA_TYPE_BYTE
+} can_data_type_t;
 
 // define struct for function user-data
-typedef struct user_data_t {
+typedef struct {
   lv_obj_t *container;
   lv_obj_t *my_btn;
   lv_obj_t *label_obj;
@@ -94,15 +111,19 @@ typedef struct user_data_t {
   uint8_t set_temp = 20; // should match value of dropdown default index
   uint8_t sensor1_pin;
   uint8_t sensor2_pin;
-  void *canDataProperty; // Pointer to the specific CanData property
-  const char* label_prefix; // To store label text prefix };
-  const char* label_unit;
-};
+  union {
+    int *intData;
+    float *floatData;
+    byte *byteData;
+  } canDataProperty;
+  can_data_type_t canDataType;
+  const char* label_prefix; // To store label text prefix
+  const char* label_unit; // Label unit e.g V,A or W
+} user_data_t;
 
 struct CombinedData {
   SensorData sensorData;
   CanData canData;
-  user_data_t userData;
 };
 
 // declare global instances
@@ -114,36 +135,36 @@ unsigned long hot_water_timer = 10000; // duration water heater stays on (ms)
 
 // CREATE BUTTON INSTANCE
 void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms = 0, uint8_t sensor1_pin = 0, uint8_t sensor2_pin = 0) {
-  // Allocate memory for every switch's new instance
-  CombinedData * data = (CombinedData *)malloc(sizeof(CombinedData));
+  // Allocate memory for userdata for each button crea every switch's new instance
+  user_data_t * data = (user_data_t *)malloc(sizeof(user_data_t));
   // Update user data with the instances passed arguments
-  data->userData.relay_pin = relay_pin;
-  data->userData.y_offset = y_offset;
-  data->userData.dcl_limit = dcl_limit;
-  data->userData.timeout_ms = timeout_ms;
-  data->userData.sensor1_pin = sensor1_pin;
-  data->userData.sensor2_pin = sensor2_pin;
+  data->relay_pin = relay_pin;
+  data->y_offset = y_offset;
+  data->dcl_limit = dcl_limit;
+  data->timeout_ms = timeout_ms;
+  data->sensor1_pin = sensor1_pin;
+  data->sensor2_pin = sensor2_pin;
 
   // create button object and add to struct
-  data->userData.my_btn = lv_btn_create(parent); // IMPORTANT TO STORE BUTTON IN USERDATA STRUCT - ELSE CLEARING BUTTONS WON'T WORK
-  lv_obj_set_pos(data->userData.my_btn, 10, y_offset);
-  lv_obj_t *label = lv_label_create(data->userData.my_btn);
+  data->my_btn = lv_btn_create(parent); // IMPORTANT TO STORE BUTTON IN USERDATA STRUCT - ELSE CLEARING BUTTONS WON'T WORK
+  lv_obj_set_pos(data->my_btn, 10, y_offset);
+  lv_obj_t *label = lv_label_create(data->my_btn);
   lv_label_set_text(label, label_text);
   lv_obj_center(label);
-  lv_obj_add_flag(data->userData.my_btn, LV_OBJ_FLAG_CHECKABLE);
+  lv_obj_add_flag(data->my_btn, LV_OBJ_FLAG_CHECKABLE);
 
   // create temperature dropdown and dynamic temperature labels
   if ( ! timeout_ms ) {
     create_temperature_dropdown(parent, data);
     // create timed labels
-    data->userData.label_obj = lv_label_create(lv_obj_get_parent(data->userData.my_btn));
+    data->label_obj = lv_label_create(lv_obj_get_parent(data->my_btn));
     lv_timer_create(display_temp, 10000, data);
-    lv_obj_set_pos(data->userData.label_obj, 180, y_offset + 13);
+    lv_obj_set_pos(data->label_obj, 180, y_offset + 13);
   }
   
   // lets set label text
-  if ( data->canData.dcl < dcl_limit ) {
-    lv_obj_add_state(data->userData.my_btn, LV_STATE_DISABLED);
+  if ( combinedData.canData.dcl < dcl_limit ) {
+    lv_obj_add_state(data->my_btn, LV_STATE_DISABLED);
     lv_obj_t *label2low = lv_label_create(parent);
     lv_label_set_long_mode(label2low, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_label_set_text(label2low, "Please Charge Battery                                            "); // spaces to allow a pause
@@ -160,55 +181,55 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   // create event handlers with custom user_data
   // CLICKED events for timer and ALL events for thermostat
   if ( timeout_ms ) {
-    lv_obj_add_event_cb(data->userData.my_btn, timer_event_handler, LV_EVENT_ALL, data);
+    lv_obj_add_event_cb(data->my_btn, timer_event_handler, LV_EVENT_ALL, data);
   }
   else {
-    lv_obj_add_event_cb(data->userData.my_btn, thermostat_event_handler, LV_EVENT_ALL, data);
+    lv_obj_add_event_cb(data->my_btn, thermostat_event_handler, LV_EVENT_ALL, data);
   }
 }
 
 // timer event handler function - HOT WATER ///////////////////////////////////////////////////////////
 static void timer_event_handler(lv_event_t * e) {
-  CombinedData * data = (CombinedData *)lv_event_get_user_data(e);
+  user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
   lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t * obj = lv_event_get_target(e);
-  //uint8_t relay_pin = data->userData.relay_pin;
+  //uint8_t relay_pin = data->relay_pin;
     if(code == LV_EVENT_CLICKED) {
     LV_UNUSED(obj);
-    if ( lv_obj_has_state(data->userData.my_btn, LV_STATE_CHECKED) ) {
-      digitalWrite(data->userData.relay_pin, HIGH);
+    if ( lv_obj_has_state(data->my_btn, LV_STATE_CHECKED) ) {
+      digitalWrite(data->relay_pin, HIGH);
       // Start timer
       lv_timer_create(switch_off, hot_water_timer, data); // want to disable timer once excess solar to hot water is activated
     }
     else {
-      digitalWrite(data->userData.relay_pin, LOW);
+      digitalWrite(data->relay_pin, LOW);
     }
   }
 }
 // SWITCH OFF CALLBACK FUNCTION ///////////////////////////////////////////////////////////////////////
 void switch_off(lv_timer_t * timer) {
-  CombinedData * data = (CombinedData *)timer->user_data;
+  user_data_t * data = (user_data_t *)timer->user_data;
   
   // turn off the relay
-  digitalWrite(data->userData.relay_pin, LOW);
+  digitalWrite(data->relay_pin, LOW);
   
   // clear button flag
-  lv_obj_clear_state(data->userData.my_btn, LV_STATE_CHECKED);
+  lv_obj_clear_state(data->my_btn, LV_STATE_CHECKED);
 }
 
 // thermostat event handler function - HEATERS /////////////////////////////////////////////////////////
 void thermostat_event_handler(lv_event_t * e) {
-  CombinedData * data = (CombinedData *)lv_event_get_user_data(e);
+  user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
   lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t * obj = lv_event_get_target(e);
   
   if(code == LV_EVENT_CLICKED) {
     LV_UNUSED(obj);
-    if ( lv_obj_has_state(data->userData.my_btn, LV_STATE_CHECKED) ) {
+    if ( lv_obj_has_state(data->my_btn, LV_STATE_CHECKED) ) {
       lv_timer_create(thermostat_timer, 10000, data); // check temp diff every 10s
     }
     else {
-      digitalWrite(data->userData.relay_pin, LOW);
+      digitalWrite(data->relay_pin, LOW);
       //lv_timer_set_repeat_count(timer, 1);
     }
   }
@@ -217,7 +238,7 @@ void thermostat_event_handler(lv_event_t * e) {
 ////////////////////////////////////////////////////////// DROP DOWN ///////////////////////////////////////
 // event handler for temperature dropdown
 void dropdown_event_handler(lv_event_t *e) {
-    CombinedData * data = (CombinedData *)lv_event_get_user_data(e);
+    user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
     if ( !data ) {
       Serial.println("dropdown_event_handler: no user data");
       return;
@@ -228,32 +249,32 @@ void dropdown_event_handler(lv_event_t *e) {
     // link index to selection
     switch (id_selected) {
       case 0:
-        data->userData.set_temp = 5;
+        data->set_temp = 5;
         break;
       case 1:
-        data->userData.set_temp = 18;
+        data->set_temp = 18;
         break;
       case 2:
-        data->userData.set_temp = 19;
+        data->set_temp = 19;
         break;
       case 3:
-        data->userData.set_temp = 20;
+        data->set_temp = 20;
         break;
       case 4:
-        data->userData.set_temp = 21;
+        data->set_temp = 21;
         break;
       case 5:
-        data->userData.set_temp = 22;
+        data->set_temp = 22;
         break;
       default:
-        data->userData.set_temp = 23;
+        data->set_temp = 23;
     }
 }
 
 // CREATE TEMPERATURE SELECTION DROPDOWN MENU ///////////////////////////////////////
-void create_temperature_dropdown(lv_obj_t * parent, CombinedData *data) {
+void create_temperature_dropdown(lv_obj_t * parent, user_data_t *data) {
   lv_obj_t *dd = lv_dropdown_create(parent);
-  //uint8_t y_offset = data->userData.y_offset;
+  //uint8_t y_offset = data->y_offset;
   lv_dropdown_set_options(dd,
     "5\u00B0C\n18\u00B0C\n19\u00B0C\n20\u00B0C\n21\u00B0C\n22\u00B0C\n23\u00B0C");
     
@@ -263,47 +284,47 @@ void create_temperature_dropdown(lv_obj_t * parent, CombinedData *data) {
   lv_obj_add_event_cb(dd, dropdown_event_handler, LV_EVENT_VALUE_CHANGED, data);
   
   // place roller
-  lv_obj_set_pos(dd, 255, data->userData.y_offset - 1);
+  lv_obj_set_pos(dd, 255, data->y_offset - 1);
   lv_obj_set_width(dd, 80);
 }
 
 // THERMOSTAT TIMER AND DISPLAY FUNCTION ///////////////////////////////////////////////////////////////////// HERE WE USE COMBINEDDATA !!!!!!!!!!!!!!!!!!!!!!!!!1
 void thermostat_timer(lv_timer_t * timer) {
-  CombinedData * data = (CombinedData *)timer->user_data;
+  user_data_t * data = (user_data_t *)timer->user_data;
   
-  if ( data->userData.sensor2_pin ) { // use avg temp
+  if ( data->sensor2_pin ) { // use avg temp
     // Close relay if temperature is below selected and button has been pressed
-    if ( data->sensorData.avg_temp < data->userData.set_temp && lv_obj_has_state(data->userData.my_btn, LV_STATE_CHECKED) ) {
-    digitalWrite(data->userData.relay_pin, HIGH); 
+    if ( combinedData.sensorData.avg_temp < data->set_temp && lv_obj_has_state(data->my_btn, LV_STATE_CHECKED) ) {
+    digitalWrite(data->relay_pin, HIGH); 
     }
     // Open relay when temperature is higher or equal to selected
     else {
-      digitalWrite(data->userData.relay_pin, LOW);
+      digitalWrite(data->relay_pin, LOW);
     }
   }
   else {
     // Close relay if temperature is below selected and button has been pressed
-    if ( data->sensorData.temp3 < data->userData.set_temp && lv_obj_has_state(data->userData.my_btn, LV_STATE_CHECKED) ) { // temp3 set as it is easier to code for now **********************************
-      digitalWrite(data->userData.relay_pin, HIGH); 
+    if ( combinedData.sensorData.temp3 < data->set_temp && lv_obj_has_state(data->my_btn, LV_STATE_CHECKED) ) { // temp3 set as it is easier to code for now **********************************
+      digitalWrite(data->relay_pin, HIGH); 
     }
     // Open relay when temperature is higher or equal to selected
     else {
-      digitalWrite(data->userData.relay_pin, LOW);
+      digitalWrite(data->relay_pin, LOW);
     }
   }  
 }
 
 // DISPLAY TEMP FUNCTION ///////////////////////////////////////////////////////////////
 void display_temp(lv_timer_t *timer) {
-  CombinedData * data = (CombinedData *)timer->user_data;
+  user_data_t * data = (user_data_t *)timer->user_data;
   char buf[10];
-  if ( data->userData.sensor2_pin ) {
+  if ( data->sensor2_pin ) {
     snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp); // use the global shared instance for temp and humidity
   }
   else {
     snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp3);
   }
-  lv_label_set_text(data->userData.label_obj, buf);
+  lv_label_set_text(data->label_obj, buf);
 }
 
 // CLEAR CAN EVENT HANDLER ////////////////////////////////////////////////////////////////
@@ -320,56 +341,94 @@ void clear_bms_fault(lv_event_t * e) {
   }
 // REFRESH CAN LABEL DATA //////////////////////////////////////////////////////////////////////
 void refresh_can_data(lv_timer_t* timer) {
-    CombinedData *data = (CombinedData *)timer->user_data;
+    user_data_t *data = (user_data_t *)timer->user_data;
     char buf[50];
-    
-    // Determine the type of property and format accordingly
-    snprintf(buf, sizeof(buf), "%s %d %s", data->userData.label_prefix, *(int*)(data->userData.canDataProperty),data->userData.label_unit);
 
-    lv_label_set_text(data->userData.label_obj, buf);
+    switch (data->canDataType) {
+        case CAN_DATA_TYPE_INT:
+            snprintf(buf, sizeof(buf), "%s %d %s", data->label_prefix, *(data->canDataProperty.intData), data->label_unit);
+            break;
+        case CAN_DATA_TYPE_FLOAT:
+            snprintf(buf, sizeof(buf), "%s %.1f %s", data->label_prefix, *(data->canDataProperty.floatData), data->label_unit);
+            break;
+        case CAN_DATA_TYPE_BYTE:
+            snprintf(buf, sizeof(buf), "%s %d %s", data->label_prefix, *(data->canDataProperty.byteData), data->label_unit);
+            break;
+        default:
+            snprintf(buf, sizeof(buf), "%s %s %s", data->label_prefix, "Unknown", data->label_unit);
+            break;
+    }
+
+    lv_label_set_text(data->label_obj, buf);
 }
 
-void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* label_unit, void* canDataProperty, int x_pos, int y_pos) {
+
+void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* label_unit, void* canDataProperty, can_data_type_t canDataType, int x_pos, int y_pos) {
     // Allocate memory for new user data instance
-    CombinedData * data = (CombinedData *)malloc(sizeof(CombinedData));
+    user_data_t *data = (user_data_t *)malloc(sizeof(user_data_t));
     if (data) {
         // Update instance with user data
-        data->userData.label_obj = lv_label_create(parent);
-        data->userData.canDataProperty = canDataProperty;
-        data->userData.label_prefix = label_prefix;
-        data->userData.label_unit = label_unit;
+        data->label_obj = lv_label_create(parent);
+        data->label_prefix = label_prefix;
+        data->label_unit = label_unit;
+        data->canDataType = canDataType; // Set the type
 
-        lv_obj_set_pos(data->userData.label_obj, x_pos, y_pos);
+        // Assign the appropriate pointer type based on canDataType
+        switch (canDataType) {
+            case CAN_DATA_TYPE_INT:
+                data->canDataProperty.intData = (int*)canDataProperty;
+                break;
+            case CAN_DATA_TYPE_FLOAT:
+                data->canDataProperty.floatData = (float*)canDataProperty;
+                break;
+            case CAN_DATA_TYPE_BYTE:
+                data->canDataProperty.byteData = (byte*)canDataProperty;
+                break;
+            default:
+                break;
+        }
+
+        lv_obj_set_pos(data->label_obj, x_pos, y_pos);
         lv_timer_create(refresh_can_data, 200, data);
     }
 }
 
+
+
 // SORT CANBUS MSG
 void sort_can() {
-    if (rxId == 0x6B0) {
-        combinedData.canData.rawI = ((rxBuf[0] << 8) + rxBuf[1]) / 10;
-        combinedData.canData.rawU = ((rxBuf[2] << 8) + rxBuf[3]) / 10;
-        combinedData.canData.soc = rxBuf[4] / 2;
-        combinedData.canData.ry = rxBuf[5];
-        combinedData.canData.st = rxBuf[6];
+  
+    if (rxId == 0x3B) {
+        combinedData.canData.rawU = ((rxBuf[0] << 8) + rxBuf[1]) / 10.0;
+        combinedData.canData.rawI = ((rxBuf[2] << 8) + rxBuf[3]) / 10;
+        combinedData.canData.absI = ((rxBuf[4] << 8) + rxBuf[5]) / 10.0;
+        combinedData.canData.soc = rxBuf[6] / 2;
     }
-    if (rxId == 0x6B1) {
-        combinedData.canData.dcl = ((rxBuf[0] << 8) + rxBuf[1]);
-        combinedData.canData.ccl = ((rxBuf[2] << 8) + rxBuf[3]);
-        combinedData.canData.hT = rxBuf[4];
-        combinedData.canData.lT = rxBuf[5];
-        combinedData.canData.fu = rxBuf[6];
+    if(rxId == 0x6B2) {
+        combinedData.canData.lC = ((rxBuf[0] << 8) + rxBuf[1]) / 10000.00;
+        combinedData.canData.hC = ((rxBuf[2] << 8) + rxBuf[3]) / 10000.00;
+        combinedData.canData.h = rxBuf[4];
+        combinedData.canData.cc = (rxBuf[5] << 8) + rxBuf[6];
     }
-    if (rxId == 0x001) {
-        combinedData.canData.hC = rxBuf[0] / 1000.0;
-        combinedData.canData.lC = rxBuf[1] / 1000.0;
-        combinedData.canData.h = rxBuf[2];
-        combinedData.canData.ah = rxBuf[3];
-        combinedData.canData.avgI = rxBuf[4];
-        combinedData.canData.kw = rxBuf[5];
-        combinedData.canData.cap = rxBuf[6];
+    if(rxId == 0x0A9) {    
+        combinedData.canData.ry = rxBuf[0];
+        combinedData.canData.ccl = rxBuf[1];
+        combinedData.canData.dcl = rxBuf[2];
+        combinedData.canData.ah = ((rxBuf[3] << 8) + rxBuf[4]) / 10.0;
+        combinedData.canData.avgI = ((rxBuf[4] << 8) + rxBuf[5]) / 10.0;
     }
-    combinedData.canData.p = (abs(combinedData.canData.rawI) / 10.0) * combinedData.canData.rawU / 10.0;
+    if(rxId == 0x0BD) {
+        combinedData.canData.fu = (rxBuf[0] << 8) + rxBuf[1];
+        combinedData.canData.hT = rxBuf[2];
+        combinedData.canData.lT = rxBuf[3];
+        combinedData.canData.ct = rxBuf[4];
+        combinedData.canData.st = rxBuf[5];
+    }
+    if(rxId == 0x0BE) {
+        combinedData.canData.hCid = rxBuf[0];
+        combinedData.canData.lCid = rxBuf[1];
+    }
+    combinedData.canData.p = abs(combinedData.canData.avgI) * combinedData.canData.rawU; // testing with absI instead of avgI
 }
 
 // RETRIEVE DATA FROM M4 CORE
@@ -385,7 +444,7 @@ void setup() {
   lv_init();
 
   Serial.begin(115200); // Initialize Serial Monitor
-  while (!Serial);
+  //while (!Serial);
   // Boot M4 & Initialize RPC protocol
   if ( RPC.begin() ) {
     Serial.println("M7 Booting M4 Core");
@@ -421,11 +480,21 @@ void setup() {
                         LV_GRID_ALIGN_STRETCH, 0, 1);
 
   // Create labels for CAN data
-  create_can_label(cont, "SOC", "\u0025", &combinedData.canData.soc, 20, 20);
-  create_can_label(cont, "Amperage", "A", &combinedData.canData.rawI, 200, 20);
-  create_can_label(cont, "Voltage", "V", &combinedData.canData.rawU, 20, 50);
-  create_can_label(cont, "Power", "W", &combinedData.canData.p, 200, 50);
-    
+  create_can_label(cont, "SOC", "%", &(combinedData.canData.soc), CAN_DATA_TYPE_BYTE, 20, 20);
+  create_can_label(cont, "Current", "A", &(combinedData.canData.rawI), CAN_DATA_TYPE_INT, 180, 20);
+  create_can_label(cont, "Voltage", "V", &(combinedData.canData.rawU), CAN_DATA_TYPE_FLOAT, 20, 50);
+  create_can_label(cont, "Power", "W", &(combinedData.canData.p), CAN_DATA_TYPE_FLOAT, 180, 50);
+  create_can_label(cont, "High Cell ID", "", &(combinedData.canData.hCid), CAN_DATA_TYPE_BYTE, 20, 80);
+  create_can_label(cont, "High Cell", "V", &(combinedData.canData.hC), CAN_DATA_TYPE_FLOAT, 180, 80);
+  create_can_label(cont, "Low Cell ID", "", &(combinedData.canData.lCid), CAN_DATA_TYPE_BYTE, 20, 110);
+  create_can_label(cont, "Low Cell", "V", &(combinedData.canData.lC), CAN_DATA_TYPE_FLOAT, 180, 110);
+  create_can_label(cont, "Discharge Current Limit          ", "A", &(combinedData.canData.dcl), CAN_DATA_TYPE_BYTE, 20, 160);
+  create_can_label(cont, "Charge Current Limit                ", "A", &(combinedData.canData.ccl), CAN_DATA_TYPE_BYTE, 20, 190);
+  create_can_label(cont, "Cycles", "", &(combinedData.canData.cc), CAN_DATA_TYPE_INT, 20, 240);
+  create_can_label(cont, "Health", "%", &(combinedData.canData.h), CAN_DATA_TYPE_BYTE, 180, 240);
+  create_can_label(cont, "Capacity", "Ah", &(combinedData.canData.ah), CAN_DATA_TYPE_FLOAT, 20, 270);
+  
+  
   // Create button to clear faults
   lv_obj_t* btn1 = lv_btn_create(cont);
   lv_obj_add_event_cb(btn1, clear_bms_fault, LV_EVENT_CLICKED, NULL);
