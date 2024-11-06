@@ -133,6 +133,10 @@ static CombinedData combinedData;
 unsigned long hot_water_timer = 10000; // duration water heater stays on (ms)
 
 
+//**************************************************************************************//
+//****** NEED TO CHECK DCL OCCASIONALLY FOR DISABLING BUTTONS FUNCTION AND LABEL *******//
+//**************************************************************************************//
+
 // CREATE BUTTON INSTANCE
 void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms = 0, uint8_t sensor1_pin = 0, uint8_t sensor2_pin = 0) {
   // Allocate memory for userdata for each button crea every switch's new instance
@@ -349,7 +353,7 @@ void refresh_can_data(lv_timer_t* timer) {
             snprintf(buf, sizeof(buf), "%s %d %s", data->label_prefix, *(data->canDataProperty.intData), data->label_unit);
             break;
         case CAN_DATA_TYPE_FLOAT:
-            snprintf(buf, sizeof(buf), "%s %.1f %s", data->label_prefix, *(data->canDataProperty.floatData), data->label_unit);
+            snprintf(buf, sizeof(buf), "%s %.1f %s", data->label_prefix, *(data->canDataProperty.floatData), data->label_unit); // possible to set 1 or 2 decimals on check?
             break;
         case CAN_DATA_TYPE_BYTE:
             snprintf(buf, sizeof(buf), "%s %d %s", data->label_prefix, *(data->canDataProperty.byteData), data->label_unit);
