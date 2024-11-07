@@ -471,14 +471,15 @@ void retrieve_M4_data() {
 void gradualDim(lv_timer_t *timer) {
     if (brightness > 0) {
         backlight.set(brightness--);
-    } else {
-        lv_timer_del(timer); // Stop the timer once brightness reaches 0
     }
+    /*else {
+        lv_timer_del(timer); // Stop the timer once brightness reaches 0
+    }*/
 }
 // DIM TIMER
 void dimDisplay(lv_timer_t *timer) {
     // Start a new timer to gradually dim the display
-    dim_timer = lv_timer_create(gradualDim, 100, NULL); // Dim every 100 ms
+    dim_timer = lv_timer_create(gradualDim, 50, NULL); // Dim every 50 ms
 }
 // RESET SCREEN INACTIVITY TIMER
 void resetInactivityTimer() {
@@ -486,12 +487,19 @@ void resetInactivityTimer() {
         lv_timer_reset(inactivity_timer); // Reset the existing timer
     }
 }
+void touchEventHandler(lv_event_t * e) {
+    if (lv_event_get_code(e) == LV_EVENT_PRESSED ||
+        lv_event_get_code(e) == LV_EVENT_RELEASED ||
+        lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        resetInactivityTimer();
+    }
+}
+
 
 
 // VOID SETUP //////////////////////////////////////////////////////////////////////////
 void setup() {
 
-  backlight.begin();
   lv_init();
 
   Serial.begin(115200); // Initialize Serial Monitor
@@ -508,26 +516,20 @@ void setup() {
         RPC.println("CAN.begin(...) failed.");
         for (;;) {}
   }
+  
+  // Initialise display, touch and backlight
+  Display.begin();
+  TouchDetector.begin();
+  backlight.begin();
+
   // Set display brightness
   backlight.set(brightness);
 
   // Set up a callback to reset the inactivity timer on any LVGL event
-  /*lv_obj_t *scr = lv_scr_act();
-  lv_obj_add_event_cb(scr, [](lv_event_t * e) {
-    if (lv_event_get_code(e) == LV_EVENT_PRESSED ||
-      lv_event_get_code(e) == LV_EVENT_RELEASED ||
-      lv_event_get_code(e) == LV_EVENT_CLICKED) {
-      user_interaction = true;
-      resetInactivityTimer();
-    }
-  }, LV_EVENT_ALL, NULL);
+  lv_obj_add_event_cb(lv_scr_act(), touchEventHandler, LV_EVENT_ALL, NULL);
 
   // Start the inactivity timer
-  inactivity_timer = lv_timer_create(dimDisplay, 120000, NULL); // 2 min delay*/
-  
-  // Initialise display and touch
-  Display.begin();
-  TouchDetector.begin();
+  inactivity_timer = lv_timer_create(dimDisplay, 10000, NULL); // 2 min delay
 
   // Create a container with grid 2x1
   static lv_coord_t col_dsc[] = {370, 370, LV_GRID_TEMPLATE_LAST};
