@@ -4,9 +4,19 @@
 #include "lvgl.h"
 #include "Arduino_GigaDisplayTouch.h"
 #include <Arduino_CAN.h>
+#include <Arduino_GigaDisplay.h>
 
 Arduino_H7_Video Display(800, 480, GigaDisplayShield);
 Arduino_GigaDisplayTouch TouchDetector;
+
+//Create backlight object
+GigaDisplayBacklight backlight;
+
+// Variables for backlight control
+int brightness = 100;
+lv_timer_t *inactivity_timer = NULL; 
+lv_timer_t *dim_timer = NULL;
+bool user_interaction = false;
 
 // Define DHT22 pins // OBSOLETE BUT USED FOR CREATING BUTTON REF
 #define DHTPIN1 2
@@ -25,7 +35,7 @@ Arduino_GigaDisplayTouch TouchDetector;
 //  ID 0x6B2 BYT0+1:LOW_CELL BYT2+3:HIGH_CELL BYT4:HEALTH BYT5+6:CYCLES
 //  ID 0x0A9 BYT0:RELAY_STATE BYT1:CCL BYT2:DCL BYT3+4:PACK_AH BYT5+6:AVG_AMP
 //  ID 0x0BD BYT0+1:CUSTOM_FLAGS BYT2:HI_TMP BYT3:LO_TMP BYT4:COUNTER BYT5:BMS_STATUS
-//  ID 0x0BE BYT0:HI_CLL_ID BYT1:LO_CLL_ID **** FUTURE ADDS: INT_HEATSINK
+//  ID 0x0BE BYT0:HI_CL_ID BYT1:LO_CL_ID BYT2:INT_HEATSINK
 
 // CANBUS receive data
 uint32_t rxId;
@@ -60,10 +70,10 @@ struct SensorData {
 // CanData struct
 struct CanData {
 
-    float p;         // watt calculated by script
+    float p;                // watt calculated by script
 
     float rawU;             // Voltage - multiplied by 10
-    int rawI;             // Current - multiplied by 10 - negative value indicates charge
+    float rawI;             // Current - multiplied by 10 - negative value indicates charge
     float avgI;             // Average current for clock and sun symbol calculations
     float absI;             // Absolute Current
     float ah;               // Amp hours
@@ -95,6 +105,7 @@ struct CanData {
 typedef enum {
     CAN_DATA_TYPE_INT,
     CAN_DATA_TYPE_FLOAT,
+    CAN_DATA_TYPE_DOUBLE_FLOAT,
     CAN_DATA_TYPE_BYTE
 } can_data_type_t;
 
@@ -134,7 +145,7 @@ unsigned long hot_water_timer = 10000; // duration water heater stays on (ms)
 
 
 //**************************************************************************************//
-//****** NEED TO CHECK DCL OCCASIONALLY FOR DISABLING BUTTONS FUNCTION AND LABEL *******//
+// NEED TO ADD DTC FLAGS AND SOLAR HOT WATER OVERRIDE, PERHAPS SIMULATE A BUTTON CLICK? //
 //**************************************************************************************//
 
 // CREATE BUTTON INSTANCE
@@ -157,28 +168,21 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   lv_obj_center(label);
   lv_obj_add_flag(data->my_btn, LV_OBJ_FLAG_CHECKABLE);
 
-  // create temperature dropdown and dynamic temperature labels
-  if ( ! timeout_ms ) {
+  // create temperature dropdown and dynamic temperature labels for thermostat buttons
+  if ( sensor1_pin ) {
+    // create label and update the user data member for access within timer to allow only to update text not object
+    data->label_obj = lv_label_create(lv_obj_get_parent(data->my_btn));
     create_temperature_dropdown(parent, data);
     // create timed labels
-    data->label_obj = lv_label_create(lv_obj_get_parent(data->my_btn));
+    
     lv_timer_create(display_temp, 10000, data);
     lv_obj_set_pos(data->label_obj, 180, y_offset + 13);
   }
   
-  // lets set label text
-  if ( combinedData.canData.dcl < dcl_limit ) {
-    lv_obj_add_state(data->my_btn, LV_STATE_DISABLED);
-    lv_obj_t *label2low = lv_label_create(parent);
-    lv_label_set_long_mode(label2low, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_label_set_text(label2low, "Please Charge Battery                                            "); // spaces to allow a pause
-    lv_obj_set_width(label2low, 150);
-    lv_obj_set_pos(label2low, 10, y_offset + 50);
-  }
-  else {
-    lv_label_set_text(label, label_text);
-  }
-  
+  // Disable all buttons by DCL limit
+  lv_timer_create(dcl_check, 10000, data); // check every 10s
+    
+  // configure relay pins
   pinMode(relay_pin, OUTPUT);
   digitalWrite(relay_pin, LOW); // initialise pin LOW
   
@@ -190,6 +194,20 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   else {
     lv_obj_add_event_cb(data->my_btn, thermostat_event_handler, LV_EVENT_ALL, data);
   }
+}
+
+// TIMER FOR DCL CHECK
+void dcl_check(lv_timer_t * timer) {
+    user_data_t * data = (user_data_t *)timer->user_data;
+    // create scrolling label and disable button      
+    if ( combinedData.canData.dcl < data->dcl_limit ) {
+      lv_obj_t *label = lv_label_create(lv_obj_get_parent(data->my_btn));
+      lv_obj_add_state(data->my_btn, LV_STATE_DISABLED);
+      lv_label_set_long_mode(label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+      lv_obj_set_width(label, 150);
+      lv_obj_set_pos(label, 10, data->y_offset + 50);
+      lv_label_set_text(label, "Please Charge Battery                                            "); // spaces to allow a pause
+    }
 }
 
 // timer event handler function - HOT WATER ///////////////////////////////////////////////////////////
@@ -328,6 +346,7 @@ void display_temp(lv_timer_t *timer) {
   else {
     snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp3);
   }
+  // update label text only and not the label object
   lv_label_set_text(data->label_obj, buf);
 }
 
@@ -354,6 +373,9 @@ void refresh_can_data(lv_timer_t* timer) {
             break;
         case CAN_DATA_TYPE_FLOAT:
             snprintf(buf, sizeof(buf), "%s %.1f %s", data->label_prefix, *(data->canDataProperty.floatData), data->label_unit); // possible to set 1 or 2 decimals on check?
+            break;
+        case CAN_DATA_TYPE_DOUBLE_FLOAT:
+            snprintf(buf, sizeof(buf), "%s %.2f %s", data->label_prefix, *(data->canDataProperty.floatData), data->label_unit); // possible to set 1 or 2 decimals on check?
             break;
         case CAN_DATA_TYPE_BYTE:
             snprintf(buf, sizeof(buf), "%s %d %s", data->label_prefix, *(data->canDataProperty.byteData), data->label_unit);
@@ -385,6 +407,9 @@ void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* la
             case CAN_DATA_TYPE_FLOAT:
                 data->canDataProperty.floatData = (float*)canDataProperty;
                 break;
+            case CAN_DATA_TYPE_DOUBLE_FLOAT:
+                data->canDataProperty.floatData = (float*)canDataProperty;
+                break;
             case CAN_DATA_TYPE_BYTE:
                 data->canDataProperty.byteData = (byte*)canDataProperty;
                 break;
@@ -404,8 +429,8 @@ void sort_can() {
   
     if (rxId == 0x3B) {
         combinedData.canData.rawU = ((rxBuf[0] << 8) + rxBuf[1]) / 10.0;
-        combinedData.canData.rawI = ((rxBuf[2] << 8) + rxBuf[3]) / 10;
-        combinedData.canData.absI = ((rxBuf[4] << 8) + rxBuf[5]) / 10.0;
+        combinedData.canData.rawI = ((rxBuf[2] << 8) + rxBuf[3]); // BAD DATA 65500 - 0 jumping
+        combinedData.canData.absI = ((rxBuf[4] << 8) + rxBuf[5]); // BAD DATA 37250 stuck
         combinedData.canData.soc = rxBuf[6] / 2;
     }
     if(rxId == 0x6B2) {
@@ -419,7 +444,7 @@ void sort_can() {
         combinedData.canData.ccl = rxBuf[1];
         combinedData.canData.dcl = rxBuf[2];
         combinedData.canData.ah = ((rxBuf[3] << 8) + rxBuf[4]) / 10.0;
-        combinedData.canData.avgI = ((rxBuf[4] << 8) + rxBuf[5]) / 10.0;
+        combinedData.canData.avgI = ((rxBuf[4] << 8) + rxBuf[5]) / 1000.0; // SHOULD BE DIVIDED BY 10 ACCORDING TO DOCUMENTATION
     }
     if(rxId == 0x0BD) {
         combinedData.canData.fu = (rxBuf[0] << 8) + rxBuf[1];
@@ -432,7 +457,7 @@ void sort_can() {
         combinedData.canData.hCid = rxBuf[0];
         combinedData.canData.lCid = rxBuf[1];
     }
-    combinedData.canData.p = abs(combinedData.canData.avgI) * combinedData.canData.rawU; // testing with absI instead of avgI
+    combinedData.canData.p = abs(combinedData.canData.avgI) * combinedData.canData.rawU;
 }
 
 // RETRIEVE DATA FROM M4 CORE
@@ -442,9 +467,31 @@ void retrieve_M4_data() {
       //combinedData.canData = RPC.call("getCanData").as<CanData>(); // until can issue on m4 is solved marked out as it causes crash
 }
 
+// DIM DISPLAY FUNCTION
+void gradualDim(lv_timer_t *timer) {
+    if (brightness > 0) {
+        backlight.set(brightness--);
+    } else {
+        lv_timer_del(timer); // Stop the timer once brightness reaches 0
+    }
+}
+// DIM TIMER
+void dimDisplay(lv_timer_t *timer) {
+    // Start a new timer to gradually dim the display
+    dim_timer = lv_timer_create(gradualDim, 100, NULL); // Dim every 100 ms
+}
+// RESET SCREEN INACTIVITY TIMER
+void resetInactivityTimer() {
+    if (inactivity_timer) {
+        lv_timer_reset(inactivity_timer); // Reset the existing timer
+    }
+}
+
+
 // VOID SETUP //////////////////////////////////////////////////////////////////////////
 void setup() {
-  
+
+  backlight.begin();
   lv_init();
 
   Serial.begin(115200); // Initialize Serial Monitor
@@ -461,6 +508,22 @@ void setup() {
         RPC.println("CAN.begin(...) failed.");
         for (;;) {}
   }
+  // Set display brightness
+  backlight.set(brightness);
+
+  // Set up a callback to reset the inactivity timer on any LVGL event
+  /*lv_obj_t *scr = lv_scr_act();
+  lv_obj_add_event_cb(scr, [](lv_event_t * e) {
+    if (lv_event_get_code(e) == LV_EVENT_PRESSED ||
+      lv_event_get_code(e) == LV_EVENT_RELEASED ||
+      lv_event_get_code(e) == LV_EVENT_CLICKED) {
+      user_interaction = true;
+      resetInactivityTimer();
+    }
+  }, LV_EVENT_ALL, NULL);
+
+  // Start the inactivity timer
+  inactivity_timer = lv_timer_create(dimDisplay, 120000, NULL); // 2 min delay*/
   
   // Initialise display and touch
   Display.begin();
@@ -485,13 +548,13 @@ void setup() {
 
   // Create labels for CAN data
   create_can_label(cont, "SOC", "%", &(combinedData.canData.soc), CAN_DATA_TYPE_BYTE, 20, 20);
-  create_can_label(cont, "Current", "A", &(combinedData.canData.rawI), CAN_DATA_TYPE_INT, 180, 20);
+  create_can_label(cont, "Current", "A", &(combinedData.canData.avgI), CAN_DATA_TYPE_FLOAT, 180, 20);
   create_can_label(cont, "Voltage", "V", &(combinedData.canData.rawU), CAN_DATA_TYPE_FLOAT, 20, 50);
   create_can_label(cont, "Power", "W", &(combinedData.canData.p), CAN_DATA_TYPE_FLOAT, 180, 50);
   create_can_label(cont, "High Cell ID", "", &(combinedData.canData.hCid), CAN_DATA_TYPE_BYTE, 20, 80);
-  create_can_label(cont, "High Cell", "V", &(combinedData.canData.hC), CAN_DATA_TYPE_FLOAT, 180, 80);
+  create_can_label(cont, "High Cell", "V", &(combinedData.canData.hC), CAN_DATA_TYPE_DOUBLE_FLOAT, 180, 80);
   create_can_label(cont, "Low Cell ID", "", &(combinedData.canData.lCid), CAN_DATA_TYPE_BYTE, 20, 110);
-  create_can_label(cont, "Low Cell", "V", &(combinedData.canData.lC), CAN_DATA_TYPE_FLOAT, 180, 110);
+  create_can_label(cont, "Low Cell", "V", &(combinedData.canData.lC), CAN_DATA_TYPE_DOUBLE_FLOAT, 180, 110);
   create_can_label(cont, "Discharge Current Limit          ", "A", &(combinedData.canData.dcl), CAN_DATA_TYPE_BYTE, 20, 160);
   create_can_label(cont, "Charge Current Limit                ", "A", &(combinedData.canData.ccl), CAN_DATA_TYPE_BYTE, 20, 190);
   create_can_label(cont, "Cycles", "", &(combinedData.canData.cc), CAN_DATA_TYPE_INT, 20, 240);
@@ -554,8 +617,15 @@ void loop() {
     }
   }
   //else { Serial.println("M7 CAN not available"); } // crazy messages despite working
-  Serial.print("SOC: ");
-  Serial.println(combinedData.canData.soc);
+  Serial.print("rawI: ");
+  Serial.println(combinedData.canData.rawI);
+  Serial.print("Power: ");
+  Serial.println(combinedData.canData.p);
+  Serial.print("absI: ");
+  Serial.println(combinedData.canData.absI);
+  Serial.print("avgI: ");
+  Serial.println(combinedData.canData.avgI);
+  
 
   // write messages from M4 core
   String buffer = "";
