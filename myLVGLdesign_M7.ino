@@ -9,8 +9,6 @@
 Arduino_H7_Video Display(800, 480, GigaDisplayShield);
 Arduino_GigaDisplayTouch TouchDetector;
 
-<<<<<<< HEAD
-=======
 //Create backlight object
 GigaDisplayBacklight backlight;
 
@@ -20,7 +18,6 @@ lv_timer_t *inactivity_timer = NULL;
 lv_timer_t *dim_timer = NULL;
 bool user_interaction = false;
 
->>>>>>> dev
 // Define DHT22 pins // OBSOLETE BUT USED FOR CREATING BUTTON REF
 #define DHTPIN1 2
 #define DHTPIN2 3
@@ -141,37 +138,16 @@ struct CombinedData {
   CanData canData;
 };
 
-<<<<<<< HEAD
-// Declare instance globally, all included struct instances need not be declared
-=======
 // declare global instances
->>>>>>> dev
 static CombinedData combinedData;
 
 // Variables
 unsigned long hot_water_timer = 10000; // duration water heater stays on (ms)
-<<<<<<< HEAD
-=======
-
->>>>>>> dev
 
 //**************************************************************************************//
 // NEED TO ADD DTC FLAGS AND SOLAR HOT WATER OVERRIDE, PERHAPS SIMULATE A BUTTON CLICK? //
 //**************************************************************************************//
 
-<<<<<<< HEAD
-// CREATE SWITCH AND DISABLE ON CONDITIONS //////////////////////////////////////////////
-void create_switch(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms = 0, uint8_t sensor1_pin = 0, uint8_t sensor2_pin = 0) {
-  // Allocate memory for every switch's new instance
-  CombinedData * data = (CombinedData *)malloc(sizeof(CombinedData));
-  // Update instance with user data
-  data->userData.relay_pin = relay_pin;
-  data->userData.y_offset = y_offset;
-  data->userData.dcl_limit = dcl_limit;
-  data->userData.timeout_ms = timeout_ms;
-  data->userData.sensor1_pin = sensor1_pin;
-  data->userData.sensor2_pin = sensor2_pin;
-=======
 // CREATE BUTTON INSTANCE
 void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms = 0, uint8_t sensor1_pin = 0, uint8_t sensor2_pin = 0) {
   // Allocate memory for userdata for each button crea every switch's new instance
@@ -183,7 +159,6 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   data->timeout_ms = timeout_ms;
   data->sensor1_pin = sensor1_pin;
   data->sensor2_pin = sensor2_pin;
->>>>>>> dev
 
   // create button object and add to struct
   data->my_btn = lv_btn_create(parent); // IMPORTANT TO STORE BUTTON IN USERDATA STRUCT - ELSE CLEARING BUTTONS WON'T WORK
@@ -199,28 +174,9 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     data->label_obj = lv_label_create(lv_obj_get_parent(data->my_btn));
     create_temperature_dropdown(parent, data);
     // create timed labels
-<<<<<<< HEAD
-    data->userData.label_obj = lv_label_create(lv_obj_get_parent(data->userData.my_btn));
-    lv_timer_create(display_temp, 10000, data);
-    lv_obj_set_pos(data->userData.label_obj, 180, y_offset + 13);
-  }
-  
-  // lets set label text
-  if ( data->canData.dcl < dcl_limit ) {
-    lv_obj_add_state(data->userData.my_btn, LV_STATE_DISABLED);
-    lv_obj_t *label2low = lv_label_create(parent);
-    lv_label_set_long_mode(label2low, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_label_set_text(label2low, "Please Charge Battery                                            "); // spaces to allow a pause
-    lv_obj_set_width(label2low, 150);
-    lv_obj_set_pos(label2low, 10, y_offset + 50);
-  }
-  else {
-    lv_label_set_text(label, label_text);
-=======
     
     lv_timer_create(display_temp, 10000, data);
     lv_obj_set_pos(data->label_obj, 180, y_offset + 13);
->>>>>>> dev
   }
   
   // Disable all buttons by DCL limit
@@ -384,11 +340,7 @@ void thermostat_timer(lv_timer_t * timer) {
 void display_temp(lv_timer_t *timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
   char buf[10];
-<<<<<<< HEAD
-  if ( data->userData.sensor2_pin ) {
-=======
   if ( data->sensor2_pin ) {
->>>>>>> dev
     snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp); // use the global shared instance for temp and humidity
   }
   else {
@@ -403,27 +355,16 @@ void clear_bms_fault(lv_event_t * e) {
     //lv_event_code_t code = lv_event_get_code(e);
     lv_obj_t * obj = lv_event_get_target(e);
     if ( lv_obj_has_state(obj, LV_EVENT_CLICKED) ) {
-<<<<<<< HEAD
-      if ( RPC.available() ) {
-      RPC.call("sendCan");
-      Serial.println("M7 Sending CAN message through M4");
-      }
-=======
       //if ( RPC.available() ) {
       //RPC.call("sendCan");
       msg_cnt = 1;
       Serial.println("Sending CAN message");
       //}
->>>>>>> dev
     }
   }
 // REFRESH CAN LABEL DATA //////////////////////////////////////////////////////////////////////
 void refresh_can_data(lv_timer_t* timer) {
-<<<<<<< HEAD
-    CombinedData *data = (CombinedData *)timer->user_data;
-=======
     user_data_t *data = (user_data_t *)timer->user_data;
->>>>>>> dev
     char buf[50];
 
     switch (data->canDataType) {
@@ -450,19 +391,6 @@ void refresh_can_data(lv_timer_t* timer) {
     lv_label_set_text(data->label_obj, buf);
 }
 
-<<<<<<< HEAD
-void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* label_unit, void* canDataProperty, int x_pos, int y_pos) {
-    // Allocate memory for new user data instance
-    CombinedData * data = (CombinedData *)malloc(sizeof(CombinedData));
-    if (data) {
-        // Update instance with user data
-        data->userData.label_obj = lv_label_create(parent);
-        data->userData.canDataProperty = canDataProperty;
-        data->userData.label_prefix = label_prefix;
-        data->userData.label_unit = label_unit;
-
-        lv_obj_set_pos(data->userData.label_obj, x_pos, y_pos);
-=======
 
 void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* label_unit, void* canDataProperty, can_data_type_t canDataType, int x_pos, int y_pos) {
     // Allocate memory for new user data instance
@@ -493,14 +421,10 @@ void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* la
         }
 
         lv_obj_set_pos(data->label_obj, x_pos, y_pos);
->>>>>>> dev
         lv_timer_create(refresh_can_data, 200, data);
     }
 }
 
-<<<<<<< HEAD
-  
-=======
 // function to convert unsigned integrals to signed
 int16_t signValue(uint16_t canValue) {
   int16_t signedValue = (canValue > 32767) ? canValue - 65536 : canValue;
@@ -546,14 +470,11 @@ void sort_can() {
     combinedData.canData.p = combinedData.canData.avgI * combinedData.canData.rawU;
 }
 
->>>>>>> dev
 // RETRIEVE DATA FROM M4 CORE
 void retrieve_M4_data() {
     // Call the RPC function to get sensor data
       combinedData.sensorData = RPC.call("getSensorData").as<SensorData>();
       //combinedData.canData = RPC.call("getCanData").as<CanData>(); // until can issue on m4 is solved marked out as it causes crash
-<<<<<<< HEAD
-=======
 }
 
 // Function to gradually dim the display
@@ -572,7 +493,6 @@ void gradualBrighten(lv_timer_t *timer) {
     } else {
         lv_timer_del(timer); // Stop the timer once brightness reaches full brightness
     }
->>>>>>> dev
 }
 
 // Function to start dimming the display
@@ -612,14 +532,11 @@ void setup() {
   }
   else {
     Serial.println("M7 Failed to boot M4 Core");
-<<<<<<< HEAD
-=======
   }
 
   if (!CAN.begin(CanBitRate::BR_500k)) {
         RPC.println("CAN.begin(...) failed.");
         for (;;) {}
->>>>>>> dev
   }
   
   // Initialise display, touch and backlight
@@ -627,14 +544,10 @@ void setup() {
   TouchDetector.begin();
   backlight.begin();
 
-<<<<<<< HEAD
-  // Create a container with grid 2x1
-=======
   // Set display brightness
   backlight.set(brightness);
 
   // Create two columns on active screen, grid 2x1
->>>>>>> dev
   static lv_coord_t col_dsc[] = {370, 370, LV_GRID_TEMPLATE_LAST};
   static lv_coord_t row_dsc[] = {430, 430, LV_GRID_TEMPLATE_LAST};
   lv_obj_t * parent = lv_obj_create(lv_scr_act());
@@ -687,11 +600,7 @@ void setup() {
   create_button(cont, "Ceiling Heater", RELAY1, 20, 70, 0, DHTPIN1, DHTPIN2);
 
   // Create Switch 2
-<<<<<<< HEAD
-  create_switch(cont, "Shower Heater", RELAY2, 120, 10, 0, DHTPIN3);
-=======
   create_button(cont, "Shower Heater", RELAY2, 120, 10, 0, DHTPIN3);
->>>>>>> dev
 
   // Create Switch 3
   create_button(cont, "Hot Water", RELAY3, 300, 60, 10000);
@@ -711,8 +620,6 @@ void loop() {
   // Handle screen events
   lv_timer_handler();
   lv_task_handler();
-<<<<<<< HEAD
-=======
 
   // CANBUS READ AND WRITE
   if (CAN.available()) {
@@ -746,7 +653,6 @@ void loop() {
   Serial.print("avgI: ");
   Serial.println(combinedData.canData.avgI);
   
->>>>>>> dev
 
   // write messages from M4 core
   String buffer = "";
@@ -755,21 +661,7 @@ void loop() {
     retrieve_M4_data();
     buffer += (char)RPC.read();  // Fill the buffer with characters
   }
-<<<<<<< HEAD
-  if (buffer.length() > 0) {
-    Serial.print(buffer);
-
-  //  Serial.print("M7 SOC: ");
-//    Serial.println(combinedData.canData.soc);
-    //Serial.print("M7 Current: ");
-    //Serial.println(combinedData.canData.rawI);
-    Serial.print("M7 Temperature and Humidity: ");
-    Serial.println(combinedData.sensorData.temp3);
-    Serial.println(combinedData.sensorData.humi3);
-  }
-=======
   if (buffer.length() > 0) Serial.print(buffer);
   
->>>>>>> dev
   delay(5); // calming loop
 }
