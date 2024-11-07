@@ -13,7 +13,7 @@ Arduino_GigaDisplayTouch TouchDetector;
 GigaDisplayBacklight backlight;
 
 // Variables for backlight control
-int brightness = 100;
+int brightness = 70;
 lv_timer_t *inactivity_timer = NULL; 
 lv_timer_t *dim_timer = NULL;
 bool user_interaction = false;
@@ -75,7 +75,7 @@ struct CanData {
     float rawU;             // Voltage - multiplied by 10
     float rawI;             // Current - multiplied by 10 - negative value indicates charge
     float avgI;             // Average current for clock and sun symbol calculations
-    float absI;             // Absolute Current
+    float absI;             // Absolute Current NOT WORKING CORRECTLY
     float ah;               // Amp hours
     float hC;               // High Cell Voltage in 0,0001V
     float lC;               // Low Cell Voltage in 0,0001V
@@ -96,14 +96,15 @@ struct CanData {
     int fs;                 // Fault messages & status from CANBus for displaying wrench icon
     int cc;                 // Total pack cycles
 
-    /*int kw;
-    int cap;*/
+    float kw;               // Active power 0,1kW
+    byte hs;                // Internal Heatsink
     
-    MSGPACK_DEFINE_ARRAY(rawU, rawI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, ct, st, cc, fs, avgI, hCid, lCid, p, absI);
+    MSGPACK_DEFINE_ARRAY(rawU, rawI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, ct, st, cc, fs, avgI, hCid, lCid, p, absI, kw, hs);
 };
 // Define an enumeration for the different data types.
 typedef enum {
     CAN_DATA_TYPE_INT,
+    //CAN_DATA_TYPE_INT_2,
     CAN_DATA_TYPE_FLOAT,
     CAN_DATA_TYPE_DOUBLE_FLOAT,
     CAN_DATA_TYPE_BYTE
@@ -371,6 +372,9 @@ void refresh_can_data(lv_timer_t* timer) {
         case CAN_DATA_TYPE_INT:
             snprintf(buf, sizeof(buf), "%s %d %s", data->label_prefix, *(data->canDataProperty.intData), data->label_unit);
             break;
+        //case CAN_DATA_TYPE_INT_2:
+            //snprintf(buf, sizeof(buf), "%s %d %s", data->label_prefix, (*(data->canDataProperty.intData) / 10.0), data->label_unit);
+            //break;
         case CAN_DATA_TYPE_FLOAT:
             snprintf(buf, sizeof(buf), "%s %.1f %s", data->label_prefix, *(data->canDataProperty.floatData), data->label_unit); // possible to set 1 or 2 decimals on check?
             break;
@@ -422,15 +426,20 @@ void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* la
     }
 }
 
-
+// function to convert unsigned integrals to signed
+int16_t signValue(uint16_t canValue) {
+  int16_t signedValue = (canValue > 32767) ? canValue - 65536 : canValue;
+  return signedValue;
+}
 
 // SORT CANBUS MSG
 void sort_can() {
-  
+
+    // I WOULD LIKE TO COMPARE CHECKSUM BUT CPP STD LIBRARY NOT AVAILABLE I BELIEVE
     if (rxId == 0x3B) {
         combinedData.canData.rawU = ((rxBuf[0] << 8) + rxBuf[1]) / 10.0;
-        combinedData.canData.rawI = ((rxBuf[2] << 8) + rxBuf[3]); // BAD DATA 65500 - 0 jumping
-        combinedData.canData.absI = ((rxBuf[4] << 8) + rxBuf[5]); // BAD DATA 37250 stuck
+        combinedData.canData.rawI = (signValue((rxBuf[2] << 8) + rxBuf[3])) / 10.0; // has become unsigned somewhere along the transmission
+        combinedData.canData.absI = ((rxBuf[4] << 8) + rxBuf[5]) / 10.0; // bad data? orion issue?
         combinedData.canData.soc = rxBuf[6] / 2;
     }
     if(rxId == 0x6B2) {
@@ -444,7 +453,7 @@ void sort_can() {
         combinedData.canData.ccl = rxBuf[1];
         combinedData.canData.dcl = rxBuf[2];
         combinedData.canData.ah = ((rxBuf[3] << 8) + rxBuf[4]) / 10.0;
-        combinedData.canData.avgI = ((rxBuf[4] << 8) + rxBuf[5]) / 1000.0; // SHOULD BE DIVIDED BY 10 ACCORDING TO DOCUMENTATION
+        combinedData.canData.avgI = (signValue((rxBuf[5] << 8) + rxBuf[6])) / 10.0; // has become unsigned somewhere along the transmission
     }
     if(rxId == 0x0BD) {
         combinedData.canData.fu = (rxBuf[0] << 8) + rxBuf[1];
@@ -456,8 +465,10 @@ void sort_can() {
     if(rxId == 0x0BE) {
         combinedData.canData.hCid = rxBuf[0];
         combinedData.canData.lCid = rxBuf[1];
+        combinedData.canData.hs = rxBuf[2];
+        combinedData.canData.kw = ((rxBuf[3] << 8) + rxBuf[4]) / 10.0;
     }
-    combinedData.canData.p = abs(combinedData.canData.avgI) * combinedData.canData.rawU;
+    combinedData.canData.p = combinedData.canData.avgI * combinedData.canData.rawU;
 }
 
 // RETRIEVE DATA FROM M4 CORE
@@ -467,34 +478,46 @@ void retrieve_M4_data() {
       //combinedData.canData = RPC.call("getCanData").as<CanData>(); // until can issue on m4 is solved marked out as it causes crash
 }
 
-// DIM DISPLAY FUNCTION
+// Function to gradually dim the display
 void gradualDim(lv_timer_t *timer) {
     if (brightness > 0) {
-        backlight.set(brightness--);
-    }
-    /*else {
+        backlight.set(--brightness); // Decrease brightness
+    } else {
         lv_timer_del(timer); // Stop the timer once brightness reaches 0
-    }*/
+    }
 }
-// DIM TIMER
+
+// Function to gradually brighten the display
+void gradualBrighten(lv_timer_t *timer) {
+    if (brightness < 100) {
+        backlight.set(++brightness); // Increase brightness
+    } else {
+        lv_timer_del(timer); // Stop the timer once brightness reaches full brightness
+    }
+}
+
+// Function to start dimming the display
 void dimDisplay(lv_timer_t *timer) {
     // Start a new timer to gradually dim the display
-    dim_timer = lv_timer_create(gradualDim, 50, NULL); // Dim every 50 ms
+    dim_timer = lv_timer_create(gradualDim, 10, NULL); // Dim every 10 ms
 }
-// RESET SCREEN INACTIVITY TIMER
+
+// Function to reset the inactivity timer
 void resetInactivityTimer() {
     if (inactivity_timer) {
         lv_timer_reset(inactivity_timer); // Reset the existing timer
     }
-}
-void touchEventHandler(lv_event_t * e) {
-    if (lv_event_get_code(e) == LV_EVENT_PRESSED ||
-        lv_event_get_code(e) == LV_EVENT_RELEASED ||
-        lv_event_get_code(e) == LV_EVENT_CLICKED) {
-        resetInactivityTimer();
+    if (dim_timer) {
+        lv_timer_del(dim_timer); // Stop the dimming timer if active
     }
+    // Start a new timer to gradually brighten the display
+    dim_timer = lv_timer_create(gradualBrighten, 10, NULL);
 }
 
+// Event handler to capture touch events
+void touchEventHandler(lv_event_t * e) {
+    resetInactivityTimer(); // Reset the timer on any touch event
+}
 
 
 // VOID SETUP //////////////////////////////////////////////////////////////////////////
@@ -525,13 +548,7 @@ void setup() {
   // Set display brightness
   backlight.set(brightness);
 
-  // Set up a callback to reset the inactivity timer on any LVGL event
-  lv_obj_add_event_cb(lv_scr_act(), touchEventHandler, LV_EVENT_ALL, NULL);
-
-  // Start the inactivity timer
-  inactivity_timer = lv_timer_create(dimDisplay, 10000, NULL); // 2 min delay
-
-  // Create a container with grid 2x1
+  // Create two columns on active screen, grid 2x1
   static lv_coord_t col_dsc[] = {370, 370, LV_GRID_TEMPLATE_LAST};
   static lv_coord_t row_dsc[] = {430, 430, LV_GRID_TEMPLATE_LAST};
   lv_obj_t * parent = lv_obj_create(lv_scr_act());
@@ -543,14 +560,14 @@ void setup() {
   // initialise container object
   lv_obj_t * cont;
 
-  // create left column
+  // create left column container instance
   cont = lv_obj_create(parent);
   lv_obj_set_grid_cell(cont, LV_GRID_ALIGN_STRETCH, 0, 1,
                         LV_GRID_ALIGN_STRETCH, 0, 1);
 
   // Create labels for CAN data
   create_can_label(cont, "SOC", "%", &(combinedData.canData.soc), CAN_DATA_TYPE_BYTE, 20, 20);
-  create_can_label(cont, "Current", "A", &(combinedData.canData.avgI), CAN_DATA_TYPE_FLOAT, 180, 20);
+  create_can_label(cont, "Current", "A", &(combinedData.canData.rawI), CAN_DATA_TYPE_FLOAT, 180, 20);
   create_can_label(cont, "Voltage", "V", &(combinedData.canData.rawU), CAN_DATA_TYPE_FLOAT, 20, 50);
   create_can_label(cont, "Power", "W", &(combinedData.canData.p), CAN_DATA_TYPE_FLOAT, 180, 50);
   create_can_label(cont, "High Cell ID", "", &(combinedData.canData.hCid), CAN_DATA_TYPE_BYTE, 20, 80);
@@ -562,6 +579,7 @@ void setup() {
   create_can_label(cont, "Cycles", "", &(combinedData.canData.cc), CAN_DATA_TYPE_INT, 20, 240);
   create_can_label(cont, "Health", "%", &(combinedData.canData.h), CAN_DATA_TYPE_BYTE, 180, 240);
   create_can_label(cont, "Capacity", "Ah", &(combinedData.canData.ah), CAN_DATA_TYPE_FLOAT, 20, 270);
+  create_can_label(cont, "Internal Heatsink Temperature", "\u00B0C", &(combinedData.canData.hs), CAN_DATA_TYPE_BYTE, 20, 300);
   
   
   // Create button to clear faults
@@ -574,7 +592,7 @@ void setup() {
   lv_obj_center(btn1_label);
 
   
-  // create right column
+  // create right column container instance
   cont = lv_obj_create(parent);
   lv_obj_set_grid_cell(cont, LV_GRID_ALIGN_STRETCH, 1, 1,
                             LV_GRID_ALIGN_STRETCH, 0, 1);
@@ -587,6 +605,14 @@ void setup() {
 
   // Create Switch 3
   create_button(cont, "Hot Water", RELAY3, 300, 60, 10000);
+
+/*
+  // Touch for brightening screen
+  lv_obj_add_event_cb(parent, touchEventHandler, LV_EVENT_ALL, NULL);
+  
+  // Start the inactivity timer
+  inactivity_timer = lv_timer_create(dimDisplay, 10000, NULL); // 1 min delay
+  */
 }
 
 // LOOP ///////////////////////////////////////////////////////////////////////////////////
