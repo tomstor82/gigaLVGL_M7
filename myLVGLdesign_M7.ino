@@ -44,7 +44,7 @@ uint8_t rxBuf[8];
 
 // CANBUS send data MPI through MPO
 static uint8_t const CAN_ID = 0x20; // Must be different from other devices on CANbus
-uint8_t const msg_data[] = {0x002, 0x01, 0, 0, 0, 0, 0, 0};
+uint8_t const msg_data[] = {0x002, 0x01}; // Length set to 1 byte in BMS, can add to this array if needed
 static uint8_t msg_cnt = 0;
 
 // CAN RX INFO DISPLAY DATA
@@ -70,7 +70,7 @@ struct SensorData {
 // CanData struct
 struct CanData {
 
-    float p;                // watt calculated by script
+    int p;                  // watt calculated by script
 
     float rawU;             // Voltage - multiplied by 10
     float rawI;             // Current - multiplied by 10 - negative value indicates charge
@@ -104,7 +104,6 @@ struct CanData {
 // Define an enumeration for the different data types.
 typedef enum {
     CAN_DATA_TYPE_INT,
-    //CAN_DATA_TYPE_INT_2,
     CAN_DATA_TYPE_FLOAT,
     CAN_DATA_TYPE_DOUBLE_FLOAT,
     CAN_DATA_TYPE_BYTE
@@ -438,8 +437,8 @@ void sort_can() {
     // I WOULD LIKE TO COMPARE CHECKSUM BUT CPP STD LIBRARY NOT AVAILABLE I BELIEVE
     if (rxId == 0x3B) {
         combinedData.canData.rawU = ((rxBuf[0] << 8) + rxBuf[1]) / 10.0;
-        combinedData.canData.rawI = (signValue((rxBuf[2] << 8) + rxBuf[3])) / 10.0; // has become unsigned somewhere along the transmission
-        combinedData.canData.absI = ((rxBuf[4] << 8) + rxBuf[5]) / 10.0; // bad data? orion issue?
+        combinedData.canData.rawI = (signValue((rxBuf[2] << 8) + rxBuf[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
+        combinedData.canData.absI = ((rxBuf[4] << 8) + rxBuf[5]) / 10.0; // orion2jr issue: set signed and -32767 to fix
         combinedData.canData.soc = rxBuf[6] / 2;
     }
     if(rxId == 0x6B2) {
@@ -453,7 +452,7 @@ void sort_can() {
         combinedData.canData.ccl = rxBuf[1];
         combinedData.canData.dcl = rxBuf[2];
         combinedData.canData.ah = ((rxBuf[3] << 8) + rxBuf[4]) / 10.0;
-        combinedData.canData.avgI = (signValue((rxBuf[5] << 8) + rxBuf[6])) / 10.0; // has become unsigned somewhere along the transmission
+        combinedData.canData.avgI = (signValue((rxBuf[5] << 8) + rxBuf[6])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
     }
     if(rxId == 0x0BD) {
         combinedData.canData.fu = (rxBuf[0] << 8) + rxBuf[1];
@@ -569,7 +568,7 @@ void setup() {
   create_can_label(cont, "SOC", "%", &(combinedData.canData.soc), CAN_DATA_TYPE_BYTE, 20, 20);
   create_can_label(cont, "Current", "A", &(combinedData.canData.rawI), CAN_DATA_TYPE_FLOAT, 180, 20);
   create_can_label(cont, "Voltage", "V", &(combinedData.canData.rawU), CAN_DATA_TYPE_FLOAT, 20, 50);
-  create_can_label(cont, "Power", "W", &(combinedData.canData.p), CAN_DATA_TYPE_FLOAT, 180, 50);
+  create_can_label(cont, "Power", "W", &(combinedData.canData.p), CAN_DATA_TYPE_INT, 180, 50);
   create_can_label(cont, "High Cell ID", "", &(combinedData.canData.hCid), CAN_DATA_TYPE_BYTE, 20, 80);
   create_can_label(cont, "High Cell", "V", &(combinedData.canData.hC), CAN_DATA_TYPE_DOUBLE_FLOAT, 180, 80);
   create_can_label(cont, "Low Cell ID", "", &(combinedData.canData.lCid), CAN_DATA_TYPE_BYTE, 20, 110);
