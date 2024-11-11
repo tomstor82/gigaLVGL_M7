@@ -12,12 +12,6 @@ Arduino_GigaDisplayTouch TouchDetector;
 //Create backlight object
 GigaDisplayBacklight backlight;
 
-// Variables for backlight control
-int brightness = 70;
-lv_timer_t *inactivity_timer = NULL; 
-lv_timer_t *dim_timer = NULL;
-bool user_interaction = false;
-
 // Define DHT22 pins // OBSOLETE BUT USED FOR CREATING BUTTON REF
 #define DHTPIN1 2
 #define DHTPIN2 3
@@ -142,9 +136,16 @@ struct CombinedData {
 // declare global instances
 static CombinedData combinedData;
 
-// global power demand variable for inverter trigger set by buttons
+// global variables
+uint8_t brightness = 70;
+uint32_t previous_touch_ms;
+uint8_t touch_timeout_ms = 20000; // 20s before screen dimming
 uint8_t pwr_demand = 0;
-
+uint32_t previous_time;
+uint8_t previous_avgI;
+uint16_t hot_water_interval_ms = 900000; // 15 min
+uint8_t inverter_interval_ms = 10000; // 10s for checking for demand
+uint8_t sweep_interval_ms = 180000; // 3 minute sweep interval
 
 //**************************************************************************************//
 // NEED TO ADD DTC FLAGS AND SOLAR HOT WATER OVERRIDE, PERHAPS SIMULATE A BUTTON CLICK? 
@@ -223,9 +224,13 @@ static void timer_event_handler(lv_event_t * e) {
     LV_UNUSED(obj);
     if ( lv_obj_has_state(data->my_btn, LV_STATE_CHECKED) ) {
       digitalWrite(data->relay_pin, HIGH);
-      pwr_demand++; // set global var to enable inverter
+      if ( data->relay_pin == RELAY4 ) { // only for inverter for sweeping
+        previous_time = millis();
+        previous_avgI = combinedData.canData.avgI;
+      }
+      pwr_demand++; // set global var to enable inverter if heater or hot water activated
       // Create timer obj to reset on conditions
-      data->switch_off_timer = lv_timer_create(switch_off, data->timeout_ms, data); // want to disable timer once excess solar to hot water is activated
+      data->switch_off_timer = lv_timer_create(switch_off, data->timeout_ms, data); // want to reset timer once excess solar to hot water is activated
     }
     else {
       digitalWrite(data->relay_pin, LOW);
@@ -233,24 +238,46 @@ static void timer_event_handler(lv_event_t * e) {
     }
   }
 }
+// INVERTER SWEEP TIMER ///////////////////////////////////////////////////////////////////////////////
+void sweep_timer (lv_timer_t* timer) {
+  user_data_t* data = (user_data_t *)timer->user_data; // required to identify button
+  // not sure i can call switch_off function or need to create another instance. perhaps best to simulate button click
+  lv_event_send(data->my_btn, LV_EVENT_CLICKED, NULL); // SIMULATE BUTTON CLICK TO START TIMER AGAIN
+  
+}
+
+
 // SWITCH OFF CALLBACK FUNCTION ///////////////////////////////////////////////////////////////////////
 void switch_off(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
   bool on = false;
   
-  // if inverter button check if there is demand for power
-  if ( data->relay_pin == RELAY4 && pwr_demand ) { // inverter relay needs to know if buttons have been turned on by global var
-    on = true;
+  // inverter - reset timer if demand or negative avgI
+  if ( data->relay_pin == RELAY4 ) {
+    if ( pwr_demand || combinedData.canData.avgI < 0 ) { // keep inverter on if heaters or hot water is demanded
+      on = true;
+    }
+    // inverter - reset timer if avgI has risen by more than 2A after inverter start (2A is standby usage)
+    else if ( previous_time + inverter_interval_ms >= millis() && previous_avgI + 2 > combinedData.canData.avgI ) {
+      on = true;
+    }
   }
-  // check if reset turn off timer on conditions
-  else if ( combinedData.canData.ccl < 10 || combinedData.canData.avgI < 0 ) {
-    on = true;
+  // hot water tank - reset timer if excess power generation
+  else if ( data->relay_pin == RELAY3 ) {
+    if ( combinedData.canData.ccl < 10 || combinedData.canData.avgI < 0 ) {
+      on = true;
+    }
   }
 
   if (on) {
     // reset timer
     lv_timer_reset(data->switch_off_timer);
   }
+  // Inverter sweep timer starting
+  else if ( data->relay_pin == RELAY4 ) {
+    lv_timer_create(sweep_timer, sweep_interval_ms, data);
+  }
+  // Hot water turned off
   else {
     digitalWrite(data->relay_pin, LOW);
     // clear button flag
@@ -269,7 +296,7 @@ void thermostat_event_handler(lv_event_t * e) {
     LV_UNUSED(obj);
     if ( lv_obj_has_state(data->my_btn, LV_STATE_CHECKED) ) {
       lv_timer_create(thermostat_timer, 10000, data); // check temp diff every 10s
-      pwr_demand++;
+      pwr_demand++; // set global var to enable inverter if heater or hot water activated
     }
     else {
       digitalWrite(data->relay_pin, LOW);
@@ -497,45 +524,22 @@ void retrieve_M4_data() {
       //combinedData.canData = RPC.call("getCanData").as<CanData>(); // until can issue on m4 is solved marked out as it causes crash
 }
 
-// Function to gradually dim the display
-void gradualDim(lv_timer_t *timer) {
-    if (brightness > 0) {
-        backlight.set(--brightness); // Decrease brightness
-    } else {
-        lv_timer_del(timer); // Stop the timer once brightness reaches 0
-    }
+// DISPLAY BRIGHTNESS DIMMING //////////////////////
+void dim_display() {
+  // check if brightness above 0
+  brightness ? brightness-- : NULL;
+  // set brightness
+  backlight.set(brightness);
 }
 
-// Function to gradually brighten the display
-void gradualBrighten(lv_timer_t *timer) {
-    if (brightness < 100) {
-        backlight.set(++brightness); // Increase brightness
-    } else {
-        lv_timer_del(timer); // Stop the timer once brightness reaches full brightness
-    }
-}
-
-// Function to start dimming the display
-void dimDisplay(lv_timer_t *timer) {
-    // Start a new timer to gradually dim the display
-    dim_timer = lv_timer_create(gradualDim, 10, NULL); // Dim every 10 ms
-}
-
-// Function to reset the inactivity timer
-void resetInactivityTimer() {
-    if (inactivity_timer) {
-        lv_timer_reset(inactivity_timer); // Reset the existing timer
-    }
-    if (dim_timer) {
-        lv_timer_del(dim_timer); // Stop the dimming timer if active
-    }
-    // Start a new timer to gradually brighten the display
-    dim_timer = lv_timer_create(gradualBrighten, 10, NULL);
-}
-
-// Event handler to capture touch events
-void touchEventHandler(lv_event_t * e) {
-    resetInactivityTimer(); // Reset the timer on any touch event
+// SCREEN TOUCH HANDLER FOR DISPLAY DIMMING ////////////////////
+void screen_touch(lv_event_t* e) {
+  lv_event_code_t code = lv_event_get_code(e);
+  lv_obj_t * obj = lv_event_get_target(e);
+  if(code == LV_EVENT_CLICKED) {
+    LV_UNUSED(obj);
+    previous_touch_ms = millis();
+  }
 }
 
 
@@ -581,6 +585,8 @@ void setup() {
 
   // create left column container instance
   cont = lv_obj_create(parent);
+  // ADD EVENT HANDLER FOR TOUCH
+  lv_obj_add_event_cb(cont, screen_touch, LV_EVENT_ALL, NULL);
   lv_obj_set_grid_cell(cont, LV_GRID_ALIGN_STRETCH, 0, 1,
                         LV_GRID_ALIGN_STRETCH, 0, 1);
 
@@ -613,6 +619,8 @@ void setup() {
   
   // create right column container instance
   cont = lv_obj_create(parent);
+  // ADD EVENT HANDLER FOR TOUCH
+  lv_obj_add_event_cb(cont, screen_touch, LV_EVENT_ALL, NULL);
   lv_obj_set_grid_cell(cont, LV_GRID_ALIGN_STRETCH, 1, 1,
                             LV_GRID_ALIGN_STRETCH, 0, 1);
 
@@ -624,17 +632,11 @@ void setup() {
   create_button(cont, "Shower Heater",  RELAY2, 120, 10, 0,     DHTPIN3);
 
   // Create Button 3 - HOT WATER
-  create_button(cont, "Hot Water",      RELAY3, 300, 60, 900000); // 15 min timer reset if negative avgI or CCL < 10A
+  create_button(cont, "Hot Water",      RELAY3, 300, 60, hot_water_interval_ms); // 15 min timer reset if negative avgI or CCL < 10A
 
   // Create Button 4 - INVERTER
-  create_button(cont, "Inverter",       RELAY4, 400, 1, 7200000); // 2 hr timer reset if negative avgI or CCL < 10A and usage > 3A (inverter uses 2A in standby)
-/*
-  // Touch for brightening screen
-  lv_obj_add_event_cb(parent, touchEventHandler, LV_EVENT_ALL, NULL);
-  
-  // Start the inactivity timer
-  inactivity_timer = lv_timer_create(dimDisplay, 10000, NULL); // 1 min delay
-  */
+  create_button(cont, "Inverter",       RELAY4, 400, 1, inverter_interval_ms); // 3 minute sweeps to check if avgI > 2A (stdby is 2A) unless negative avgI or CCL < 10A
+
 }
 
 // LOOP ///////////////////////////////////////////////////////////////////////////////////
@@ -685,6 +687,16 @@ void loop() {
     buffer += (char)RPC.read();  // Fill the buffer with characters
   }
   if (buffer.length() > 0) Serial.print(buffer);
+
+  // if no touch within timeout dim display and brightness above 0
+  if (previous_touch_ms + touch_timeout_ms < millis() && brightness) {
+    dim_display();
+  }
+  // only turn on if off to avoid flickering
+  else if ( brightness != 70 ) {
+    brightness = 70;
+    backlight.set(brightness);
+  }
   
   delay(5); // calming loop
 }
