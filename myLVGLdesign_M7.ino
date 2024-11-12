@@ -132,7 +132,7 @@ uint8_t brightness = 70;
 uint32_t previous_touch_ms;
 uint16_t touch_timeout_ms = 20000; // 20s before screen dimming
 uint8_t pwr_demand = 0;
-uint32_t previous_sweep_ms;
+//uint32_t previous_sweep_ms;
 uint8_t previous_avgI;
 uint32_t hot_water_interval_ms = 10000; //900000; // 15 min
 uint16_t inverter_startup_ms = 10000; // 10s startup
@@ -212,7 +212,7 @@ static void timer_event_handler(lv_event_t * e) {
     if ( lv_obj_has_state(data->my_btn, LV_STATE_CHECKED) ) {
       digitalWrite(data->relay_pin, HIGH);
       if ( data->relay_pin == RELAY4 ) { // only for inverter for sweeping
-        previous_sweep_ms = millis();
+        //previous_sweep_ms = millis();
         previous_avgI = combinedData.canData.avgI;
       }
       else pwr_demand++; // only for hot water
@@ -240,9 +240,9 @@ void sweep_timer (lv_timer_t* timer) {
 // SWITCH OFF CALLBACK FUNCTION ///////////////////////////////////////////////////////////////////////
 void switch_off(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
-  //lv_timer_del(data->sweep);
   bool on = false;
-  // inverter on for 10s to check demand or current flow else off and timer for 3 minutes before restarting this timer
+  
+  // inverter on for 10s to check demand or current flow else off and timer for 3 minutes before restarting this timer (sweep)
   // inverter - reset timer if demand or negative avgI
   if ( data->relay_pin == RELAY4 ) {
     if ( pwr_demand || combinedData.canData.avgI < 0 ) { // keep inverter on if heaters or hot water is demanded
@@ -250,7 +250,7 @@ void switch_off(lv_timer_t * timer) {
       Serial.println("Inverter ON due Button demand or charge");
     }
     // inverter - reset timer if avgI has risen by more than 2A after inverter start (2A is standby usage)
-    else if ( previous_sweep_ms + inverter_startup_ms >= millis() && previous_avgI + 2 < combinedData.canData.avgI ) {
+    else if ( previous_avgI + 2 < combinedData.canData.avgI ) {
       on = true;
       Serial.println("Inverter ON due current flow");
     }
