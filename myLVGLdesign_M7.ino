@@ -244,10 +244,10 @@ void switch_off(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
   bool on = false;
   
-  // inverter on for 10s to check demand or current flow else off and timer for 3 minutes before restarting this timer (sweep)
+  // inverter on for 20s to check demand or current flow else off and timer for 3 minutes before restarting this timer (sweep)
   // inverter - reset timer if demand or negative avgI
   if ( data->relay_pin == RELAY4 ) {
-    if ( pwr_demand || combinedData.canData.avgI < 0 ) { // keep inverter on if heaters or hot water is demanded
+    if ( pwr_demand || combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) { // keep inverter on above 50% SOC if heaters or hot water demand or charge current
       on = true;
       Serial.println("Inverter ON due Button demand or charge");
     }
