@@ -61,8 +61,8 @@ struct CanData {
 
     int p;                  // watt calculated by script
 
-    float rawU;             // Voltage - multiplied by 10
-    float rawI;             // Current - multiplied by 10 - negative value indicates charge
+    float instU;             // Voltage - multiplied by 10
+    float instI;             // Current - multiplied by 10 - negative value indicates charge
     float avgI;             // Average current for clock and sun symbol calculations
     float absI;             // Absolute Current NOT WORKING CORRECTLY
     float ah;               // Amp hours
@@ -88,7 +88,7 @@ struct CanData {
     float kw;               // Active power 0,1kW
     byte hs;                // Internal Heatsink
     
-    MSGPACK_DEFINE_ARRAY(rawU, rawI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, ct, st, cc, fs, avgI, hCid, lCid, p, absI, kw, hs);
+    MSGPACK_DEFINE_ARRAY(instU, instI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, ct, st, cc, fs, avgI, hCid, lCid, p, absI, kw, hs);
 };
 // Define an enumeration for the different data types.
 typedef enum {
@@ -133,10 +133,10 @@ uint32_t previous_touch_ms;
 uint16_t touch_timeout_ms = 20000; // 20s before screen dimming
 uint8_t pwr_demand = 0;
 //uint32_t previous_sweep_ms;
-uint8_t previous_avgI;
-uint32_t hot_water_interval_ms = 10000; //900000; // 15 min
-uint16_t inverter_startup_ms = 10000; // 10s startup
-uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval
+uint8_t pre_start_avgI;
+uint32_t hot_water_interval_ms = 900000; // 15 min
+uint16_t inverter_startup_ms = 20000; // 20s startup required before comparing current flow
+uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 75Wh to around 12,5Wh -84%
 
 //**************************************************************************************//
 // NEED TO ADD DTC FLAGS AND SOLAR HOT WATER OVERRIDE, PERHAPS SIMULATE A BUTTON CLICK? 
@@ -213,7 +213,9 @@ static void timer_event_handler(lv_event_t * e) {
       digitalWrite(data->relay_pin, HIGH);
       if ( data->relay_pin == RELAY4 ) { // only for inverter for sweeping
         //previous_sweep_ms = millis();
-        previous_avgI = combinedData.canData.avgI;
+        pre_start_avgI = combinedData.canData.avgI;
+        Serial.print("DEBUG before start avgI: ");
+        Serial.println(pre_start_avgI);
       }
       else pwr_demand++; // only for hot water
       // Create timer obj to reset on conditions
@@ -250,9 +252,16 @@ void switch_off(lv_timer_t * timer) {
       Serial.println("Inverter ON due Button demand or charge");
     }
     // inverter - reset timer if avgI has risen by more than 2A after inverter start (2A is standby usage)
-    else if ( previous_avgI + 2 < combinedData.canData.avgI ) {
+    // else if ( pre_start_avgI 
+    
+    
+    
+    else if ( pre_start_avgI + 2 < combinedData.canData.avgI ) {
       on = true;
-      Serial.println("Inverter ON due current flow");
+      Serial.print("Current before start: ");
+      Serial.println(pre_start_avgI);
+      Serial.print("Current now: ");
+      Serial.println(combinedData.canData.avgI);
     }
   }
   // hot water tank - reset timer if excess power generation
@@ -275,7 +284,8 @@ void switch_off(lv_timer_t * timer) {
     lv_timer_del(timer);
     // Inverter sweep timer starting after turning off relay
     if ( data->relay_pin == RELAY4 ) {
-      Serial.println("OFF as there's no demand");
+      Serial.print("OFF as there's no demand, starting sweep timer. Current avgI: ");
+      Serial.println(combinedData.canData.avgI);
       lv_timer_create(sweep_timer, sweep_interval_ms, data);
     }
     else { // clear button flag for hot water
@@ -482,8 +492,8 @@ void sort_can() {
 
     // I WOULD LIKE TO COMPARE CHECKSUM BUT CPP STD LIBRARY NOT AVAILABLE I BELIEVE
     if (rxId == 0x3B) {
-        combinedData.canData.rawU = ((rxBuf[0] << 8) + rxBuf[1]) / 10.0;
-        combinedData.canData.rawI = (signValue((rxBuf[2] << 8) + rxBuf[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
+        combinedData.canData.instU = ((rxBuf[0] << 8) + rxBuf[1]) / 10.0;
+        combinedData.canData.instI = (signValue((rxBuf[2] << 8) + rxBuf[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
         combinedData.canData.absI = ((rxBuf[4] << 8) + rxBuf[5]) / 10.0; // orion2jr issue: set signed and -32767 to fix
         combinedData.canData.soc = rxBuf[6] / 2;
     }
@@ -513,7 +523,7 @@ void sort_can() {
         combinedData.canData.hs = rxBuf[2];
         combinedData.canData.kw = ((rxBuf[3] << 8) + rxBuf[4]) / 10.0;
     }
-    combinedData.canData.p = combinedData.canData.avgI * combinedData.canData.rawU;
+    combinedData.canData.p = combinedData.canData.avgI * combinedData.canData.instU;
 }
 
 // RETRIEVE DATA FROM M4 CORE
@@ -581,20 +591,19 @@ void setup() {
   lv_obj_set_style_bg_color(parent, lv_color_hex(0x03989e), LV_PART_MAIN);
   lv_obj_center(parent);
 
-  lv_obj_add_event_cb(parent, screen_touch, LV_EVENT_ALL, NULL);
-
   // initialise container object
   lv_obj_t * cont;
 
   // create left column container instance
   cont = lv_obj_create(parent);
+  lv_obj_add_event_cb(cont, screen_touch, LV_EVENT_ALL, NULL);
   lv_obj_set_grid_cell(cont, LV_GRID_ALIGN_STRETCH, 0, 1,
                         LV_GRID_ALIGN_STRETCH, 0, 1);
 
   // Create labels for CAN data
   create_can_label(cont, "SOC", "%", &(combinedData.canData.soc), CAN_DATA_TYPE_BYTE, 20, 20);
-  create_can_label(cont, "Current", "A", &(combinedData.canData.rawI), CAN_DATA_TYPE_FLOAT, 180, 20);
-  create_can_label(cont, "Voltage", "V", &(combinedData.canData.rawU), CAN_DATA_TYPE_FLOAT, 20, 50);
+  create_can_label(cont, "Current", "A", &(combinedData.canData.instI), CAN_DATA_TYPE_FLOAT, 180, 20);
+  create_can_label(cont, "Voltage", "V", &(combinedData.canData.instU), CAN_DATA_TYPE_FLOAT, 20, 50);
   create_can_label(cont, "Power", "W", &(combinedData.canData.p), CAN_DATA_TYPE_INT, 180, 50);
   create_can_label(cont, "High Cell ID", "", &(combinedData.canData.hCid), CAN_DATA_TYPE_BYTE, 20, 80);
   create_can_label(cont, "High Cell", "V", &(combinedData.canData.hC), CAN_DATA_TYPE_DOUBLE_FLOAT, 180, 80);
@@ -620,7 +629,6 @@ void setup() {
   
   // create right column container instance
   cont = lv_obj_create(parent);
-  // ADD EVENT HANDLER FOR TOUCH
   lv_obj_add_event_cb(cont, screen_touch, LV_EVENT_ALL, NULL);
   lv_obj_set_grid_cell(cont, LV_GRID_ALIGN_STRETCH, 1, 1,
                             LV_GRID_ALIGN_STRETCH, 0, 1);
@@ -670,8 +678,8 @@ void loop() {
     }
   }
   //else { Serial.println("M7 CAN not available"); } // crazy messages despite working
-  /*Serial.print("rawI: ");
-  Serial.println(combinedData.canData.rawI);
+  /*Serial.print("instI: ");
+  Serial.println(combinedData.canData.instI);
   Serial.print("Power: ");
   Serial.println(combinedData.canData.p);
   Serial.print("absI: ");
