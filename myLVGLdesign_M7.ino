@@ -128,6 +128,9 @@ struct CombinedData {
 static CombinedData combinedData;
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size)
+static lv_obj_t* inv_btn;
+static lv_timer_t* thermostat = NULL;
+
 uint8_t brightness = 70;
 uint32_t previous_touch_ms;
 uint16_t touch_timeout_ms = 20000; // 20s before screen dimming
@@ -135,7 +138,7 @@ uint8_t pwr_demand = 0;
 //uint32_t previous_sweep_ms;
 uint8_t pre_start_avgI;
 uint32_t hot_water_interval_ms = 900000; // 15 min
-uint16_t inverter_startup_ms = 20000; // 20s startup required before comparing current flow
+uint16_t inverter_startup_ms = 22000; // 22s startup required before comparing current flow
 uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 75Wh to around 12,5Wh -84%
 
 //**************************************************************************************//
@@ -160,6 +163,9 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 
   // create button object and add to struct
   data->my_btn = lv_btn_create(parent); // IMPORTANT TO STORE BUTTON IN USERDATA STRUCT - ELSE CLEARING BUTTONS WON'T WORK
+  if ( relay_pin == RELAY4 ) { // adding inverter button to global variable as it needs to be triggered by the other buttons
+    inv_btn = data->my_btn;
+  }
   lv_obj_set_pos(data->my_btn, 10, y_offset);
   lv_obj_t *label = lv_label_create(data->my_btn);
   lv_label_set_text(label, label_text);
@@ -171,8 +177,8 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     // create label and update the user data member for access within timer to allow only to update text not object
     data->label_obj = lv_label_create(lv_obj_get_parent(data->my_btn));
     create_temperature_dropdown(parent, data);
-    // create timed labels
-    lv_timer_create(display_temp, 10000, data);
+    // create time updated temperature labels
+    lv_timer_create(update_temp, 10000, data);
     lv_obj_set_pos(data->label_obj, 180, y_offset + 13);
   }
   
@@ -188,22 +194,22 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   }
 }
 
-// TIMER FOR DCL CHECK
+// DCL CHECK TIMER ////////////////////////////////////////////////////////////////////////////
 void dcl_check(lv_timer_t * timer) {
-    user_data_t * data = (user_data_t *)timer->user_data;
-    // create scrolling label and disable button      
-    if ( combinedData.canData.dcl < data->dcl_limit ) {
-      lv_obj_t *label = lv_label_create(lv_obj_get_parent(data->my_btn));
-      lv_obj_add_state(data->my_btn, LV_STATE_DISABLED);
-      lv_label_set_long_mode(label, LV_LABEL_LONG_SCROLL_CIRCULAR);
-      lv_obj_set_width(label, 150);
-      lv_obj_set_pos(label, 10, data->y_offset + 50);
-      lv_label_set_text(label, "Please Charge Battery                                            "); // spaces to allow a pause
-    }
+  user_data_t * data = (user_data_t *)timer->user_data;
+  // create scrolling label and disable button
+  if ( combinedData.canData.dcl < data->dcl_limit ) {
+    lv_obj_t *label = lv_label_create(lv_obj_get_parent(data->my_btn));
+    lv_obj_add_state(data->my_btn, LV_STATE_DISABLED);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_width(label, 150);
+    lv_obj_set_pos(label, 10, data->y_offset + 50);
+    lv_label_set_text(label, "Please Charge Battery                                            "); // spaces to allow a pause
+  }
 }
 
-// HOT WATER AND INVERTER EVENT HANDLER ///////////////////////////////////////////////////////////
-static void timer_event_handler(lv_event_t * e) {
+// HOT WATER AND INVERTER EVENT HANDLER ////////////////////////////////////////////////////
+void timer_event_handler(lv_event_t * e) {
   user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
   lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t * obj = lv_event_get_target(e);
@@ -229,7 +235,8 @@ static void timer_event_handler(lv_event_t * e) {
     }
   }
 }
-// INVERTER SWEEP TIMER ///////////////////////////////////////////////////////////////////////////////
+
+// INVERTER SWEEP TIMER ///////////////////////////////////////////////////////////////////
 void sweep_timer (lv_timer_t* timer) {
   user_data_t* data = (user_data_t *)timer->user_data; // required to identify button
   // not sure i can call switch_off function or need to create another instance. perhaps best to simulate button click
@@ -239,7 +246,7 @@ void sweep_timer (lv_timer_t* timer) {
 }
 
 
-// SWITCH OFF CALLBACK FUNCTION ///////////////////////////////////////////////////////////////////////
+// SWITCH OFF TIMER ///////////////////////////////////////////////////////////////////////
 void switch_off(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
   bool on = false;
@@ -252,10 +259,6 @@ void switch_off(lv_timer_t * timer) {
       Serial.println("Inverter ON due Button demand or charge");
     }
     // inverter - reset timer if avgI has risen by more than 2A after inverter start (2A is standby usage)
-    // else if ( pre_start_avgI 
-    
-    
-    
     else if ( pre_start_avgI + 2 < combinedData.canData.avgI ) {
       on = true;
       Serial.print("Current before start: ");
@@ -265,10 +268,8 @@ void switch_off(lv_timer_t * timer) {
     }
   }
   // hot water tank - reset timer if excess power generation
-  else {
-    if ( combinedData.canData.ccl < 10 || combinedData.canData.avgI < 0 ) {
-      on = true;
-    }
+  else if ( combinedData.canData.ccl < 10 || combinedData.canData.avgI < 0 ) {
+    on = true;
   }
 
   if (on) {
@@ -304,12 +305,18 @@ void thermostat_event_handler(lv_event_t * e) {
   if(code == LV_EVENT_CLICKED) {
     LV_UNUSED(obj);
     if ( lv_obj_has_state(data->my_btn, LV_STATE_CHECKED) ) {
-      lv_timer_create(thermostat_timer, 10000, data); // check temp diff every 10s
+      if ( ! thermostat ) {
+        thermostat = lv_timer_create(thermostat_timer, 10000, data); // check temp diff every 10s
+      }
       pwr_demand++; // set global var to enable inverter if heater or hot water activated
     }
     else {
       digitalWrite(data->relay_pin, LOW);
       pwr_demand ? pwr_demand-- : NULL;
+      if ( thermostat ) {
+        lv_timer_del(thermostat);
+        thermostat = NULL;
+      }
     }
   }
 }
@@ -366,36 +373,41 @@ void create_temperature_dropdown(lv_obj_t * parent, user_data_t *data) {
   lv_obj_set_width(dd, 80);
 }
 
-// THERMOSTAT TIMER AND DISPLAY FUNCTION ////////////////////////////////////////////////////////////////
+// THERMOSTAT TIMER ////////////////////////////////////////////////////////////////
 void thermostat_timer(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
+  // turn inverter on if off
+  if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
+    lv_event_send(*inv_btn, LV_EVENT_CLICKED, NULL); // send click event to start inverter
+    Serial.println("DEBUG Thermostat Timer - trying to send event to start inverter");
+  }
 
-  // CEILING HEATER THERMOSTAT
+  // ceiling heater thermostat
   if ( data->relay_pin == RELAY1 ) {
     // Close relay if temperature is below selected and button has been pressed
     if ( combinedData.sensorData.avg_temp < data->set_temp && lv_obj_has_state(data->my_btn, LV_STATE_CHECKED) ) {
-    digitalWrite(data->relay_pin, HIGH); 
+    digitalWrite(data->relay_pin, HIGH);
     }
     // Open relay when temperature is higher or equal to selected
     else {
       digitalWrite(data->relay_pin, LOW);
     }
   }
-  // SHOWER HEATER THERMOSTAT
+  // shower heater thermostat
   else {
     // Close relay if temperature is below selected and button has been pressed
     if ( combinedData.sensorData.temp3 < data->set_temp && lv_obj_has_state(data->my_btn, LV_STATE_CHECKED) ) {
-      digitalWrite(data->relay_pin, HIGH); 
+      digitalWrite(data->relay_pin, HIGH);
     }
     // Open relay when temperature is higher or equal to selected
     else {
       digitalWrite(data->relay_pin, LOW);
     }
-  }  
+  }
 }
 
-// DISPLAY TEMP FUNCTION ///////////////////////////////////////////////////////////////
-void display_temp(lv_timer_t *timer) {
+// DISPLAY TEMP TIMER ////////////////////////////////////////////////////////////////////////
+void update_temp(lv_timer_t *timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
   char buf[10];
   // ceiling heater use avg temp
@@ -410,7 +422,7 @@ void display_temp(lv_timer_t *timer) {
   lv_label_set_text(data->label_obj, buf);
 }
 
-// CLEAR CAN EVENT HANDLER ////////////////////////////////////////////////////////////////
+// CLEAR CAN EVENT HANDLER ////////////////////////////////////////////////////////////////////
 void clear_bms_fault(lv_event_t * e) {
   lv_obj_t * obj = lv_event_get_target(e);
   if ( lv_obj_has_state(obj, LV_EVENT_CLICKED) ) {
@@ -447,7 +459,7 @@ void refresh_can_data(lv_timer_t* timer) {
     lv_label_set_text(data->label_obj, buf);
 }
 
-
+// CREATE CAN LABELS ////////////////////////////////////////////////////////////////////////////////////////////////////
 void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* label_unit, void* canDataProperty, can_data_type_t canDataType, int x_pos, int y_pos) {
     // Allocate memory for new user data instance
     user_data_t *data = (user_data_t *)malloc(sizeof(user_data_t));
@@ -477,17 +489,18 @@ void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* la
         }
 
         lv_obj_set_pos(data->label_obj, x_pos, y_pos);
+        // create refresh can data timer
         lv_timer_create(refresh_can_data, 200, data);
     }
 }
 
-// function to convert unsigned integrals to signed
+// CONVERT UNSIGNED TO SIGNED FUNCTION ////////////////////////////////////////
 int16_t signValue(uint16_t canValue) {
   int16_t signedValue = (canValue > 32767) ? canValue - 65536 : canValue;
   return signedValue;
 }
 
-// SORT CANBUS MSG
+// SORT CANBUS DATA ////////////////////////////////////////////////////////////
 void sort_can() {
 
     // I WOULD LIKE TO COMPARE CHECKSUM BUT CPP STD LIBRARY NOT AVAILABLE I BELIEVE
@@ -526,14 +539,14 @@ void sort_can() {
     combinedData.canData.p = combinedData.canData.avgI * combinedData.canData.instU;
 }
 
-// RETRIEVE DATA FROM M4 CORE
+// RETRIEVE DATA FROM M4 CORE //////////////////////////////////////////////////////////
 void retrieve_M4_data() {
     // Call the RPC function to get sensor data
       combinedData.sensorData = RPC.call("getSensorData").as<SensorData>();
       //combinedData.canData = RPC.call("getCanData").as<CanData>(); // until can issue on m4 is solved marked out as it causes crash
 }
 
-// DISPLAY BRIGHTNESS DIMMING //////////////////////
+// DISPLAY BRIGHTNESS DIMMING /////////////////////////////////////////////////////////
 void dim_display() {
   // check if brightness above 0
   brightness ? brightness-- : NULL;
@@ -541,7 +554,7 @@ void dim_display() {
   backlight.set(brightness);
 }
 
-// SCREEN TOUCH HANDLER FOR DISPLAY DIMMING ////////////////////
+// SCREEN TOUCH HANDLER FOR DISPLAY DIMMING ///////////////////////////////////////////
 void screen_touch(lv_event_t* e) {
   lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t * obj = lv_event_get_target(e);
