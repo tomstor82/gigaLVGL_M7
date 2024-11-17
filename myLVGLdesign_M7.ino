@@ -131,28 +131,17 @@ static CombinedData combinedData;
 static lv_obj_t* inv_btn;
 static lv_timer_t* thermostat = NULL;
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-uint8_t brightness = 70;
-uint32_t previous_touch_ms;
-uint16_t touch_timeout_ms = 20000; // 20s before screen dimming
-=======
 static float pre_start_avgI; // trying static to see if value is remembered
->>>>>>> dev
+
 uint8_t pwr_demand = 0;
 uint32_t hot_water_interval_ms = 900000; // 15 min
 uint16_t inverter_startup_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
 uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 75Wh to around 12,5Wh -84%
 
-<<<<<<< HEAD
->>>>>>> dev
-=======
 uint8_t brightness = 70;
 uint32_t previous_touch_ms;
 uint16_t touch_timeout_ms = 20000; // 20s before screen dimming
 
->>>>>>> dev
 //**************************************************************************************//
 // NEED TO ADD DTC FLAGS AND SOLAR HOT WATER OVERRIDE, PERHAPS SIMULATE A BUTTON CLICK? //
 // ADD RELAY CODE FOR INVERTER RELAY CONTROL (TIMER/CLOCK,SOC,DCL,avgI)                 //
