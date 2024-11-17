@@ -27,19 +27,19 @@ GigaDisplayBacklight backlight;
 //  ID 0x0BE BYT0:HI_CL_ID BYT1:LO_CL_ID BYT2:INT_HEATSINK
 
 // CANBUS receive data
-uint32_t rxId;
-uint8_t len = 0;
-uint8_t rxBuf[8];
+static uint32_t rxId;
+static uint8_t len = 0;
+static uint8_t rxBuf[8];
 
 // CANBUS send data MPI through MPO
 static uint8_t const CAN_ID = 0x20; // Must be different from other devices on CANbus
-uint8_t const msg_data[] = {0x002, 0x01}; // Length set to 1 byte in BMS, can add to this array if needed
+static uint8_t const msg_data[] = {0x002, 0x01}; // Length set to 1 byte in BMS, can add to this array if needed
 static uint8_t msg_cnt = 0;
 
 // CAN RX INFO DISPLAY DATA
-uint8_t pos_x = 100;
-uint8_t pos_y = 20;
-uint8_t line_gap = 50;
+static uint8_t pos_x = 100;
+static uint8_t pos_y = 20;
+static uint8_t line_gap = 50;
 
 // Define named structs as data types
 struct SensorData {
@@ -99,7 +99,7 @@ typedef enum {
 } can_data_type_t;
 
 // define struct for function user-data
-typedef struct {
+typedef struct { // typedef used to not having to use the struct keyword for declaring struct variable
   lv_obj_t* container;
   lv_obj_t* my_btn;
   lv_obj_t* label_obj;
@@ -132,21 +132,30 @@ static lv_obj_t* inv_btn;
 static lv_timer_t* thermostat = NULL;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 uint8_t brightness = 70;
 uint32_t previous_touch_ms;
 uint16_t touch_timeout_ms = 20000; // 20s before screen dimming
+=======
+static float pre_start_avgI; // trying static to see if value is remembered
+>>>>>>> dev
 uint8_t pwr_demand = 0;
-//uint32_t previous_sweep_ms;
-uint8_t pre_start_avgI;
 uint32_t hot_water_interval_ms = 900000; // 15 min
-uint16_t inverter_startup_ms = 22000; // 22s startup required before comparing current flow
+uint16_t inverter_startup_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
 uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 75Wh to around 12,5Wh -84%
+
+<<<<<<< HEAD
+>>>>>>> dev
+=======
+uint8_t brightness = 70;
+uint32_t previous_touch_ms;
+uint16_t touch_timeout_ms = 20000; // 20s before screen dimming
 
 >>>>>>> dev
 //**************************************************************************************//
-// NEED TO ADD DTC FLAGS AND SOLAR HOT WATER OVERRIDE, PERHAPS SIMULATE A BUTTON CLICK? 
-// ADD RELAY CODE FOR INVERTER RELAY CONTROL (TIMER/CLOCK,SOC,DCL,avgI)                 
+// NEED TO ADD DTC FLAGS AND SOLAR HOT WATER OVERRIDE, PERHAPS SIMULATE A BUTTON CLICK? //
+// ADD RELAY CODE FOR INVERTER RELAY CONTROL (TIMER/CLOCK,SOC,DCL,avgI)                 //
 //**************************************************************************************//
 
 // CREATE BUTTON INSTANCE
@@ -168,6 +177,10 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   data->my_btn = lv_btn_create(parent); // IMPORTANT TO STORE BUTTON IN USERDATA STRUCT - ELSE CLEARING BUTTONS WON'T WORK
   if ( relay_pin == RELAY4 ) { // adding inverter button to global variable as it needs to be triggered by the other buttons
     inv_btn = data->my_btn;
+    data->label_obj = lv_label_create(lv_obj_get_parent(data->my_btn));
+    lv_obj_set_width(data->label_obj, 120);
+    lv_obj_set_pos(data->label_obj, 180, y_offset + 13);
+    lv_label_set_text(data->label_obj, "OFF");
   }
   lv_obj_set_pos(data->my_btn, 10, y_offset);
   lv_obj_t *label = lv_label_create(data->my_btn);
@@ -190,7 +203,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     
   // create event handlers with custom user_data
   if ( timeout_ms ) { // hot water and inverter
-    lv_obj_add_event_cb(data->my_btn, timer_event_handler, LV_EVENT_ALL, data);
+    lv_obj_add_event_cb(data->my_btn, hot_water_inverter_event_handler, LV_EVENT_ALL, data);
   }
   else { // heaters
     lv_obj_add_event_cb(data->my_btn, thermostat_event_handler, LV_EVENT_ALL, data);
@@ -212,28 +225,44 @@ void dcl_check(lv_timer_t * timer) {
 }
 
 // HOT WATER AND INVERTER EVENT HANDLER ////////////////////////////////////////////////////
-void timer_event_handler(lv_event_t * e) {
+void hot_water_inverter_event_handler(lv_event_t * e) {
   user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
   lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t * obj = lv_event_get_target(e);
   if(code == LV_EVENT_CLICKED) {
     LV_UNUSED(obj);
+    lv_timer_t* timeroi = NULL; // declare timer to be able to delete if button off prematurely
     if ( lv_obj_has_state(data->my_btn, LV_STATE_CHECKED) ) {
-      digitalWrite(data->relay_pin, HIGH);
       if ( data->relay_pin == RELAY4 ) { // only for inverter for sweeping
-        //previous_sweep_ms = millis();
         pre_start_avgI = combinedData.canData.avgI;
-        Serial.print("DEBUG before start avgI: ");
+        lv_label_set_text(data->label_obj, "ON");
+        inv_btn = data->my_btn; // update global inverter button with event ****** may work
+        Serial.print("event handler pre-start avgi: ");
         Serial.println(pre_start_avgI);
       }
+      // if inverter off don't allow hot water button to be marked as clicked
+      else if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
+        lv_event_send(inv_btn, LV_EVENT_CLICKED, NULL); // send click event to start inverter
+        // DEBUG if inverter is still off disable change flag
+        if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
+          lv_obj_clear_state(data->my_btn, LV_STATE_CHECKED);
+          Serial.println("DEBUG hot_water_inverter_event_handler - Unable to send start inverter event");
+          return; // exit function if inverter is off
+        }
+      }
+      // hot water if inverter is on
       else pwr_demand++; // only for hot water
-      // Create timer obj to reset on conditions
-      lv_timer_create(switch_off, data->timeout_ms, data); // want to reset timer once excess solar to hot water is activated
+
+      digitalWrite(data->relay_pin, HIGH);
+      // Create delay timer for inverter sweep and for hot water
+      timeroi = lv_timer_create(switch_off, data->timeout_ms, data); // want to reset timer once excess solar to hot water is activated
     }
     else {
       digitalWrite(data->relay_pin, LOW);
-      if ( ! data->relay_pin == RELAY4 ) { // only for hot water
-        pwr_demand ? pwr_demand-- : NULL; 
+      if (timeroi) lv_timer_del(timeroi);
+      if ( data->relay_pin == RELAY4 ) lv_label_set_text(data->label_obj, "OFF"); // inverter only
+      else {
+        pwr_demand ? pwr_demand-- : NULL;
       }
     }
   }
@@ -241,10 +270,10 @@ void timer_event_handler(lv_event_t * e) {
 
 // INVERTER SWEEP TIMER ///////////////////////////////////////////////////////////////////
 void sweep_timer (lv_timer_t* timer) {
-  user_data_t* data = (user_data_t *)timer->user_data; // required to identify button
-  // not sure i can call switch_off function or need to create another instance. perhaps best to simulate button click
-  lv_event_send(data->my_btn, LV_EVENT_CLICKED, NULL); // SIMULATE BUTTON CLICK TO START TIMER AGAIN
-  // delete timer so it only runs once
+  user_data_t* data = (user_data_t *)timer->user_data;
+  // stimulate button with click to start inverter again
+  lv_event_send(data->my_btn, LV_EVENT_CLICKED, NULL);
+  // delete timer so it only runs once as this function is called continiously
   lv_timer_del(timer);
 }
 
@@ -253,21 +282,21 @@ void sweep_timer (lv_timer_t* timer) {
 void switch_off(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
   bool on = false;
+  Serial.print("switch off timer pre-start avgI: ");
+  Serial.println(pre_start_avgI);
+  Serial.print("Current avgI: ");
+  Serial.println(combinedData.canData.avgI);
   
-  // inverter on for 20s to check demand or current flow else off and timer for 3 minutes before restarting this timer (sweep)
   // inverter - reset timer if demand or negative avgI
   if ( data->relay_pin == RELAY4 ) {
     if ( pwr_demand || combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) { // keep inverter on above 50% SOC if heaters or hot water demand or charge current
       on = true;
-      Serial.println("Inverter ON due Button demand or charge");
+      Serial.println("inverter on due to demand or charge");
     }
-    // inverter - reset timer if avgI has risen by more than 2A after inverter start (2A is standby usage)
-    else if ( pre_start_avgI + 2 < combinedData.canData.avgI ) {
+    // inverter - reset timer if avgI has risen by more than 3A compared to instant current. (Inverter Standby ~2,5Ah)
+    else if ( pre_start_avgI + 2.5 < combinedData.canData.avgI ) {
       on = true;
-      Serial.print("Current before start: ");
-      Serial.println(pre_start_avgI);
-      Serial.print("Current now: ");
-      Serial.println(combinedData.canData.avgI);
+      Serial.println("inverter on due current above start current detected");
     }
   }
   // hot water tank - reset timer if excess power generation
@@ -277,19 +306,18 @@ void switch_off(lv_timer_t * timer) {
 
   if (on) {
     // we start this timer again
-    Serial.print("ON Timer Reset, demand var: ");
-    Serial.println(pwr_demand);
-    lv_timer_reset(timer);
+     lv_timer_reset(timer);
   }
   // turn off relay
   else {
     digitalWrite(data->relay_pin, LOW);
     // delete timer if relay is turned off
     lv_timer_del(timer);
+
     // Inverter sweep timer starting after turning off relay
     if ( data->relay_pin == RELAY4 ) {
-      Serial.print("OFF as there's no demand, starting sweep timer. Current avgI: ");
-      Serial.println(combinedData.canData.avgI);
+      Serial.println("Inverter off for 3 minutes");
+      lv_label_set_text(data->label_obj, "3 min Sweep");
       lv_timer_create(sweep_timer, sweep_interval_ms, data);
     }
     else { // clear button flag for hot water
@@ -308,6 +336,16 @@ void thermostat_event_handler(lv_event_t * e) {
   if(code == LV_EVENT_CLICKED) {
     LV_UNUSED(obj);
     if ( lv_obj_has_state(data->my_btn, LV_STATE_CHECKED) ) {
+      // check if inverter is on
+      if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
+        lv_event_send(inv_btn, LV_EVENT_CLICKED, NULL); // send click event to start inverter
+        // DEBUG if inverter is still off disable change flag
+        if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
+          lv_obj_clear_state(data->my_btn, LV_STATE_CHECKED);
+          Serial.println("DEBUG thermostat_event_handler - Unable to send start inverter event");
+          return; // exit function if inverter is off
+        }
+      }
       if ( ! thermostat ) {
         thermostat = lv_timer_create(thermostat_timer, 10000, data); // check temp diff every 10s
       }
@@ -379,11 +417,6 @@ void create_temperature_dropdown(lv_obj_t * parent, user_data_t *data) {
 // THERMOSTAT TIMER ////////////////////////////////////////////////////////////////
 void thermostat_timer(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
-  // turn inverter on if off
-  if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
-    lv_event_send(*inv_btn, LV_EVENT_CLICKED, NULL); // send click event to start inverter
-    Serial.println("DEBUG Thermostat Timer - trying to send event to start inverter");
-  }
 
   // ceiling heater thermostat
   if ( data->relay_pin == RELAY1 ) {
@@ -570,13 +603,13 @@ void screen_touch(lv_event_t* e) {
 }
 
 
-// VOID SETUP //////////////////////////////////////////////////////////////////////////
+// SETUP //////////////////////////////////////////////////////////////////////////
 void setup() {
 
   lv_init();
 
-  Serial.begin(115200); // Initialize Serial Monitor
-  //while (!Serial);
+  if ( Serial ) Serial.begin(115200); // Initialize Serial Monitor if available
+  //while (!Serial); // used to delay boot until serial console ready, in order to read all messages
   // Boot M4 & Initialize RPC protocol
   if ( RPC.begin() ) {
     Serial.println("M7 Booting M4 Core");
@@ -657,10 +690,10 @@ void setup() {
   create_button(cont, "Shower Heater",  RELAY2, 120, 10, 0);
 
   // Create Button 3 - HOT WATER
-  create_button(cont, "Hot Water",      RELAY3, 300, 60, hot_water_interval_ms); // 15 min timer reset if negative avgI or CCL < 10A
+  create_button(cont, "Hot Water",      RELAY3, 220, 60, hot_water_interval_ms);
 
   // Create Button 4 - INVERTER
-  create_button(cont, "Inverter",       RELAY4, 400, 1, inverter_startup_ms); // 3 minute sweeps to check if avgI > 2A (stdby is 2A) unless negative avgI or CCL < 10A
+  create_button(cont, "Inverter",       RELAY4, 320, 1, inverter_startup_ms);
 
 }
 
@@ -701,17 +734,26 @@ void loop() {
   Serial.print("absI: ");
   Serial.println(combinedData.canData.absI);
   Serial.print("avgI: ");
-  Serial.println(combinedData.canData.avgI);*/
-  
+  Serial.println(combinedData.canData.avgI);
+  Serial.print("low cell id: ");
+  Serial.println(combinedData.canData.lCid);
+  Serial.print("high cell id: ");
+  Serial.println(combinedData.canData.hCid);*/
 
   // write messages from M4 core
-  String buffer = "";
-  while (RPC.available()) {
+  //String buffer = "";
+  if (RPC.available()) {
+    static String buffer = ""; // clean buffer before reading
     // call func to get sensors and can data from M4 core
     retrieve_M4_data();
     buffer += (char)RPC.read();  // Fill the buffer with characters
+    if (buffer.length() > 0) Serial.print(buffer);
   }
-  if (buffer.length() > 0) Serial.print(buffer);
+  //else Serial.println("RPC not available");
+  /*if ( combinedData.sensorData.temp3 ) {
+    Serial.print("Temperature from M4 core: ");
+    Serial.println(combinedData.sensorData.temp3);
+  }*/
 
   // if no touch within timeout dim display and brightness above 0
   if (previous_touch_ms + touch_timeout_ms < millis() && brightness) {
