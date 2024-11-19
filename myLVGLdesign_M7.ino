@@ -104,6 +104,7 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   lv_obj_t* my_btn;
   lv_obj_t* label_obj;
   lv_obj_t* label_text;
+  lv_obj_t* arc_label;
   uint8_t relay_pin;
   uint8_t y_offset;
   unsigned long timeout_ms;
@@ -144,16 +145,17 @@ uint16_t touch_timeout_ms = 20000; // 20s before screen dimming
 
 //**************************************************************************************//
 // NEED TO ADD DTC FLAGS AND SOLAR HOT WATER OVERRIDE, PERHAPS SIMULATE A BUTTON CLICK? //
-// ADD RELAY CODE FOR INVERTER RELAY CONTROL (TIMER/CLOCK,SOC,DCL,avgI)                 //
+// TURN OFF HEATERS AND HOT WATER IF INVERTER IS TURNED OFF                             //
+// TEMPERATURE UPDATE ISSUE - //
 //**************************************************************************************//
 
 // CREATE BUTTON INSTANCE
 void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms = 0) {
-  
+
   // configure relay pins
   pinMode(relay_pin, OUTPUT);
   digitalWrite(relay_pin, LOW); // initialise pin LOW
-  
+
   // Allocate memory for userdata for each button instance
   user_data_t * data = (user_data_t *)malloc(sizeof(user_data_t));
   // Update user data with received arguments
@@ -163,14 +165,17 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   data->timeout_ms = timeout_ms;
 
   // create button object and add to struct
-  data->my_btn = lv_btn_create(parent); // IMPORTANT TO STORE BUTTON IN USERDATA STRUCT - ELSE CLEARING BUTTONS WON'T WORK
-  if ( relay_pin == RELAY4 ) { // adding inverter button to global variable as it needs to be triggered by the other buttons
-    inv_btn = data->my_btn;
+  if ( relay_pin == RELAY4 ) { // adding inverter button to global variable as it needs to be read by the other buttons
+    inv_btn = lv_btn_create(parent);
+    data->my_btn = inv_btn;
     data->label_obj = lv_label_create(lv_obj_get_parent(data->my_btn));
     lv_obj_set_width(data->label_obj, 120);
     lv_obj_set_pos(data->label_obj, 180, y_offset + 13);
     lv_label_set_text(data->label_obj, "OFF");
   }
+  // all other buttons
+  else data->my_btn = lv_btn_create(parent); // IMPORTANT TO STORE BUTTON IN USERDATA STRUCT - ELSE CLEARING BUTTONS WON'T WORK
+
   lv_obj_set_pos(data->my_btn, 10, y_offset);
   lv_obj_t *label = lv_label_create(data->my_btn);
   lv_label_set_text(label, label_text);
@@ -181,7 +186,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   if ( ! timeout_ms ) {
     // create label and update the user data member for access within timer to allow only to update text not object
     data->label_obj = lv_label_create(lv_obj_get_parent(data->my_btn));
-    create_temperature_dropdown(parent, data);
+    create_arc(parent, data); //create_temperature_dropdown(parent, data);
     // create time updated temperature labels
     lv_timer_create(update_temp, 10000, data);
     lv_obj_set_pos(data->label_obj, 180, y_offset + 13);
@@ -384,6 +389,33 @@ void dropdown_event_handler(lv_event_t *e) {
         data->set_temp = 23;
     }
 }
+// CREATE TEMPERATURE ARC ///////////////////////////////////////////////////////////
+void create_arc(lv_obj_t* parent, user_data_t* data) {
+  // temp selection label
+  data->arc_label = lv_label_create(parent);
+
+  // create arc
+  lv_obj_t* arc = lv_arc_create(parent);
+  lv_obj_set_size(arc, 100, 100);
+  lv_arc_set_range(arc, 5, 25);
+  lv_arc_set_rotation(arc, 180);
+  lv_arc_set_bg_angles(arc, 0, 270);
+  lv_arc_set_value(arc, 20); // default value
+  lv_obj_add_event_cb(arc, arc_temp_change, LV_EVENT_VALUE_CHANGED, data);
+  // initiate label
+  lv_event_send(arc, LV_EVENT_VALUE_CHANGED, NULL);
+}
+// ARC EVENT HANDLER ///////////////////////////////////////////////////////////////
+static void arc_temp_change(lv_event_t* e) {
+  user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
+  lv_obj_t* arc = lv_event_get_target(e);
+  // update struct
+  data->set_temp = lv_arc_get_value(arc);
+  // set label
+  lv_label_set_text_fmt(data->arc_label, "%d\u00B0C", data->set_temp);
+  // rotate label with arc slider
+  lv_arc_rotate_obj_to_angle(arc, data->arc_label, 25); // radius_offset
+}
 
 // CREATE TEMPERATURE SELECTION DROPDOWN MENU ///////////////////////////////////////
 void create_temperature_dropdown(lv_obj_t * parent, user_data_t *data) {
@@ -405,6 +437,12 @@ void create_temperature_dropdown(lv_obj_t * parent, user_data_t *data) {
 // THERMOSTAT TIMER ////////////////////////////////////////////////////////////////
 void thermostat_timer(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
+
+  // first check if inverter is on
+  if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
+    lv_timer_del(timer);
+    return;
+  }
 
   // ceiling heater thermostat
   if ( data->relay_pin == RELAY1 ) {
