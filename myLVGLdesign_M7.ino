@@ -131,7 +131,7 @@ static CombinedData combinedData;
 static lv_obj_t* inv_btn;
 static lv_timer_t* thermostat = NULL;
 
-static float pre_start_avgI; // trying static to see if value is remembered
+static float pre_start_p; // trying static to see if value is remembered
 
 uint8_t pwr_demand = 0;
 uint32_t hot_water_interval_ms = 900000; // 15 min
@@ -223,11 +223,10 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
     lv_timer_t* timeroi = NULL; // declare timer to be able to delete if button off prematurely
     if ( lv_obj_has_state(data->my_btn, LV_STATE_CHECKED) ) {
       if ( data->relay_pin == RELAY4 ) { // only for inverter for sweeping
-        pre_start_avgI = combinedData.canData.avgI;
+        pre_start_p = combinedData.canData.p;
         lv_label_set_text(data->label_obj, "ON");
-        inv_btn = data->my_btn; // update global inverter button with event ****** may work
-        Serial.print("event handler pre-start avgi: ");
-        Serial.println(pre_start_avgI);
+        Serial.print("event handler pre-start power: ");
+        Serial.println(pre_start_p);
       }
       // if inverter off don't allow hot water button to be marked as clicked
       else if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
@@ -271,25 +270,25 @@ void sweep_timer (lv_timer_t* timer) {
 void switch_off(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
   bool on = false;
-  Serial.print("switch off timer pre-start avgI: ");
-  Serial.println(pre_start_avgI);
-  Serial.print("Current avgI: ");
-  Serial.println(combinedData.canData.avgI);
+  Serial.print("switch off timer pre-start Power: ");
+  Serial.println(pre_start_p);
+  Serial.print("Current Power: ");
+  Serial.println(combinedData.canData.p);
   
-  // inverter - reset timer if demand or negative avgI
-  if ( data->relay_pin == RELAY4 ) {
+  // inverter - reset timer if demand or negative avgI if soc or dcl within limits
+  if ( data->relay_pin == RELAY4 && combinedData.canData.soc > 10 || combinedData.canData.dcl > data->dcl_limit ) {
     if ( pwr_demand || combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) { // keep inverter on above 50% SOC if heaters or hot water demand or charge current
       on = true;
       Serial.println("inverter on due to demand or charge");
     }
-    // inverter - reset timer if avgI has risen by more than 3A compared to instant current. (Inverter Standby ~2,5Ah)
-    else if ( pre_start_avgI + 2.5 < combinedData.canData.avgI ) {
+    // inverter - reset timer if power has risen by more than 75W compared to before start. (Inverter Standby ~75W)
+    else if ( pre_start_p + 75 < combinedData.canData.p ) {
       on = true;
-      Serial.println("inverter on due current above start current detected");
+      Serial.println("inverter on due power above inverter start power detected");
     }
   }
   // hot water tank - reset timer if excess power generation
-  else if ( combinedData.canData.ccl < 10 || combinedData.canData.avgI < 0 ) {
+  else if ( data->relay_pin != RELAY4 && combinedData.canData.ccl < 10 || combinedData.canData.avgI < 0 ) {
     on = true;
   }
 
