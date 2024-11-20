@@ -104,7 +104,7 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   lv_obj_t* my_btn;
   lv_obj_t* label_obj;
   lv_obj_t* label_text;
-  lv_obj_t* arc_label;
+  //lv_obj_t* arc_label;
   uint8_t relay_pin;
   uint8_t y_offset;
   unsigned long timeout_ms;
@@ -186,7 +186,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   if ( ! timeout_ms ) {
     // create label and update the user data member for access within timer to allow only to update text not object
     data->label_obj = lv_label_create(lv_obj_get_parent(data->my_btn));
-    create_arc(parent, data); //create_temperature_dropdown(parent, data);
+     create_temperature_dropdown(parent, data);//create_arc(parent, data);
     // create time updated temperature labels
     lv_timer_create(update_temp, 10000, data);
     lv_obj_set_pos(data->label_obj, 180, y_offset + 13);
@@ -390,7 +390,7 @@ void dropdown_event_handler(lv_event_t *e) {
     }
 }
 // CREATE TEMPERATURE ARC ///////////////////////////////////////////////////////////
-void create_arc(lv_obj_t* parent, user_data_t* data) {
+/*void create_arc(lv_obj_t* parent, user_data_t* data) {
   // temp selection label
   data->arc_label = lv_label_create(parent);
 
@@ -399,8 +399,10 @@ void create_arc(lv_obj_t* parent, user_data_t* data) {
   lv_obj_set_size(arc, 100, 100);
   lv_arc_set_range(arc, 5, 25);
   lv_arc_set_rotation(arc, 180);
-  lv_arc_set_bg_angles(arc, 0, 270);
+  lv_arc_set_bg_angles(arc, 0, 180);
   lv_arc_set_value(arc, 20); // default value
+  // position arc
+  lv_obj_set_pos(arc, 230, data->y_offset - 10);
   lv_obj_add_event_cb(arc, arc_temp_change, LV_EVENT_VALUE_CHANGED, data);
   // initiate label
   lv_event_send(arc, LV_EVENT_VALUE_CHANGED, NULL);
@@ -414,8 +416,8 @@ static void arc_temp_change(lv_event_t* e) {
   // set label
   lv_label_set_text_fmt(data->arc_label, "%d\u00B0C", data->set_temp);
   // rotate label with arc slider
-  lv_arc_rotate_obj_to_angle(arc, data->arc_label, 25); // radius_offset
-}
+  lv_arc_rotate_obj_to_angle(arc, data->arc_label, 20); // radius_offset
+}*/
 
 // CREATE TEMPERATURE SELECTION DROPDOWN MENU ///////////////////////////////////////
 void create_temperature_dropdown(lv_obj_t * parent, user_data_t *data) {
@@ -430,7 +432,7 @@ void create_temperature_dropdown(lv_obj_t * parent, user_data_t *data) {
   lv_obj_add_event_cb(dd, dropdown_event_handler, LV_EVENT_VALUE_CHANGED, data);
   
   // place roller
-  lv_obj_set_pos(dd, 255, data->y_offset - 1);
+  lv_obj_set_pos(dd, 245, data->y_offset - 1);
   lv_obj_set_width(dd, 80);
 }
 
