@@ -129,7 +129,7 @@ struct CombinedData {
 static CombinedData combinedData;
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size)
-static lv_obj_t* inv_btn;
+lv_obj_t* inv_btn;
 static lv_timer_t* thermostat = NULL;
 
 static float pre_start_p; // trying static to see if value is remembered
@@ -164,17 +164,16 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   data->dcl_limit = dcl_limit;
   data->timeout_ms = timeout_ms;
 
-  // create button object and add to struct
+  // create button object and add to struct to be able to clear later
+  data->my_btn = lv_btn_create(parent);
   if ( relay_pin == RELAY4 ) { // adding inverter button to global variable as it needs to be read by the other buttons
-    inv_btn = lv_btn_create(parent);
-    data->my_btn = inv_btn;
+    inv_btn = data->my_btn;
     data->label_obj = lv_label_create(lv_obj_get_parent(data->my_btn));
     lv_obj_set_width(data->label_obj, 120);
     lv_obj_set_pos(data->label_obj, 180, y_offset + 13);
+    // initialise label text
     lv_label_set_text(data->label_obj, "OFF");
   }
-  // all other buttons
-  else data->my_btn = lv_btn_create(parent); // IMPORTANT TO STORE BUTTON IN USERDATA STRUCT - ELSE CLEARING BUTTONS WON'T WORK
 
   lv_obj_set_pos(data->my_btn, 10, y_offset);
   lv_obj_t *label = lv_label_create(data->my_btn);
