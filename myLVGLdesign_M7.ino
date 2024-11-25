@@ -26,20 +26,21 @@ GigaDisplayBacklight backlight;
 //  ID 0x0BD BYT0+1:CUSTOM_FLAGS BYT2:HI_TMP BYT3:LO_TMP BYT4:COUNTER BYT5:BMS_STATUS
 //  ID 0x0BE BYT0:HI_CL_ID BYT1:LO_CL_ID BYT2:INT_HEATSINK
 
-// CANBUS receive data
-static uint32_t rxId;
-static uint8_t len = 0;
-static uint8_t rxBuf[8];
+struct CanMsgData {
+  // receive settings
+  uint32_t rxId;
+  uint8_t len;
+  uint8_t rxBuf[8];
+  // send settings
+  static const uint8_t CAN_ID = 0x002; // CAN id for the message (constant)
+  uint8_t msg_data[1]; // Data payload set to 1 byte in BMS
+  uint8_t msg_cnt;
 
-// CANBUS send data MPI through MPO
-static uint8_t const CAN_ID = 0x002; // CAN id for the message
-static uint8_t msg_data[1] = {0x01}; // Data payload set to 1 byte in BMS
-static uint8_t msg_cnt = 0;
-
-// CAN RX INFO DISPLAY DATA
-static uint8_t pos_x = 100;
-static uint8_t pos_y = 20;
-static uint8_t line_gap = 50;
+  // Constructor to initialize non const values
+  CanMsgData() : rxId(0), len(0), msg_data{0x01}, msg_cnt(0) {}
+};
+//Initialise struct
+CanMsgData canMsgData;
 
 // Define named structs as data types
 struct SensorData {
@@ -153,9 +154,8 @@ uint32_t previous_touch_ms;
 uint16_t touch_timeout_ms = 20000; // 20s before screen dimming
 
 //**************************************************************************************//
-// NEED TO ADD DTC FLAGS AND SOLAR HOT WATER OVERRIDE, PERHAPS SIMULATE A BUTTON CLICK? //
-// TURN OFF HEATERS AND HOT WATER IF INVERTER IS TURNED OFF                             //
-// TEMPERATURE UPDATE ISSUE - //
+//                             //
+// 
 //**************************************************************************************//
 
 // CREATE BUTTON INSTANCE
@@ -510,7 +510,7 @@ void clear_bms_flag(lv_event_t * e) {
   if(code == LV_EVENT_CLICKED) {
     Serial.println("DEBUG clear bms flag #2");
     LV_UNUSED(obj);
-    msg_cnt = 1;
+    canMsgData.msg_cnt = 1;
     Serial.println("Sending CAN message");
   }
 }
@@ -588,37 +588,37 @@ int16_t signValue(uint16_t canValue) {
 void sort_can() {
 
     // I WOULD LIKE TO COMPARE CHECKSUM BUT CPP STD LIBRARY NOT AVAILABLE I BELIEVE
-    if (rxId == 0x3B) {
-        combinedData.canData.instU = ((rxBuf[0] << 8) + rxBuf[1]) / 10.0;
-        combinedData.canData.instI = (signValue((rxBuf[2] << 8) + rxBuf[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
-        combinedData.canData.absI = ((rxBuf[4] << 8) + rxBuf[5]) / 10.0; // orion2jr issue: set signed and -32767 to fix
-        combinedData.canData.soc = rxBuf[6] / 2;
+    if (canMsgData.rxId == 0x3B) {
+        combinedData.canData.instU = ((canMsgData.rxBuf[0] << 8) + canMsgData.rxBuf[1]) / 10.0;
+        combinedData.canData.instI = (signValue((canMsgData.rxBuf[2] << 8) + canMsgData.rxBuf[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
+        combinedData.canData.absI = ((canMsgData.rxBuf[4] << 8) + canMsgData.rxBuf[5]) / 10.0; // orion2jr issue: set signed and -32767 to fix
+        combinedData.canData.soc = canMsgData.rxBuf[6] / 2;
     }
-    if(rxId == 0x6B2) {
-        combinedData.canData.lC = ((rxBuf[0] << 8) + rxBuf[1]) / 10000.00;
-        combinedData.canData.hC = ((rxBuf[2] << 8) + rxBuf[3]) / 10000.00;
-        combinedData.canData.h = rxBuf[4];
-        combinedData.canData.cc = (rxBuf[5] << 8) + rxBuf[6];
+    if(canMsgData.rxId == 0x6B2) {
+        combinedData.canData.lC = ((canMsgData.rxBuf[0] << 8) + canMsgData.rxBuf[1]) / 10000.00;
+        combinedData.canData.hC = ((canMsgData.rxBuf[2] << 8) + canMsgData.rxBuf[3]) / 10000.00;
+        combinedData.canData.h = canMsgData.rxBuf[4];
+        combinedData.canData.cc = (canMsgData.rxBuf[5] << 8) + canMsgData.rxBuf[6];
     }
-    if(rxId == 0x0A9) {    
-        combinedData.canData.ry = rxBuf[0];
-        combinedData.canData.ccl = rxBuf[1];
-        combinedData.canData.dcl = rxBuf[2];
-        combinedData.canData.ah = ((rxBuf[3] << 8) + rxBuf[4]) / 10.0;
-        combinedData.canData.avgI = (signValue((rxBuf[5] << 8) + rxBuf[6])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
+    if(canMsgData.rxId == 0x0A9) {
+        combinedData.canData.ry = canMsgData.rxBuf[0];
+        combinedData.canData.ccl = canMsgData.rxBuf[1];
+        combinedData.canData.dcl = canMsgData.rxBuf[2];
+        combinedData.canData.ah = ((canMsgData.rxBuf[3] << 8) + canMsgData.rxBuf[4]) / 10.0;
+        combinedData.canData.avgI = (signValue((canMsgData.rxBuf[5] << 8) + canMsgData.rxBuf[6])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
     }
-    if(rxId == 0x0BD) {
-        combinedData.canData.fu = (rxBuf[0] << 8) + rxBuf[1];
-        combinedData.canData.hT = rxBuf[2];
-        combinedData.canData.lT = rxBuf[3];
-        combinedData.canData.ct = rxBuf[4];
-        combinedData.canData.st = (rxBuf[5] << 8) + rxBuf[6];
+    if(canMsgData.rxId == 0x0BD) {
+        combinedData.canData.fu = (canMsgData.rxBuf[0] << 8) + canMsgData.rxBuf[1];
+        combinedData.canData.hT = canMsgData.rxBuf[2];
+        combinedData.canData.lT = canMsgData.rxBuf[3];
+        combinedData.canData.ct = canMsgData.rxBuf[4];
+        combinedData.canData.st = (canMsgData.rxBuf[5] << 8) + canMsgData.rxBuf[6];
     }
-    if(rxId == 0x0BE) {
-        combinedData.canData.hCid = rxBuf[0];
-        combinedData.canData.lCid = rxBuf[1];
-        combinedData.canData.hs = rxBuf[2];
-        combinedData.canData.kw = ((rxBuf[3] << 8) + rxBuf[4]) / 10.0;
+    if(canMsgData.rxId == 0x0BE) {
+        combinedData.canData.hCid = canMsgData.rxBuf[0];
+        combinedData.canData.lCid = canMsgData.rxBuf[1];
+        combinedData.canData.hs = canMsgData.rxBuf[2];
+        combinedData.canData.kw = ((canMsgData.rxBuf[3] << 8) + canMsgData.rxBuf[4]) / 10.0;
     }
     combinedData.canData.p = combinedData.canData.avgI * combinedData.canData.instU;
 }
@@ -928,24 +928,24 @@ void loop() {
   // CANBUS READ AND WRITE
   if (CAN.available()) {
     CanMsg const msg = CAN.read();
-    rxId = msg.id;
-    len = msg.data_length;
-    memcpy(rxBuf, msg.data, len);
+    canMsgData.rxId = msg.id;
+    canMsgData.len = msg.data_length;
+    memcpy(canMsgData.rxBuf, msg.data, canMsgData.len);
     sort_can();
 
     // send CAN if commanded
-    if ( msg_cnt && msg_cnt < 3 ) {
-      msg_data[0] = msg_cnt; // Directly assign the single byte
-      CanMsg send_msg(CanStandardId(CAN_ID), sizeof(msg_data), msg_data);
+    if ( canMsgData.msg_cnt && canMsgData.msg_cnt < 3 ) {
+      canMsgData.msg_data[0] = canMsgData.msg_cnt; // Directly assign the single byte
+      CanMsg send_msg(CanStandardId(canMsgData.CAN_ID), sizeof(canMsgData.msg_data), canMsgData.msg_data);
 
       // retry if send failed
       int const rc = CAN.write(send_msg);
       if ( rc <= 0 ) {
         Serial.print("CAN.write(...) failed with error code ");
         Serial.println(rc);
-        msg_cnt++;
+        canMsgData.msg_cnt++;
       }
-      else msg_cnt = 0; // sent successfully
+      else canMsgData.msg_cnt = 0; // sent successfully
     }
   }
   //else { Serial.println("M7 CAN not available"); } // crazy messages despite working
