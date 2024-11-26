@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <vector>
 #include <RPC.h>
 #include <Arduino_H7_Video.h>
 #include "lvgl.h"
@@ -26,23 +27,7 @@ GigaDisplayBacklight backlight;
 //  ID 0x0BD BYT0+1:CUSTOM_FLAGS BYT2:HI_TMP BYT3:LO_TMP BYT4:COUNTER BYT5:BMS_STATUS
 //  ID 0x0BE BYT0:HI_CL_ID BYT1:LO_CL_ID BYT2:INT_HEATSINK
 
-struct CanMsgData {
-  // receive settings
-  uint32_t rxId;
-  uint8_t len;
-  uint8_t rxBuf[8];
-  // send settings
-  static const uint8_t CAN_ID = 0x002; // CAN id for the message (constant)
-  uint8_t msg_data[1]; // Data payload set to 1 byte in BMS
-  uint8_t msg_cnt;
-
-  // Constructor to initialize non const values
-  CanMsgData() : rxId(0), len(0), msg_data{0x01}, msg_cnt(0) {}
-};
-//Initialise struct
-CanMsgData canMsgData;
-
-// Define named structs as data types
+// Temp and Humidity data struct from M4
 struct SensorData {
     float temp1;
     float temp2;
@@ -56,7 +41,7 @@ struct SensorData {
 
     MSGPACK_DEFINE_ARRAY(temp1, temp2, temp3, temp4, humi1, humi2, humi3, humi4, avg_temp);
 };
-// Define named structs as data types
+
 // CanData struct
 struct CanData {
 
@@ -90,20 +75,35 @@ struct CanData {
     
     MSGPACK_DEFINE_ARRAY(instU, instI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, ct, st, cc, avgI, hCid, lCid, p, absI, kw, hs);
 };
-// Define an enumeration for the different data types.
-typedef enum {
-    CAN_DATA_TYPE_INT,
-    CAN_DATA_TYPE_FLOAT,
-    CAN_DATA_TYPE_DOUBLE_FLOAT, // 2 decimals
-    CAN_DATA_TYPE_BYTE
-} can_data_type_t;
 
-// Define a struct to hold BMS flag data
+// Create combined struct with sensor and can data
+struct CombinedData {
+  SensorData sensorData;
+  CanData canData;
+};
+
+// Can Message Data struct
+struct CanMsgData {
+  // receive settings
+  uint32_t rxId;
+  uint8_t len;
+  uint8_t rxBuf[8];
+  // send settings
+  static const uint8_t CAN_ID = 0x002; // CAN id for the message (constant)
+  uint8_t msg_data[1]; // Data payload set to 1 byte in BMS
+  uint8_t msg_cnt;
+
+  // Constructor to initialize non const values
+  CanMsgData() : rxId(0), len(0), msg_data{0x01}, msg_cnt(0) {}
+};
+
+// Define a struct to hold BMS status message data
 typedef struct {
     lv_obj_t *parent;
     lv_coord_t x;
     lv_coord_t y;
-    lv_obj_t *labels[28]; // 28 bms messages
+    std::vector<lv_obj_t*> labels; // Vector to store active labels
+    //lv_obj_t *labels[28]; // 28 bms messages
     bool balancing;
 } bms_status_data_t;
 
@@ -112,7 +112,6 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   //lv_obj_t* container;
   lv_obj_t* my_btn;
   lv_obj_t* label_obj;
-  lv_obj_t* label_text;
   //lv_obj_t* arc_label;
   uint8_t relay_pin;
   uint8_t x_offset;
@@ -120,27 +119,39 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   unsigned long timeout_ms;
   uint8_t dcl_limit;
   uint8_t set_temp = 20; // should match value of dropdown default index
+} user_data_t;
+
+// Define an enumeration for the different data types.
+typedef enum {
+    CAN_DATA_TYPE_INT,
+    CAN_DATA_TYPE_FLOAT,
+    CAN_DATA_TYPE_DOUBLE_FLOAT, // 2 decimals
+    CAN_DATA_TYPE_BYTE
+} can_data_type_t;
+
+// Define struct for can label data and initiate enumeration struct
+typedef struct {
   union {
     int* intData;
     float* floatData;
     byte* byteData;
   } canDataProperty;
   can_data_type_t canDataType;
+  lv_obj_t* label_obj;
+  lv_obj_t* label_text;
   const char* label_prefix; // To store label text prefix
   const char* label_unit; // Label unit e.g V,A or W
-} user_data_t;
+} can_label_t;
 
-struct CombinedData {
-  SensorData sensorData;
-  CanData canData;
-};
-
-// declare global instances
+//Initialise structures
+static CanMsgData canMsgData;
+static bms_status_data_t bmsStatusData;
+static user_data_t userData[5]; // 5 buttons
+static can_label_t canLabel[14]; // 14 labels so far
 static CombinedData combinedData;
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size)
-lv_obj_t* inv_btn;
-//static lv_timer_t* thermostat = NULL;
+lv_obj_t* inv_btn = nullptr;
 
 static float pre_start_p; // trying static to see if value is remembered
 
@@ -154,19 +165,17 @@ uint32_t previous_touch_ms;
 uint16_t touch_timeout_ms = 20000; // 20s before screen dimming
 
 //**************************************************************************************//
-//                             //
+//   REMOVE MALLOC AND SEPARATE EVENT_HANDLER FOR INVERTER TO ALLOW CALL FROM OTHERS    //
 // 
 //**************************************************************************************//
 
 // CREATE BUTTON INSTANCE
-void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms) {
+void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms, user_data_t* data) {
 
   // configure relay pins
   pinMode(relay_pin, OUTPUT);
   digitalWrite(relay_pin, LOW); // initialise pin LOW
 
-  // Allocate memory for userdata for each button instance
-  user_data_t * data = (user_data_t *)malloc(sizeof(user_data_t));
   // Update user data with received arguments
   data->relay_pin = relay_pin;
   data->y_offset = y_offset;
@@ -208,7 +217,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     inv_btn = data->my_btn;
     // create inverter status label
     data->label_obj = lv_label_create(lv_obj_get_parent(data->my_btn));
-    lv_obj_set_width(data->label_obj, 120);
+    lv_obj_set_width(data->label_obj, 180);
     lv_obj_set_pos(data->label_obj, 180, y_offset + 13);
     // initialise label text
     lv_label_set_text(data->label_obj, "Inverter OFF");
@@ -241,8 +250,8 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
       if ( data->relay_pin == RELAY4 ) { // only for inverter for sweeping
         pre_start_p = combinedData.canData.p;
         lv_label_set_text(data->label_obj, "Inverter ON");
-        /*Serial.print("event handler pre-start power: ");
-        Serial.println(pre_start_p);*/
+        Serial.print("event handler pre-start power: ");
+        Serial.println(pre_start_p);
       }
       // if inverter off don't allow hot water button to be marked as clicked
       else if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
@@ -298,7 +307,7 @@ void switch_off(lv_timer_t * timer) {
       //Serial.println("inverter on due to demand or charge");
     }
     // inverter - reset timer if power has risen by more than 75W compared to before start. (Inverter Standby ~75W)
-    else if ( pre_start_p + 75 < combinedData.canData.p ) {
+    else if ( pre_start_p + 75 < combinedData.canData.p && abs(combinedData.canData.p) > 75 ) {
       on = true;
       //Serial.println("inverter on due power above inverter start power detected");
     }
@@ -320,7 +329,7 @@ void switch_off(lv_timer_t * timer) {
 
     // Inverter sweep timer starting after turning off relay
     if ( data->relay_pin == RELAY4 ) {
-      lv_label_set_text(data->label_obj, "Eco Sweep - 3 min OFF");
+      lv_label_set_text(data->label_obj, "EcoSweep - 3 min");
       lv_timer_create(sweep_timer, sweep_interval_ms, data);
     }
     else { // clear button flag for hot water
@@ -498,8 +507,8 @@ void update_temp(lv_timer_t *timer) {
   // update label text only and not the label object
   lv_label_set_text(data->label_obj, buf);
   // DEBUG
-  Serial.print("M7 core: ");
-  Serial.println(buf);
+  /*Serial.print("M7 core: ");
+  Serial.println(buf);*/
 }
 
 // CLEAR CAN EVENT HANDLER ////////////////////////////////////////////////////////////////////
@@ -516,7 +525,7 @@ void clear_bms_flag(lv_event_t * e) {
 }
 // REFRESH CAN LABEL DATA //////////////////////////////////////////////////////////////////////
 void refresh_can_data(lv_timer_t* timer) {
-    user_data_t *data = (user_data_t *)timer->user_data;
+    can_label_t *data = (can_label_t *)timer->user_data;
     char buf[50];
 
     switch (data->canDataType) {
@@ -541,9 +550,9 @@ void refresh_can_data(lv_timer_t* timer) {
 }
 
 // CREATE CAN LABELS ////////////////////////////////////////////////////////////////////////////////////////////////////
-void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* label_unit, void* canDataProperty, can_data_type_t canDataType, int x_pos, int y_pos) {
+void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* label_unit, void* canDataProperty, can_data_type_t canDataType, int x_pos, int y_pos, can_label_t* data) {
     // Allocate memory for new user data instance
-    user_data_t *data = (user_data_t *)malloc(sizeof(user_data_t));
+    //user_data_t *data = (user_data_t *)malloc(sizeof(user_data_t));
     if (data) {
         // Update instance with user data
         data->label_obj = lv_label_create(parent);
@@ -650,6 +659,11 @@ void screen_touch(lv_event_t* e) {
   }
 }
 
+// OPACITY FOR LABEL ANIMATION ////////////////////////////////////////////////
+void set_opacity(void * obj, int32_t opacity) {
+    lv_obj_set_style_opa((lv_obj_t *)obj, opacity, 0);
+}
+
 // FLASH LABEL FOR CELL BALANCING /////////////////////////////////////////////
 void flash_label(lv_timer_t * timer) {
     bms_status_data_t *data = (bms_status_data_t *)timer->user_data;
@@ -665,57 +679,131 @@ void flash_label(lv_timer_t * timer) {
             }
         }
 
-        // If the label is found, toggle its visibility
+        // If the label is found, create an animation to flash it
         if (cell_balancing_label_index != -1) {
-            if (lv_obj_has_flag(data->labels[cell_balancing_label_index], LV_OBJ_FLAG_HIDDEN)) {
-                lv_obj_clear_flag(data->labels[cell_balancing_label_index], LV_OBJ_FLAG_HIDDEN);
-            } else {
-                lv_obj_add_flag(data->labels[cell_balancing_label_index], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_t * label = data->labels[cell_balancing_label_index];
+
+            lv_anim_t anim;
+            lv_anim_init(&anim);
+            lv_anim_set_var(&anim, label);
+            lv_anim_set_values(&anim, LV_OPA_TRANSP, LV_OPA_COVER);
+            lv_anim_set_time(&anim, 500); // Time for each step
+            lv_anim_set_playback_time(&anim, 500);
+            lv_anim_set_repeat_count(&anim, LV_ANIM_REPEAT_INFINITE);
+            lv_anim_set_exec_cb(&anim, (lv_anim_exec_xcb_t)set_opacity);
+            lv_anim_start(&anim);
+        }
+    } else {
+        lv_timer_del(timer);
+    }
+}
+
+// LABEL CREATION HELPER FUNCTION /////////////////////////////////////////////////////////////
+void update_bms_labels(bms_status_data_t *data, lv_coord_t x, lv_coord_t y) {
+    // Clear existing labels
+    for (auto &label : data->labels) {
+        lv_obj_del(label);
+    }
+    data->labels.clear();
+
+    int y_offset = y;
+    data->balancing = false; // Reset balancing flag before updating
+
+    auto create_label = [&](const char* text) {
+        lv_obj_t* label = lv_label_create(data->parent);
+        lv_label_set_text(label, text);
+        lv_obj_align(label, LV_ALIGN_TOP_MID, 0, y_offset);
+        data->labels.push_back(label);
+        y_offset += 20; // Adjust offset for next label
+    };
+
+    // Update BMS flags
+    auto update_flags = [&](uint16_t flag, const char* text) {
+        if (combinedData.canData.fu & flag) {
+            create_label(text);
+        }
+    };
+
+    update_flags(0x0100, "Internal Hardware Fault");
+    update_flags(0x0200, "Internal Cell Comm Fault");
+    update_flags(0x0400, "Weak Cell Fault");
+    update_flags(0x0800, "Low Cell Voltage");
+    update_flags(0x1000, "Open Wire Fault");
+    update_flags(0x2000, "Current Sensor Fault");
+    update_flags(0x4000, "Abnormal SOC Behavior");
+    update_flags(0x8000, "Pack Too Hot Fault");
+    update_flags(0x0001, "Weak Pack Fault");
+    update_flags(0x0002, "External Thermistor Fault");
+    update_flags(0x0004, "Charge Relay Failure");
+    update_flags(0x0008, "Discharge Relay Fault");
+    update_flags(0x0010, "Safety Relay Fault");
+    update_flags(0x0020, "CAN communication Fault");
+    update_flags(0x0040, "Internal Thermistor Fault");
+    update_flags(0x0080, "Internal Logic Fault");
+
+    // Update failsafe status
+    auto update_status = [&](uint16_t status, const char* text) {
+        if (combinedData.canData.st & status) {
+            create_label(text);
+            if (status == 0x0008) { // Check if it's the balancing flag
+                data->balancing = true;
             }
         }
-    }
-    else lv_timer_del(timer);
+    };
+
+    update_status(0x0001, "Voltage Failsafe");
+    update_status(0x0002, "Current Failsafe");
+    update_status(0x0004, "Relay Failsafe");
+    update_status(0x0008, "Cell Balancing Active");
+    update_status(0x0010, "Charge Interlock Failsafe");
+    update_status(0x0020, "Thermistor B-value Table Invalid");
+    update_status(0x0040, "Input Power Supply Failsafe");
+    update_status(0x0100, "Relays Opened under Load Failsafe");
+    update_status(0x1000, "Polarization Model 1 Active");
+    update_status(0x2000, "Polarization Model 2 Active");
+    update_status(0x4000, "Polarization Compensation Inactive");
+    update_status(0x8000, "Charge Mode Activated over CANBUS");
 }
 
 
 // CREATE BMS FLAG LABELS //////////////////////////////////////////////////////
-void create_bms_flag_label(lv_obj_t* parent, lv_coord_t x, lv_coord_t y) {
-    // Allocate memory for new user data instance
-    bms_status_data_t *bms_status_data = (bms_status_data_t *)malloc(sizeof(bms_status_data_t));
-    if (bms_status_data) {
-        bms_status_data->parent = parent;
-        bms_status_data->x = x;
-        bms_status_data->y = y;
+void create_bms_flag_label(lv_obj_t* parent, lv_coord_t x, lv_coord_t y, bms_status_data_t* data) {
+    if (data) {
+        data->parent = parent;
+        data->x = x;
+        data->y = y;
 
         // Create title label
         lv_obj_t* title_label = lv_label_create(parent);
         lv_label_set_text(title_label, "BMS Status Messages");
-        lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, y - 5);//lv_obj_set_pos(title_label, x + 40, y - 5);
+        lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, y - 5);
 
-        // Create labels for status data
-        uint16_t y_alignment;
-        for (uint8_t i = 0; i < 28; i++) {
-            y_alignment = y + (i + 1) * 20;
-            bms_status_data->labels[i] = lv_label_create(parent);
-            lv_obj_align(bms_status_data->labels[i], LV_ALIGN_TOP_MID, 0, y_alignment);//lv_obj_set_pos(bms_status_data->labels[i], x, y + (i + 1) * 20);
-            lv_label_set_text(bms_status_data->labels[i], "");
-        }
-
-        // Create button below labels
+        // Create a button below labels, initially hidden
         lv_obj_t* button = lv_btn_create(parent);
         lv_obj_t* btn_label = lv_label_create(button);
         lv_label_set_text(btn_label, "Clear BMS Flags");
-        lv_obj_align_to(button, title_label, LV_ALIGN_TOP_MID, 0, y_alignment + 20); // align to other object and add 
+        lv_obj_add_flag(button, LV_OBJ_FLAG_HIDDEN); // Initially hidden
+
+        // Update BMS labels
+        update_bms_labels(data, x, y + 20);
+
+        // Show the button only if there are any labels
+        if (!data->labels.empty()) {
+            lv_obj_clear_flag(button, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_align_to(button, data->labels.back(), LV_ALIGN_TOP_MID, 0, 20);
+        } else {
+            // If no labels, the button remains hidden
+            lv_obj_add_flag(button, LV_OBJ_FLAG_HIDDEN);
+        }
+
         lv_obj_add_event_cb(button, clear_bms_flag, LV_EVENT_CLICKED, NULL);
 
         // Refresh status labels every second
-        lv_timer_create(refresh_bms_flag_label, 1000, bms_status_data);
+        lv_timer_create(refresh_bms_flag_label, 1000, data);
 
-        // Create a timer for flashing effect
-        lv_timer_create(flash_label, 1000, bms_status_data); // 1000ms interval for flashing
-    }
-    else {
-        // Handle memory allocation failure
+        // Create a timer for the flashing effect
+        lv_timer_create(flash_label, 1000, data); // 1000ms interval for flashing
+    } else {
         Serial.println("Error: Unable to allocate memory for BMS flag data.");
     }
 }
@@ -723,102 +811,7 @@ void create_bms_flag_label(lv_obj_t* parent, lv_coord_t x, lv_coord_t y) {
 // REFRESH BMS FLAG LABEL ////////////////////////////////////////////////////////
 void refresh_bms_flag_label(lv_timer_t * timer) {
     bms_status_data_t *data = (bms_status_data_t *)timer->user_data;
-
-    int label_index = 0;
-    data->balancing = false; // reset balancing flag before updating
-
-    // bms flags
-    if ((combinedData.canData.fu & 0x0100) == 0x0100) {
-        lv_label_set_text(data->labels[label_index++], "Internal Hardware Fault");
-    }
-    if ((combinedData.canData.fu & 0x0200) == 0x0200) {
-        lv_label_set_text(data->labels[label_index++], "Internal Cell Comm Fault");
-    }
-    if ((combinedData.canData.fu & 0x0400) == 0x0400) {
-        lv_label_set_text(data->labels[label_index++], "Weak Cell Fault");
-    }
-    if ((combinedData.canData.fu & 0x0800) == 0x0800) {
-        lv_label_set_text(data->labels[label_index++], "Low Cell Voltage");
-    }
-    if ((combinedData.canData.fu & 0x1000) == 0x1000) {
-        lv_label_set_text(data->labels[label_index++], "Open Wire Fault");
-    }
-    if ((combinedData.canData.fu & 0x2000) == 0x2000) {
-        lv_label_set_text(data->labels[label_index++], "Current Sensor Fault");
-    }
-    if ((combinedData.canData.fu & 0x4000) == 0x4000) {
-        lv_label_set_text(data->labels[label_index++], "Abnormal SOC Behavior");
-    }
-    if ((combinedData.canData.fu & 0x8000) == 0x8000) {
-        lv_label_set_text(data->labels[label_index++], "Pack Too Hot Fault");
-    }
-    if ((combinedData.canData.fu & 0x0001) == 0x0001) {
-        lv_label_set_text(data->labels[label_index++], "Weak Pack Fault");
-    }
-    if ((combinedData.canData.fu & 0x0002) == 0x0002) {
-        lv_label_set_text(data->labels[label_index++], "External Thermistor Fault");
-    }
-    if ((combinedData.canData.fu & 0x0004) == 0x0004) {
-        lv_label_set_text(data->labels[label_index++], "Charge Relay Failure");
-    }
-    if ((combinedData.canData.fu & 0x0008) == 0x0008) {
-        lv_label_set_text(data->labels[label_index++], "Discharge Relay Fault");
-    }
-    if ((combinedData.canData.fu & 0x0010) == 0x0010) {
-        lv_label_set_text(data->labels[label_index++], "Safety Relay Fault");
-    }
-    if ((combinedData.canData.fu & 0x0020) == 0x0020) {
-        lv_label_set_text(data->labels[label_index++], "CAN communication Fault");
-    }
-    if ((combinedData.canData.fu & 0x0040) == 0x0040) {
-        lv_label_set_text(data->labels[label_index++], "Internal Thermistor Fault");
-    }
-    if ((combinedData.canData.fu & 0x0080) == 0x0080) {
-        lv_label_set_text(data->labels[label_index++], "Internal Logic Fault");
-    }
-    // failsafe status
-    if ((combinedData.canData.st & 0x0001) == 0x0001) {
-        lv_label_set_text(data->labels[label_index++], "Voltage Failsafe");
-    }
-    if ((combinedData.canData.st & 0x0002) == 0x0002) {
-        lv_label_set_text(data->labels[label_index++], "Current Failsafe");
-    }
-    if ((combinedData.canData.st & 0x0004) == 0x0004) {
-        lv_label_set_text(data->labels[label_index++], "Relay Failsafe");
-    }
-    if ((combinedData.canData.st & 0x0008) == 0x0008) {
-        lv_label_set_text(data->labels[label_index++], "Cell Balancing Active");
-        data->balancing = true;
-    }
-    if ((combinedData.canData.st & 0x0010) == 0x0010) {
-        lv_label_set_text(data->labels[label_index++], "Charge Interlock Failsafe");
-    }
-    if ((combinedData.canData.st & 0x0020) == 0x0020) {
-        lv_label_set_text(data->labels[label_index++], "Thermistor B-value Table Invalid");
-    }
-    if ((combinedData.canData.st & 0x0040) == 0x0040) {
-        lv_label_set_text(data->labels[label_index++], "Input Power Supply Failsafe");
-    }
-    if ((combinedData.canData.st & 0x0100) == 0x0100) {
-        lv_label_set_text(data->labels[label_index++], "Relays Opened under Load Failsafe");
-    }
-    if ((combinedData.canData.st & 0x1000) == 0x1000) {
-        lv_label_set_text(data->labels[label_index++], "Polarization Model 1 Active");
-    }
-    if ((combinedData.canData.st & 0x2000) == 0x2000) {
-        lv_label_set_text(data->labels[label_index++], "Polarization Model 2 Active");
-    }
-    if ((combinedData.canData.st & 0x4000) == 0x4000) {
-        lv_label_set_text(data->labels[label_index++], "Polarization Compensation Inactive");
-    }
-    if ((combinedData.canData.st & 0x8000) == 0x8000) {
-        lv_label_set_text(data->labels[label_index++], "Charge Mode Activated over CANBUS");
-    }
-
-    // Clear remaining labels
-    while (label_index < 28) {
-        lv_label_set_text(data->labels[label_index++], "");
-    }
+    update_bms_labels(data, data->x, data->y);
 }
 
 
@@ -869,33 +862,23 @@ void setup() {
                         LV_GRID_ALIGN_STRETCH, 0, 1);
 
   // Create labels for CAN data
-  create_can_label(cont, "SOC", "%", &(combinedData.canData.soc), CAN_DATA_TYPE_BYTE, 20, 20);
-  create_can_label(cont, "Current", "A", &(combinedData.canData.instI), CAN_DATA_TYPE_FLOAT, 180, 20);
-  create_can_label(cont, "Voltage", "V", &(combinedData.canData.instU), CAN_DATA_TYPE_FLOAT, 20, 50);
-  create_can_label(cont, "Power", "W", &(combinedData.canData.p), CAN_DATA_TYPE_INT, 180, 50);
-  create_can_label(cont, "High Cell ID", "", &(combinedData.canData.hCid), CAN_DATA_TYPE_BYTE, 20, 80);
-  create_can_label(cont, "High Cell", "V", &(combinedData.canData.hC), CAN_DATA_TYPE_DOUBLE_FLOAT, 180, 80);
-  create_can_label(cont, "Low Cell ID", "", &(combinedData.canData.lCid), CAN_DATA_TYPE_BYTE, 20, 110);
-  create_can_label(cont, "Low Cell", "V", &(combinedData.canData.lC), CAN_DATA_TYPE_DOUBLE_FLOAT, 180, 110);
-  create_can_label(cont, "Discharge Current Limit          ", "A", &(combinedData.canData.dcl), CAN_DATA_TYPE_BYTE, 20, 160);
-  create_can_label(cont, "Charge Current Limit                ", "A", &(combinedData.canData.ccl), CAN_DATA_TYPE_BYTE, 20, 190);
-  create_can_label(cont, "Cycles", "", &(combinedData.canData.cc), CAN_DATA_TYPE_INT, 20, 240);
-  create_can_label(cont, "Health", "%", &(combinedData.canData.h), CAN_DATA_TYPE_BYTE, 180, 240);
-  create_can_label(cont, "Capacity", "Ah", &(combinedData.canData.ah), CAN_DATA_TYPE_FLOAT, 20, 270);
-  create_can_label(cont, "Internal Heatsink Temperature", "\u00B0C", &(combinedData.canData.hs), CAN_DATA_TYPE_BYTE, 20, 300);
+  create_can_label(cont, "SOC", "%", &(combinedData.canData.soc), CAN_DATA_TYPE_BYTE, 20, 20, &canLabel[0]);
+  create_can_label(cont, "Current", "A", &(combinedData.canData.instI), CAN_DATA_TYPE_FLOAT, 180, 20, &canLabel[1]);
+  create_can_label(cont, "Voltage", "V", &(combinedData.canData.instU), CAN_DATA_TYPE_FLOAT, 20, 50, &canLabel[2]);
+  create_can_label(cont, "Power", "W", &(combinedData.canData.p), CAN_DATA_TYPE_INT, 180, 50, &canLabel[3]);
+  create_can_label(cont, "High Cell ID", "", &(combinedData.canData.hCid), CAN_DATA_TYPE_BYTE, 20, 80, &canLabel[4]);
+  create_can_label(cont, "High Cell", "V", &(combinedData.canData.hC), CAN_DATA_TYPE_DOUBLE_FLOAT, 180, 80, &canLabel[5]);
+  create_can_label(cont, "Low Cell ID", "", &(combinedData.canData.lCid), CAN_DATA_TYPE_BYTE, 20, 110, &canLabel[6]);
+  create_can_label(cont, "Low Cell", "V", &(combinedData.canData.lC), CAN_DATA_TYPE_DOUBLE_FLOAT, 180, 110, &canLabel[7]);
+  create_can_label(cont, "Discharge Current Limit          ", "A", &(combinedData.canData.dcl), CAN_DATA_TYPE_BYTE, 20, 160, &canLabel[8]);
+  create_can_label(cont, "Charge Current Limit                ", "A", &(combinedData.canData.ccl), CAN_DATA_TYPE_BYTE, 20, 190, &canLabel[9]);
+  create_can_label(cont, "Cycles", "", &(combinedData.canData.cc), CAN_DATA_TYPE_INT, 20, 240, &canLabel[10]);
+  create_can_label(cont, "Health", "%", &(combinedData.canData.h), CAN_DATA_TYPE_BYTE, 180, 240, &canLabel[11]);
+  create_can_label(cont, "Capacity", "Ah", &(combinedData.canData.ah), CAN_DATA_TYPE_FLOAT, 20, 270, &canLabel[12]);
+  create_can_label(cont, "Internal Heatsink Temperature", "\u00B0C", &(combinedData.canData.hs), CAN_DATA_TYPE_BYTE, 20, 300, &canLabel[13]);
   
-  // Display bms flags codes
-  create_bms_flag_label(cont, 70, 350);
-  
-  // Create button to clear bms faults
-  /*lv_obj_t* bms_btn = lv_btn_create(cont);
-  lv_obj_add_event_cb(bms_btn, clear_bms_flag, LV_EVENT_CLICKED, NULL);
-  lv_obj_set_pos(bms_btn, 110, 600);
-  // Create button text label
-  lv_obj_t* bms_btn_label = lv_label_create(bms_btn);
-  lv_label_set_text(bms_btn_label, "Clear Faults");
-  lv_obj_center(bms_btn_label);*/
-
+  // Display bms messages
+  create_bms_flag_label(cont, 70, 350, &bmsStatusData);
   
   // create right column container instance
   cont = lv_obj_create(parent);
@@ -905,16 +888,16 @@ void setup() {
 
   // Create Button 1 - CEILING HEATER
   // arguments 1:obj  2:label 3:relay_pin 4:y_offset 5:dcl_limit 6:timeout_ms
-  create_button(cont, "Ceiling Heater", RELAY1, 20, 70, 0);
+  create_button(cont, "Ceiling Heater", RELAY1, 20, 70, 0, &userData[0]);
 
   // Create Button 2 - SHOWER HEATER
-  create_button(cont, "Shower Heater",  RELAY2, 120, 10, 0);
+  create_button(cont, "Shower Heater",  RELAY2, 120, 10, 0, &userData[1]);
 
   // Create Button 3 - HOT WATER
-  create_button(cont, "Hot Water",      RELAY3, 220, 60, hot_water_interval_ms);
+  create_button(cont, "Hot Water",      RELAY3, 220, 60, hot_water_interval_ms, &userData[2]);
 
   // Create Button 4 - INVERTER
-  create_button(cont, "Inverter",       RELAY4, 320, 5, inverter_startup_ms);
+  create_button(cont, "Inverter",       RELAY4, 320, 5, inverter_startup_ms, &userData[3]);
 
 }
 
