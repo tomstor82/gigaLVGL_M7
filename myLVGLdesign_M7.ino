@@ -118,7 +118,7 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   uint8_t y_offset;
   unsigned long timeout_ms;
   uint8_t dcl_limit;
-  uint8_t set_temp = 20; // should match value of dropdown default index
+  uint8_t set_temp = 20; // should match value of dropdown default index ** how is this allowed as it is not const??
 } user_data_t;
 
 // Define an enumeration for the different data types.
@@ -146,19 +146,17 @@ typedef struct {
 //Initialise structures
 static CanMsgData canMsgData;
 static bms_status_data_t bmsStatusData;
-static user_data_t userData[5]; // 5 buttons
+static user_data_t userData[4]; // 4 buttons with user_data
 static can_label_t canLabel[14]; // 14 labels so far
 static CombinedData combinedData;
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size)
 lv_obj_t* inv_btn = nullptr;
-
-static float pre_start_p; // trying static to see if value is remembered
-
+int pre_start_p;
 uint8_t pwr_demand = 0;
-uint32_t hot_water_interval_ms = 900000; // 15 min
-uint16_t inverter_startup_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
-uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 75Wh to around 12,5Wh -84%
+const uint32_t hot_water_interval_ms = 900000; // 15 min
+const uint16_t inverter_startup_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
+const uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 75Wh to around 12,5Wh -84%
 
 uint8_t brightness = 70;
 uint32_t previous_touch_ms;
@@ -295,10 +293,6 @@ void sweep_timer (lv_timer_t* timer) {
 void switch_off(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
   bool on = false;
-  /*Serial.print("switch off timer pre-start Power: ");
-  Serial.println(pre_start_p);
-  Serial.print("Current Power: ");
-  Serial.println(combinedData.canData.p);*/
   
   // inverter - reset timer if demand or negative avgI if soc or dcl within limits
   if ( data->relay_pin == RELAY4 && combinedData.canData.soc > 10 || combinedData.canData.dcl > data->dcl_limit ) {
@@ -306,7 +300,7 @@ void switch_off(lv_timer_t * timer) {
       on = true;
       //Serial.println("inverter on due to demand or charge");
     }
-    // inverter - reset timer if power has risen by more than 75W compared to before start. (Inverter Standby ~75W)
+    // inverter - reset timer if power has risen by more than 75W compared to before start and power is above 75W (solar issue otherwise). (Inverter Standby ~75W)
     else if ( pre_start_p + 75 < combinedData.canData.p && abs(combinedData.canData.p) > 75 ) {
       on = true;
       //Serial.println("inverter on due power above inverter start power detected");
@@ -698,7 +692,7 @@ void flash_label(lv_timer_t * timer) {
     }
 }
 
-// LABEL CREATION HELPER FUNCTION /////////////////////////////////////////////////////////////
+// READ BMS STATUS MESSAGES AND UPDATE LABELS ////////////////////////////////////
 void update_bms_labels(bms_status_data_t *data, lv_coord_t x, lv_coord_t y) {
     // Clear existing labels
     for (auto &label : data->labels) {
@@ -765,6 +759,11 @@ void update_bms_labels(bms_status_data_t *data, lv_coord_t x, lv_coord_t y) {
     update_status(0x8000, "Charge Mode Activated over CANBUS");
 }
 
+// REFRESH BMS FLAG LABEL ////////////////////////////////////////////////////////
+void refresh_bms_flag_label(lv_timer_t * timer) {
+    bms_status_data_t *data = (bms_status_data_t *)timer->user_data;
+    update_bms_labels(data, data->x, data->y);
+}
 
 // CREATE BMS FLAG LABELS //////////////////////////////////////////////////////
 void create_bms_flag_label(lv_obj_t* parent, lv_coord_t x, lv_coord_t y, bms_status_data_t* data) {
@@ -775,7 +774,7 @@ void create_bms_flag_label(lv_obj_t* parent, lv_coord_t x, lv_coord_t y, bms_sta
 
         // Create title label
         lv_obj_t* title_label = lv_label_create(parent);
-        lv_label_set_text(title_label, "BMS Status Messages");
+        lv_label_set_text(title_label, "BMS Flags");
         lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, y - 5);
 
         // Create a button below labels, initially hidden
@@ -807,13 +806,6 @@ void create_bms_flag_label(lv_obj_t* parent, lv_coord_t x, lv_coord_t y, bms_sta
         Serial.println("Error: Unable to allocate memory for BMS flag data.");
     }
 }
-
-// REFRESH BMS FLAG LABEL ////////////////////////////////////////////////////////
-void refresh_bms_flag_label(lv_timer_t * timer) {
-    bms_status_data_t *data = (bms_status_data_t *)timer->user_data;
-    update_bms_labels(data, data->x, data->y);
-}
-
 
 // SETUP //////////////////////////////////////////////////////////////////////////////
 void setup() {
@@ -886,8 +878,13 @@ void setup() {
   lv_obj_set_grid_cell(cont, LV_GRID_ALIGN_STRETCH, 1, 1,
                             LV_GRID_ALIGN_STRETCH, 0, 1);
 
+
+  // arguments 1:obj  2:label 3:relay_pin 4:y_offset 5:dcl_limit 6:timeout_ms 7:user_data struct
+  
+  // Create Button 4 - INVERTER - first to allow others to send click event
+  create_button(cont, "Inverter",       RELAY4, 320, 5, inverter_startup_ms, &userData[3]);
+
   // Create Button 1 - CEILING HEATER
-  // arguments 1:obj  2:label 3:relay_pin 4:y_offset 5:dcl_limit 6:timeout_ms
   create_button(cont, "Ceiling Heater", RELAY1, 20, 70, 0, &userData[0]);
 
   // Create Button 2 - SHOWER HEATER
@@ -895,9 +892,6 @@ void setup() {
 
   // Create Button 3 - HOT WATER
   create_button(cont, "Hot Water",      RELAY3, 220, 60, hot_water_interval_ms, &userData[2]);
-
-  // Create Button 4 - INVERTER
-  create_button(cont, "Inverter",       RELAY4, 320, 5, inverter_startup_ms, &userData[3]);
 
 }
 
