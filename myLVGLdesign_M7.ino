@@ -219,8 +219,8 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     inv_btn = data->button;
     // create inverter status label
     data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
-    lv_obj_set_width(data->label_obj, 180);
-    lv_obj_set_pos(data->label_obj, 180, y_offset + 13);
+    lv_obj_set_width(data->label_obj, 120);
+    lv_obj_align_to(data->label_obj, data->button, LV_ALIGN_OUT_RIGHT_MID, 80, 0);
     // initialise label text
     lv_label_set_text(data->label_obj, "Inverter OFF");
   }
@@ -451,7 +451,7 @@ void create_temperature_dropdown(lv_obj_t * parent, user_data_t *data) {
   lv_obj_add_event_cb(dd, dropdown_event_handler, LV_EVENT_VALUE_CHANGED, data);
   
   // place roller
-  lv_obj_set_pos(dd, 245, data->y_offset - 1);
+  lv_obj_set_pos(dd, 235, data->y_offset - 1);
   lv_obj_set_width(dd, 80);
 }
 
@@ -660,9 +660,8 @@ void flash_label(lv_timer_t * timer) {
 
     if (data->balancing) {
         int cell_balancing_label_index = -1;
-
         // Find the "Cell Balancing Active" label
-        for (int i = 0; i < data->status_label_indexes; i++) {
+        for (uint8_t i = 0; i < (data->status_label_indexes + 1); i++) {
             if (strcmp(lv_label_get_text(data->status_label[i]), "Cell Balancing Active") == 0) {
                 cell_balancing_label_index = i;
                 break;
@@ -678,7 +677,6 @@ void flash_label(lv_timer_t * timer) {
             }
         }
     }
-    else lv_timer_del(timer);
 }
 
 // CREATE BMS STATUS LABELS //////////////////////////////////////////////////////
@@ -690,7 +688,7 @@ void create_bms_status_label(lv_obj_t* parent, lv_coord_t y, bms_status_data_t* 
         // Create title label
         data->title_label = lv_label_create(parent);
         lv_label_set_text(data->title_label, "BMS Status Messages");
-        lv_obj_align(data->title_label, LV_ALIGN_TOP_MID, 0, y - 5);
+        lv_obj_align(data->title_label, LV_ALIGN_TOP_MID, 0, y);
 
         // Initialize button (but hidden initially)
         data->button = lv_btn_create(parent);
@@ -704,7 +702,8 @@ void create_bms_status_label(lv_obj_t* parent, lv_coord_t y, bms_status_data_t* 
 
         // Create a timer for flashing effect
         lv_timer_create(flash_label, 1000, data); // 1000ms interval for flashing
-    } else {
+    }
+    else {
         // Handle memory allocation failure
         Serial.println("Error: Unable to allocate memory for BMS flag data.");
     }
@@ -723,11 +722,11 @@ void create_status_label(bool reset_index, const char* label_text, bms_status_da
       data->status_label[i] = lv_label_create(data->parent);
     }
     lv_label_set_text(data->status_label[i], label_text);
-    lv_obj_align_to(data->status_label[i], data->title_label, LV_ALIGN_OUT_BOTTOM_MID, 0, data->y + i * 20);
+    lv_obj_align_to(data->status_label[i], data->title_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 15 + i * 10);
 
-    // Update button position dynamically after all labels are created
+    // Update button position dynamically after all labels are created (button not visible if no messages)
     if (reset_index && data->button) {
-      lv_obj_align_to(data->button, data->status_label[data->status_label_indexes], LV_ALIGN_OUT_BOTTOM_MID, 0, 10); // Align button below last label with a gap
+      lv_obj_align_to(data->button, data->status_label[data->status_label_indexes], LV_ALIGN_OUT_BOTTOM_MID, 0, 20); // Align button below last label with a gap
       lv_obj_clear_flag(data->button, LV_OBJ_FLAG_HIDDEN); // Show the button
     }
 
@@ -902,7 +901,7 @@ void setup() {
   create_can_label(cont, "Internal Heatsink Temperature", "\u00B0C", &(combinedData.canData.hs), CAN_DATA_TYPE_BYTE, 20, 300, &canLabel[13]);
   
   // Display bms messages arg2: y_pos
-  create_bms_status_label(cont, 350, &bmsStatusData);
+  create_bms_status_label(cont, 345, &bmsStatusData);
   
   // create right column container instance
   cont = lv_obj_create(parent);
