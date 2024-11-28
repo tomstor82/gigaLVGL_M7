@@ -101,7 +101,7 @@ typedef enum {
 typedef struct {
     lv_obj_t *parent;
     lv_coord_t x;
-    lv_coord_t y;
+    uint8_t y;
     lv_obj_t *labels[28]; // 28 bms messages
     bool balancing;
 } bms_status_data_t;
@@ -112,9 +112,10 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   lv_obj_t* my_btn;
   lv_obj_t* label_obj;
   lv_obj_t* label_text;
+  lv_obj_t* dcl_label;
   //lv_obj_t* arc_label;
   uint8_t relay_pin;
-  uint8_t x_offset;
+  //uint8_t x_offset;
   uint8_t y_offset;
   unsigned long timeout_ms;
   uint8_t dcl_limit;
@@ -182,6 +183,15 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   lv_obj_center(label);
   lv_obj_add_flag(data->my_btn, LV_OBJ_FLAG_CHECKABLE);
 
+  // Disable all buttons by DCL limit
+  data->dcl_label = lv_label_create(lv_obj_get_parent(data->my_btn));
+  lv_label_set_long_mode(data->dcl_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+  lv_obj_set_width(data->dcl_label, 150);
+  lv_obj_align_to(data->dcl_label, data->my_btn, LV_ALIGN_OUT_BOTTOM_MID, 10, 50);
+  lv_label_set_text(data->dcl_label, "Please Charge Battery                                            "); // spaces to allow a pause
+  lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
+  lv_timer_create(dcl_check, 10000, data); // check every 10s
+
   // create temperature dropdown and dynamic temperature labels for thermostat buttons
   if ( ! timeout_ms ) {
     // create label and update the user data member for access within timer to allow only to update text not object
@@ -191,10 +201,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     lv_timer_create(update_temp, 10000, data);
     lv_obj_set_pos(data->label_obj, 180, y_offset + 13);
   }
-  
-  // Disable all buttons by DCL limit
-  lv_timer_create(dcl_check, 10000, data); // check every 10s
-    
+     
   // create event handlers with custom user_data
   if ( timeout_ms ) { // hot water and inverter
     lv_obj_add_event_cb(data->my_btn, hot_water_inverter_event_handler, LV_EVENT_ALL, data);
@@ -220,12 +227,11 @@ void dcl_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
   // create scrolling label and disable button
   if ( combinedData.canData.dcl < data->dcl_limit ) {
-    lv_obj_t *label = lv_label_create(lv_obj_get_parent(data->my_btn));
+    lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
     lv_obj_add_state(data->my_btn, LV_STATE_DISABLED);
-    lv_label_set_long_mode(label, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_width(label, 150);
-    lv_obj_set_pos(label, 10, data->y_offset + 50);
-    lv_label_set_text(label, "Please Charge Battery                                            "); // spaces to allow a pause
+  }
+  else {
+    lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // add hidden flag to hide
   }
 }
 
@@ -298,7 +304,7 @@ void switch_off(lv_timer_t * timer) {
       //Serial.println("inverter on due to demand or charge");
     }
     // inverter - reset timer if power has risen by more than 75W compared to before start. (Inverter Standby ~75W)
-    else if ( pre_start_p + 75 < combinedData.canData.p ) {
+    else if ( pre_start_p + 75 < combinedData.canData.p && abs(combinedData.canData.p) > 75 ) {
       on = true;
       //Serial.println("inverter on due power above inverter start power detected");
     }
