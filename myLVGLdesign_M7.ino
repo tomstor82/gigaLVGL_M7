@@ -26,22 +26,7 @@ GigaDisplayBacklight backlight;
 //  ID 0x0BD BYT0+1:CUSTOM_FLAGS BYT2:HI_TMP BYT3:LO_TMP BYT4:COUNTER BYT5:BMS_STATUS
 //  ID 0x0BE BYT0:HI_CL_ID BYT1:LO_CL_ID BYT2:INT_HEATSINK
 
-// CANBUS receive data
-static uint32_t rxId;
-static uint8_t len = 0;
-static uint8_t rxBuf[8];
-
-// CANBUS send data MPI through MPO
-static uint8_t const CAN_ID = 0x002; // CAN id for the message
-static uint8_t msg_data[1] = {0x01}; // Data payload set to 1 byte in BMS
-static uint8_t msg_cnt = 0;
-
-// CAN RX INFO DISPLAY DATA
-static uint8_t pos_x = 100;
-static uint8_t pos_y = 20;
-static uint8_t line_gap = 50;
-
-// Define named structs as data types
+// Temp and Humidity data struct from M4
 struct SensorData {
     float temp1;
     float temp2;
@@ -55,7 +40,7 @@ struct SensorData {
 
     MSGPACK_DEFINE_ARRAY(temp1, temp2, temp3, temp4, humi1, humi2, humi3, humi4, avg_temp);
 };
-// Define named structs as data types
+
 // CanData struct
 struct CanData {
 
@@ -89,13 +74,27 @@ struct CanData {
     
     MSGPACK_DEFINE_ARRAY(instU, instI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, ct, st, cc, avgI, hCid, lCid, p, absI, kw, hs);
 };
-// Define an enumeration for the different data types.
-typedef enum {
-    CAN_DATA_TYPE_INT,
-    CAN_DATA_TYPE_FLOAT,
-    CAN_DATA_TYPE_DOUBLE_FLOAT, // 2 decimals
-    CAN_DATA_TYPE_BYTE
-} can_data_type_t;
+
+// Create combined struct with sensor and can data
+struct CombinedData {
+  SensorData sensorData;
+  CanData canData;
+};
+
+// Can Message Data struct
+struct CanMsgData {
+  // receive settings
+  uint32_t rxId;
+  uint8_t len;
+  uint8_t rxBuf[8];
+  // send settings
+  static const uint8_t CAN_ID = 0x002; // CAN id for the message (constant)
+  uint8_t msg_data[1]; // Data payload set to 1 byte in BMS
+  uint8_t msg_cnt;
+
+  // Constructor to initialize non const values
+  CanMsgData() : rxId(0), len(0), msg_data{0x01}, msg_cnt(0) {}
+};
 
 // Define a struct to hold BMS flag data
 typedef struct {
@@ -128,46 +127,39 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   can_data_type_t canDataType;
   const char* label_prefix; // To store label text prefix
   const char* label_unit; // Label unit e.g V,A or W
-} user_data_t;
+} can_label_t;
 
-struct CombinedData {
-  SensorData sensorData;
-  CanData canData;
-};
-
-// declare global instances
+//Initialise structures
+static CanMsgData canMsgData;
+static bms_status_data_t bmsStatusData;
+static user_data_t userData[4]; // 4 buttons with user_data
+static can_label_t canLabel[14]; // 14 labels so far
 static CombinedData combinedData;
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size)
-lv_obj_t* inv_btn;
-//static lv_timer_t* thermostat = NULL;
-
-static float pre_start_p; // trying static to see if value is remembered
-
+lv_obj_t* inv_btn = nullptr;
+int pre_start_p;
 uint8_t pwr_demand = 0;
-uint32_t hot_water_interval_ms = 900000; // 15 min
-uint16_t inverter_startup_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
-uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 75Wh to around 12,5Wh -84%
+const uint32_t hot_water_interval_ms = 900000; // 15 min
+const uint16_t inverter_startup_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
+const uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 75Wh to around 12,5Wh -84%
 
 uint8_t brightness = 70;
 uint32_t previous_touch_ms;
 uint16_t touch_timeout_ms = 20000; // 20s before screen dimming
 
 //**************************************************************************************//
-// NEED TO ADD DTC FLAGS AND SOLAR HOT WATER OVERRIDE, PERHAPS SIMULATE A BUTTON CLICK? //
-// TURN OFF HEATERS AND HOT WATER IF INVERTER IS TURNED OFF                             //
-// TEMPERATURE UPDATE ISSUE - //
+//   REMOVE MALLOC AND SEPARATE EVENT_HANDLER FOR INVERTER TO ALLOW CALL FROM OTHERS    //
+// 
 //**************************************************************************************//
 
 // CREATE BUTTON INSTANCE
-void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms) {
+void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms, user_data_t* data) {
 
   // configure relay pins
   pinMode(relay_pin, OUTPUT);
   digitalWrite(relay_pin, LOW); // initialise pin LOW
 
-  // Allocate memory for userdata for each button instance
-  user_data_t * data = (user_data_t *)malloc(sizeof(user_data_t));
   // Update user data with received arguments
   data->relay_pin = relay_pin;
   data->y_offset = y_offset;
@@ -215,7 +207,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     inv_btn = data->my_btn;
     // create inverter status label
     data->label_obj = lv_label_create(lv_obj_get_parent(data->my_btn));
-    lv_obj_set_width(data->label_obj, 120);
+    lv_obj_set_width(data->label_obj, 180);
     lv_obj_set_pos(data->label_obj, 180, y_offset + 13);
     // initialise label text
     lv_label_set_text(data->label_obj, "Inverter OFF");
@@ -292,10 +284,6 @@ void sweep_timer (lv_timer_t* timer) {
 void switch_off(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
   bool on = false;
-  /*Serial.print("switch off timer pre-start Power: ");
-  Serial.println(pre_start_p);
-  Serial.print("Current Power: ");
-  Serial.println(combinedData.canData.p);*/
   
   // inverter - reset timer if demand or negative avgI if soc or dcl within limits
   if ( data->relay_pin == RELAY4 && combinedData.canData.soc > 10 || combinedData.canData.dcl > data->dcl_limit ) {
@@ -303,7 +291,7 @@ void switch_off(lv_timer_t * timer) {
       on = true;
       //Serial.println("inverter on due to demand or charge");
     }
-    // inverter - reset timer if power has risen by more than 75W compared to before start. (Inverter Standby ~75W)
+    // inverter - reset timer if power has risen by more than 75W compared to before start and power is above 75W (solar issue otherwise). (Inverter Standby ~75W)
     else if ( pre_start_p + 75 < combinedData.canData.p && abs(combinedData.canData.p) > 75 ) {
       on = true;
       //Serial.println("inverter on due power above inverter start power detected");
@@ -516,13 +504,13 @@ void clear_bms_flag(lv_event_t * e) {
   if(code == LV_EVENT_CLICKED) {
     Serial.println("DEBUG clear bms flag #2");
     LV_UNUSED(obj);
-    msg_cnt = 1;
+    canMsgData.msg_cnt = 1;
     Serial.println("Sending CAN message");
   }
 }
 // REFRESH CAN LABEL DATA //////////////////////////////////////////////////////////////////////
 void refresh_can_data(lv_timer_t* timer) {
-    user_data_t *data = (user_data_t *)timer->user_data;
+    can_label_t *data = (can_label_t *)timer->user_data;
     char buf[50];
 
     switch (data->canDataType) {
@@ -547,9 +535,9 @@ void refresh_can_data(lv_timer_t* timer) {
 }
 
 // CREATE CAN LABELS ////////////////////////////////////////////////////////////////////////////////////////////////////
-void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* label_unit, void* canDataProperty, can_data_type_t canDataType, int x_pos, int y_pos) {
+void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* label_unit, void* canDataProperty, can_data_type_t canDataType, int x_pos, int y_pos, can_label_t* data) {
     // Allocate memory for new user data instance
-    user_data_t *data = (user_data_t *)malloc(sizeof(user_data_t));
+    //user_data_t *data = (user_data_t *)malloc(sizeof(user_data_t));
     if (data) {
         // Update instance with user data
         data->label_obj = lv_label_create(parent);
@@ -594,37 +582,37 @@ int16_t signValue(uint16_t canValue) {
 void sort_can() {
 
     // I WOULD LIKE TO COMPARE CHECKSUM BUT CPP STD LIBRARY NOT AVAILABLE I BELIEVE
-    if (rxId == 0x3B) {
-        combinedData.canData.instU = ((rxBuf[0] << 8) + rxBuf[1]) / 10.0;
-        combinedData.canData.instI = (signValue((rxBuf[2] << 8) + rxBuf[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
-        combinedData.canData.absI = ((rxBuf[4] << 8) + rxBuf[5]) / 10.0; // orion2jr issue: set signed and -32767 to fix
-        combinedData.canData.soc = rxBuf[6] / 2;
+    if (canMsgData.rxId == 0x3B) {
+        combinedData.canData.instU = ((canMsgData.rxBuf[0] << 8) + canMsgData.rxBuf[1]) / 10.0;
+        combinedData.canData.instI = (signValue((canMsgData.rxBuf[2] << 8) + canMsgData.rxBuf[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
+        combinedData.canData.absI = ((canMsgData.rxBuf[4] << 8) + canMsgData.rxBuf[5]) / 10.0; // orion2jr issue: set signed and -32767 to fix
+        combinedData.canData.soc = canMsgData.rxBuf[6] / 2;
     }
-    if(rxId == 0x6B2) {
-        combinedData.canData.lC = ((rxBuf[0] << 8) + rxBuf[1]) / 10000.00;
-        combinedData.canData.hC = ((rxBuf[2] << 8) + rxBuf[3]) / 10000.00;
-        combinedData.canData.h = rxBuf[4];
-        combinedData.canData.cc = (rxBuf[5] << 8) + rxBuf[6];
+    if(canMsgData.rxId == 0x6B2) {
+        combinedData.canData.lC = ((canMsgData.rxBuf[0] << 8) + canMsgData.rxBuf[1]) / 10000.00;
+        combinedData.canData.hC = ((canMsgData.rxBuf[2] << 8) + canMsgData.rxBuf[3]) / 10000.00;
+        combinedData.canData.h = canMsgData.rxBuf[4];
+        combinedData.canData.cc = (canMsgData.rxBuf[5] << 8) + canMsgData.rxBuf[6];
     }
-    if(rxId == 0x0A9) {    
-        combinedData.canData.ry = rxBuf[0];
-        combinedData.canData.ccl = rxBuf[1];
-        combinedData.canData.dcl = rxBuf[2];
-        combinedData.canData.ah = ((rxBuf[3] << 8) + rxBuf[4]) / 10.0;
-        combinedData.canData.avgI = (signValue((rxBuf[5] << 8) + rxBuf[6])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
+    if(canMsgData.rxId == 0x0A9) {
+        combinedData.canData.ry = canMsgData.rxBuf[0];
+        combinedData.canData.ccl = canMsgData.rxBuf[1];
+        combinedData.canData.dcl = canMsgData.rxBuf[2];
+        combinedData.canData.ah = ((canMsgData.rxBuf[3] << 8) + canMsgData.rxBuf[4]) / 10.0;
+        combinedData.canData.avgI = (signValue((canMsgData.rxBuf[5] << 8) + canMsgData.rxBuf[6])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
     }
-    if(rxId == 0x0BD) {
-        combinedData.canData.fu = (rxBuf[0] << 8) + rxBuf[1];
-        combinedData.canData.hT = rxBuf[2];
-        combinedData.canData.lT = rxBuf[3];
-        combinedData.canData.ct = rxBuf[4];
-        combinedData.canData.st = (rxBuf[5] << 8) + rxBuf[6];
+    if(canMsgData.rxId == 0x0BD) {
+        combinedData.canData.fu = (canMsgData.rxBuf[0] << 8) + canMsgData.rxBuf[1];
+        combinedData.canData.hT = canMsgData.rxBuf[2];
+        combinedData.canData.lT = canMsgData.rxBuf[3];
+        combinedData.canData.ct = canMsgData.rxBuf[4];
+        combinedData.canData.st = (canMsgData.rxBuf[5] << 8) + canMsgData.rxBuf[6];
     }
-    if(rxId == 0x0BE) {
-        combinedData.canData.hCid = rxBuf[0];
-        combinedData.canData.lCid = rxBuf[1];
-        combinedData.canData.hs = rxBuf[2];
-        combinedData.canData.kw = ((rxBuf[3] << 8) + rxBuf[4]) / 10.0;
+    if(canMsgData.rxId == 0x0BE) {
+        combinedData.canData.hCid = canMsgData.rxBuf[0];
+        combinedData.canData.lCid = canMsgData.rxBuf[1];
+        combinedData.canData.hs = canMsgData.rxBuf[2];
+        combinedData.canData.kw = ((canMsgData.rxBuf[3] << 8) + canMsgData.rxBuf[4]) / 10.0;
     }
     combinedData.canData.p = combinedData.canData.avgI * combinedData.canData.instU;
 }
@@ -685,13 +673,11 @@ void flash_label(lv_timer_t * timer) {
 
 
 // CREATE BMS FLAG LABELS //////////////////////////////////////////////////////
-void create_bms_flag_label(lv_obj_t* parent, lv_coord_t x, lv_coord_t y) {
-    // Allocate memory for new user data instance
-    bms_status_data_t *bms_status_data = (bms_status_data_t *)malloc(sizeof(bms_status_data_t));
-    if (bms_status_data) {
-        bms_status_data->parent = parent;
-        bms_status_data->x = x;
-        bms_status_data->y = y;
+void create_bms_flag_label(lv_obj_t* parent, lv_coord_t x, lv_coord_t y, bms_status_data_t* data) {
+    if (data) {
+        data->parent = parent;
+        data->x = x;
+        data->y = y;
 
         // Create title label
         lv_obj_t* title_label = lv_label_create(parent);
@@ -827,7 +813,6 @@ void refresh_bms_flag_label(lv_timer_t * timer) {
     }
 }
 
-
 // SETUP //////////////////////////////////////////////////////////////////////////////
 void setup() {
 
@@ -875,33 +860,23 @@ void setup() {
                         LV_GRID_ALIGN_STRETCH, 0, 1);
 
   // Create labels for CAN data
-  create_can_label(cont, "SOC", "%", &(combinedData.canData.soc), CAN_DATA_TYPE_BYTE, 20, 20);
-  create_can_label(cont, "Current", "A", &(combinedData.canData.instI), CAN_DATA_TYPE_FLOAT, 180, 20);
-  create_can_label(cont, "Voltage", "V", &(combinedData.canData.instU), CAN_DATA_TYPE_FLOAT, 20, 50);
-  create_can_label(cont, "Power", "W", &(combinedData.canData.p), CAN_DATA_TYPE_INT, 180, 50);
-  create_can_label(cont, "High Cell ID", "", &(combinedData.canData.hCid), CAN_DATA_TYPE_BYTE, 20, 80);
-  create_can_label(cont, "High Cell", "V", &(combinedData.canData.hC), CAN_DATA_TYPE_DOUBLE_FLOAT, 180, 80);
-  create_can_label(cont, "Low Cell ID", "", &(combinedData.canData.lCid), CAN_DATA_TYPE_BYTE, 20, 110);
-  create_can_label(cont, "Low Cell", "V", &(combinedData.canData.lC), CAN_DATA_TYPE_DOUBLE_FLOAT, 180, 110);
-  create_can_label(cont, "Discharge Current Limit          ", "A", &(combinedData.canData.dcl), CAN_DATA_TYPE_BYTE, 20, 160);
-  create_can_label(cont, "Charge Current Limit                ", "A", &(combinedData.canData.ccl), CAN_DATA_TYPE_BYTE, 20, 190);
-  create_can_label(cont, "Cycles", "", &(combinedData.canData.cc), CAN_DATA_TYPE_INT, 20, 240);
-  create_can_label(cont, "Health", "%", &(combinedData.canData.h), CAN_DATA_TYPE_BYTE, 180, 240);
-  create_can_label(cont, "Capacity", "Ah", &(combinedData.canData.ah), CAN_DATA_TYPE_FLOAT, 20, 270);
-  create_can_label(cont, "Internal Heatsink Temperature", "\u00B0C", &(combinedData.canData.hs), CAN_DATA_TYPE_BYTE, 20, 300);
+  create_can_label(cont, "SOC", "%", &(combinedData.canData.soc), CAN_DATA_TYPE_BYTE, 20, 20, &canLabel[0]);
+  create_can_label(cont, "Current", "A", &(combinedData.canData.instI), CAN_DATA_TYPE_FLOAT, 180, 20, &canLabel[1]);
+  create_can_label(cont, "Voltage", "V", &(combinedData.canData.instU), CAN_DATA_TYPE_FLOAT, 20, 50, &canLabel[2]);
+  create_can_label(cont, "Power", "W", &(combinedData.canData.p), CAN_DATA_TYPE_INT, 180, 50, &canLabel[3]);
+  create_can_label(cont, "High Cell ID", "", &(combinedData.canData.hCid), CAN_DATA_TYPE_BYTE, 20, 80, &canLabel[4]);
+  create_can_label(cont, "High Cell", "V", &(combinedData.canData.hC), CAN_DATA_TYPE_DOUBLE_FLOAT, 180, 80, &canLabel[5]);
+  create_can_label(cont, "Low Cell ID", "", &(combinedData.canData.lCid), CAN_DATA_TYPE_BYTE, 20, 110, &canLabel[6]);
+  create_can_label(cont, "Low Cell", "V", &(combinedData.canData.lC), CAN_DATA_TYPE_DOUBLE_FLOAT, 180, 110, &canLabel[7]);
+  create_can_label(cont, "Discharge Current Limit          ", "A", &(combinedData.canData.dcl), CAN_DATA_TYPE_BYTE, 20, 160, &canLabel[8]);
+  create_can_label(cont, "Charge Current Limit                ", "A", &(combinedData.canData.ccl), CAN_DATA_TYPE_BYTE, 20, 190, &canLabel[9]);
+  create_can_label(cont, "Cycles", "", &(combinedData.canData.cc), CAN_DATA_TYPE_INT, 20, 240, &canLabel[10]);
+  create_can_label(cont, "Health", "%", &(combinedData.canData.h), CAN_DATA_TYPE_BYTE, 180, 240, &canLabel[11]);
+  create_can_label(cont, "Capacity", "Ah", &(combinedData.canData.ah), CAN_DATA_TYPE_FLOAT, 20, 270, &canLabel[12]);
+  create_can_label(cont, "Internal Heatsink Temperature", "\u00B0C", &(combinedData.canData.hs), CAN_DATA_TYPE_BYTE, 20, 300, &canLabel[13]);
   
-  // Display bms flags codes
-  create_bms_flag_label(cont, 70, 350);
-  
-  // Create button to clear bms faults
-  /*lv_obj_t* bms_btn = lv_btn_create(cont);
-  lv_obj_add_event_cb(bms_btn, clear_bms_flag, LV_EVENT_CLICKED, NULL);
-  lv_obj_set_pos(bms_btn, 110, 600);
-  // Create button text label
-  lv_obj_t* bms_btn_label = lv_label_create(bms_btn);
-  lv_label_set_text(bms_btn_label, "Clear Faults");
-  lv_obj_center(bms_btn_label);*/
-
+  // Display bms messages
+  create_bms_flag_label(cont, 70, 350, &bmsStatusData);
   
   // create right column container instance
   cont = lv_obj_create(parent);
@@ -909,18 +884,20 @@ void setup() {
   lv_obj_set_grid_cell(cont, LV_GRID_ALIGN_STRETCH, 1, 1,
                             LV_GRID_ALIGN_STRETCH, 0, 1);
 
+
+  // arguments 1:obj  2:label 3:relay_pin 4:y_offset 5:dcl_limit 6:timeout_ms 7:user_data struct
+  
+  // Create Button 4 - INVERTER - first to allow others to send click event
+  create_button(cont, "Inverter",       RELAY4, 320, 5, inverter_startup_ms, &userData[3]);
+
   // Create Button 1 - CEILING HEATER
-  // arguments 1:obj  2:label 3:relay_pin 4:y_offset 5:dcl_limit 6:timeout_ms
-  create_button(cont, "Ceiling Heater", RELAY1, 20, 70, 0);
+  create_button(cont, "Ceiling Heater", RELAY1, 20, 70, 0, &userData[0]);
 
   // Create Button 2 - SHOWER HEATER
-  create_button(cont, "Shower Heater",  RELAY2, 120, 10, 0);
+  create_button(cont, "Shower Heater",  RELAY2, 120, 10, 0, &userData[1]);
 
   // Create Button 3 - HOT WATER
-  create_button(cont, "Hot Water",      RELAY3, 220, 60, hot_water_interval_ms);
-
-  // Create Button 4 - INVERTER
-  create_button(cont, "Inverter",       RELAY4, 320, 5, inverter_startup_ms);
+  create_button(cont, "Hot Water",      RELAY3, 220, 60, hot_water_interval_ms, &userData[2]);
 
 }
 
@@ -934,24 +911,24 @@ void loop() {
   // CANBUS READ AND WRITE
   if (CAN.available()) {
     CanMsg const msg = CAN.read();
-    rxId = msg.id;
-    len = msg.data_length;
-    memcpy(rxBuf, msg.data, len);
+    canMsgData.rxId = msg.id;
+    canMsgData.len = msg.data_length;
+    memcpy(canMsgData.rxBuf, msg.data, canMsgData.len);
     sort_can();
 
     // send CAN if commanded
-    if ( msg_cnt && msg_cnt < 3 ) {
-      msg_data[0] = msg_cnt; // Directly assign the single byte
-      CanMsg send_msg(CanStandardId(CAN_ID), sizeof(msg_data), msg_data);
+    if ( canMsgData.msg_cnt && canMsgData.msg_cnt < 3 ) {
+      canMsgData.msg_data[0] = canMsgData.msg_cnt; // Directly assign the single byte
+      CanMsg send_msg(CanStandardId(canMsgData.CAN_ID), sizeof(canMsgData.msg_data), canMsgData.msg_data);
 
       // retry if send failed
       int const rc = CAN.write(send_msg);
       if ( rc <= 0 ) {
         Serial.print("CAN.write(...) failed with error code ");
         Serial.println(rc);
-        msg_cnt++;
+        canMsgData.msg_cnt++;
       }
-      else msg_cnt = 0; // sent successfully
+      else canMsgData.msg_cnt = 0; // sent successfully
     }
   }
   //else { Serial.println("M7 CAN not available"); } // crazy messages despite working
