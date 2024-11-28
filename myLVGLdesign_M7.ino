@@ -87,6 +87,7 @@ struct CanMsgData {
   uint32_t rxId;
   uint8_t len;
   uint8_t rxBuf[8];
+
   // send settings
   static const uint8_t CAN_ID = 0x002; // CAN id for the message (constant)
   uint8_t msg_data[1]; // Data payload set to 1 byte in BMS
@@ -96,37 +97,48 @@ struct CanMsgData {
   CanMsgData() : rxId(0), len(0), msg_data{0x01}, msg_cnt(0) {}
 };
 
-// Define a struct to hold BMS flag data
+// Type defined structure for bms status messages allowing it to be passed to function
 typedef struct {
-    lv_obj_t *parent;
-    lv_coord_t x;
+    lv_obj_t* parent;
+    lv_obj_t* title_label;
+    lv_obj_t* button;
+    lv_obj_t* status_label[28]; // can be expanded beyond the current 28 bms messages
+    uint8_t status_label_indexes; // index for last stored element for label spacing and flashing
     uint8_t y;
-    lv_obj_t *labels[28]; // 28 bms messages
     bool balancing;
 } bms_status_data_t;
 
+// Define an enumeration for the different data types.
+typedef enum {
+    CAN_DATA_TYPE_INT,
+    CAN_DATA_TYPE_FLOAT,
+    CAN_DATA_TYPE_DOUBLE_FLOAT, // 2 decimals
+    CAN_DATA_TYPE_BYTE
+} can_data_type_t;
+
 // define struct for function user-data
 typedef struct { // typedef used to not having to use the struct keyword for declaring struct variable
-  //lv_obj_t* container;
-  lv_obj_t* my_btn;
-  lv_obj_t* label_obj;
-  lv_obj_t* label_text;
+  lv_obj_t* button;
   lv_obj_t* dcl_label;
-  //lv_obj_t* arc_label;
+  lv_obj_t* label_obj;
   uint8_t relay_pin;
-  //uint8_t x_offset;
   uint8_t y_offset;
   unsigned long timeout_ms;
   uint8_t dcl_limit;
   uint8_t set_temp = 20; // should match value of dropdown default index
+} user_data_t;
+
+typedef struct {
+  lv_obj_t* label_obj;
+  lv_obj_t* label_text;
+  const char* label_prefix; // To store label text prefix e.g Voltage
+  const char* label_unit; // Label unit e.g V,A or W
   union {
     int* intData;
     float* floatData;
     byte* byteData;
   } canDataProperty;
   can_data_type_t canDataType;
-  const char* label_prefix; // To store label text prefix
-  const char* label_unit; // Label unit e.g V,A or W
 } can_label_t;
 
 //Initialise structures
@@ -146,7 +158,7 @@ const uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces st
 
 uint8_t brightness = 70;
 uint32_t previous_touch_ms;
-uint16_t touch_timeout_ms = 20000; // 20s before screen dimming
+const uint16_t touch_timeout_ms = 20000; // 20s before screen dimming
 
 //**************************************************************************************//
 //   REMOVE MALLOC AND SEPARATE EVENT_HANDLER FOR INVERTER TO ALLOW CALL FROM OTHERS    //
@@ -160,26 +172,26 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   pinMode(relay_pin, OUTPUT);
   digitalWrite(relay_pin, LOW); // initialise pin LOW
 
-  // Update user data with received arguments
+  // Update struct with received arguments
   data->relay_pin = relay_pin;
   data->y_offset = y_offset;
   data->dcl_limit = dcl_limit;
   data->timeout_ms = timeout_ms;
 
   // create button object and add to struct to be able to clear later
-  data->my_btn = lv_btn_create(parent);
+  data->button = lv_btn_create(parent);
 
-  lv_obj_set_pos(data->my_btn, 10, y_offset);
-  lv_obj_t *label = lv_label_create(data->my_btn);
+  lv_obj_set_pos(data->button, 10, y_offset);
+  lv_obj_t *label = lv_label_create(data->button);
   lv_label_set_text(label, label_text);
   lv_obj_center(label);
-  lv_obj_add_flag(data->my_btn, LV_OBJ_FLAG_CHECKABLE);
+  lv_obj_add_flag(data->button, LV_OBJ_FLAG_CHECKABLE);
 
   // Disable all buttons by DCL limit
-  data->dcl_label = lv_label_create(lv_obj_get_parent(data->my_btn));
+  data->dcl_label = lv_label_create(lv_obj_get_parent(data->button));
   lv_label_set_long_mode(data->dcl_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
   lv_obj_set_width(data->dcl_label, 150);
-  lv_obj_align_to(data->dcl_label, data->my_btn, LV_ALIGN_OUT_BOTTOM_MID, 10, 50);
+  lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_MID, 10, 50);
   lv_label_set_text(data->dcl_label, "Please Charge Battery                                            "); // spaces to allow a pause
   lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
   lv_timer_create(dcl_check, 10000, data); // check every 10s
@@ -187,7 +199,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   // create temperature dropdown and dynamic temperature labels for thermostat buttons
   if ( ! timeout_ms ) {
     // create label and update the user data member for access within timer to allow only to update text not object
-    data->label_obj = lv_label_create(lv_obj_get_parent(data->my_btn));
+    data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
      create_temperature_dropdown(parent, data);//create_arc(parent, data);
     // create time updated temperature labels
     lv_timer_create(update_temp, 10000, data);
@@ -196,17 +208,17 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
      
   // create event handlers with custom user_data
   if ( timeout_ms ) { // hot water and inverter
-    lv_obj_add_event_cb(data->my_btn, hot_water_inverter_event_handler, LV_EVENT_ALL, data);
+    lv_obj_add_event_cb(data->button, hot_water_inverter_event_handler, LV_EVENT_ALL, data);
   }
   else { // heaters
-    lv_obj_add_event_cb(data->my_btn, thermostat_event_handler, LV_EVENT_ALL, data);
+    lv_obj_add_event_cb(data->button, thermostat_event_handler, LV_EVENT_ALL, data);
   }
   // adding inverter button to global variable as it needs to be read by the other buttons and
   // creating inverter status label
   if ( relay_pin == RELAY4 ) {
-    inv_btn = data->my_btn;
+    inv_btn = data->button;
     // create inverter status label
-    data->label_obj = lv_label_create(lv_obj_get_parent(data->my_btn));
+    data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
     lv_obj_set_width(data->label_obj, 180);
     lv_obj_set_pos(data->label_obj, 180, y_offset + 13);
     // initialise label text
@@ -220,7 +232,7 @@ void dcl_check(lv_timer_t * timer) {
   // create scrolling label and disable button
   if ( combinedData.canData.dcl < data->dcl_limit ) {
     lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
-    lv_obj_add_state(data->my_btn, LV_STATE_DISABLED);
+    lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }
   else {
     lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // add hidden flag to hide
@@ -235,7 +247,7 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
   if(code == LV_EVENT_CLICKED) {
     LV_UNUSED(obj);
     lv_timer_t* timeroi = NULL; // declare timer to be able to delete if button off prematurely
-    if ( lv_obj_has_state(data->my_btn, LV_STATE_CHECKED) ) {
+    if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       if ( data->relay_pin == RELAY4 ) { // only for inverter for sweeping
         pre_start_p = combinedData.canData.p;
         lv_label_set_text(data->label_obj, "Inverter ON");
@@ -247,7 +259,7 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
         lv_event_send(inv_btn, LV_EVENT_CLICKED, NULL); // send click event to start inverter
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
-          lv_obj_clear_state(data->my_btn, LV_STATE_CHECKED);
+          lv_obj_clear_state(data->button, LV_STATE_CHECKED);
           Serial.println("DEBUG hot_water_inverter_event_handler - Unable to send start inverter event");
           return; // exit function if inverter is off
         }
@@ -274,7 +286,7 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
 void sweep_timer (lv_timer_t* timer) {
   user_data_t* data = (user_data_t *)timer->user_data;
   // stimulate button with click to start inverter again
-  lv_event_send(data->my_btn, LV_EVENT_CLICKED, NULL);
+  lv_event_send(data->button, LV_EVENT_CLICKED, NULL);
   // delete timer so it only runs once as this function is called continiously by other timer
   lv_timer_del(timer);
 }
@@ -318,7 +330,7 @@ void switch_off(lv_timer_t * timer) {
       lv_timer_create(sweep_timer, sweep_interval_ms, data);
     }
     else { // clear button flag for hot water
-      lv_obj_clear_state(data->my_btn, LV_STATE_CHECKED);
+      lv_obj_clear_state(data->button, LV_STATE_CHECKED);
       pwr_demand ? pwr_demand-- : NULL;
     }
   }
@@ -334,13 +346,13 @@ void thermostat_event_handler(lv_event_t * e) {
   
   if(code == LV_EVENT_CLICKED) {
     LV_UNUSED(obj);
-    if ( lv_obj_has_state(data->my_btn, LV_STATE_CHECKED) ) {
+    if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       // check if inverter is on
       if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
         lv_event_send(inv_btn, LV_EVENT_CLICKED, NULL); // send click event to start inverter
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
-          lv_obj_clear_state(data->my_btn, LV_STATE_CHECKED);
+          lv_obj_clear_state(data->button, LV_STATE_CHECKED);
           Serial.println("DEBUG thermostat_event_handler - Unable to send start inverter event");
           return; // exit function if inverter is off
         }
@@ -456,7 +468,7 @@ void thermostat_timer(lv_timer_t * timer) {
   // ceiling heater thermostat
   if ( data->relay_pin == RELAY1 ) {
     // Close relay if temperature is below selected and button has been pressed
-    if ( combinedData.sensorData.avg_temp < data->set_temp && lv_obj_has_state(data->my_btn, LV_STATE_CHECKED) ) {
+    if ( combinedData.sensorData.avg_temp < data->set_temp && lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
     digitalWrite(data->relay_pin, HIGH);
     }
     // Open relay when temperature is higher or equal to selected
@@ -467,7 +479,7 @@ void thermostat_timer(lv_timer_t * timer) {
   // shower heater thermostat
   else {
     // Close relay if temperature is below selected and button has been pressed
-    if ( combinedData.sensorData.temp3 < data->set_temp && lv_obj_has_state(data->my_btn, LV_STATE_CHECKED) ) {
+    if ( combinedData.sensorData.temp3 < data->set_temp && lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       digitalWrite(data->relay_pin, HIGH);
     }
     // Open relay when temperature is higher or equal to selected
@@ -536,8 +548,6 @@ void refresh_can_data(lv_timer_t* timer) {
 
 // CREATE CAN LABELS ////////////////////////////////////////////////////////////////////////////////////////////////////
 void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* label_unit, void* canDataProperty, can_data_type_t canDataType, int x_pos, int y_pos, can_label_t* data) {
-    // Allocate memory for new user data instance
-    //user_data_t *data = (user_data_t *)malloc(sizeof(user_data_t));
     if (data) {
         // Update instance with user data
         data->label_obj = lv_label_create(parent);
@@ -652,8 +662,8 @@ void flash_label(lv_timer_t * timer) {
         int cell_balancing_label_index = -1;
 
         // Find the "Cell Balancing Active" label
-        for (int i = 0; i < 28; i++) {
-            if (strcmp(lv_label_get_text(data->labels[i]), "Cell Balancing Active") == 0) {
+        for (int i = 0; i < data->status_label_indexes; i++) {
+            if (strcmp(lv_label_get_text(data->status_label[i]), "Cell Balancing Active") == 0) {
                 cell_balancing_label_index = i;
                 break;
             }
@@ -661,156 +671,172 @@ void flash_label(lv_timer_t * timer) {
 
         // If the label is found, toggle its visibility
         if (cell_balancing_label_index != -1) {
-            if (lv_obj_has_flag(data->labels[cell_balancing_label_index], LV_OBJ_FLAG_HIDDEN)) {
-                lv_obj_clear_flag(data->labels[cell_balancing_label_index], LV_OBJ_FLAG_HIDDEN);
+            if (lv_obj_has_flag(data->status_label[cell_balancing_label_index], LV_OBJ_FLAG_HIDDEN)) {
+                lv_obj_clear_flag(data->status_label[cell_balancing_label_index], LV_OBJ_FLAG_HIDDEN);
             } else {
-                lv_obj_add_flag(data->labels[cell_balancing_label_index], LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(data->status_label[cell_balancing_label_index], LV_OBJ_FLAG_HIDDEN);
             }
         }
     }
     else lv_timer_del(timer);
 }
 
-
-// CREATE BMS FLAG LABELS //////////////////////////////////////////////////////
-void create_bms_flag_label(lv_obj_t* parent, lv_coord_t x, lv_coord_t y, bms_status_data_t* data) {
+// CREATE BMS STATUS LABELS //////////////////////////////////////////////////////
+void create_bms_status_label(lv_obj_t* parent, lv_coord_t y, bms_status_data_t* data) {
     if (data) {
         data->parent = parent;
-        data->x = x;
         data->y = y;
 
         // Create title label
-        lv_obj_t* title_label = lv_label_create(parent);
-        lv_label_set_text(title_label, "BMS Status Messages");
-        lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, y - 5);//lv_obj_set_pos(title_label, x + 40, y - 5);
+        data->title_label = lv_label_create(parent);
+        lv_label_set_text(data->title_label, "BMS Status Messages");
+        lv_obj_align(data->title_label, LV_ALIGN_TOP_MID, 0, y - 5);
 
-        // Create labels for status data
-        uint16_t y_alignment;
-        for (uint8_t i = 0; i < 28; i++) {
-            y_alignment = y + (i + 1) * 20;
-            bms_status_data->labels[i] = lv_label_create(parent);
-            lv_obj_align(bms_status_data->labels[i], LV_ALIGN_TOP_MID, 0, y_alignment);//lv_obj_set_pos(bms_status_data->labels[i], x, y + (i + 1) * 20);
-            lv_label_set_text(bms_status_data->labels[i], "");
-        }
-
-        // Create button below labels
-        lv_obj_t* button = lv_btn_create(parent);
-        lv_obj_t* btn_label = lv_label_create(button);
+        // Initialize button (but hidden initially)
+        data->button = lv_btn_create(parent);
+        lv_obj_t* btn_label = lv_label_create(data->button);
         lv_label_set_text(btn_label, "Clear BMS Flags");
-        lv_obj_align_to(button, title_label, LV_ALIGN_TOP_MID, 0, y_alignment + 20); // align to other object and add 
-        lv_obj_add_event_cb(button, clear_bms_flag, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN); // Hide initially
+        lv_obj_add_event_cb(data->button, clear_bms_flag, LV_EVENT_CLICKED, NULL);
 
         // Refresh status labels every second
-        lv_timer_create(refresh_bms_flag_label, 1000, bms_status_data);
+        lv_timer_create(refresh_bms_status_data, 1000, data);
 
         // Create a timer for flashing effect
-        lv_timer_create(flash_label, 1000, bms_status_data); // 1000ms interval for flashing
-    }
-    else {
+        lv_timer_create(flash_label, 1000, data); // 1000ms interval for flashing
+    } else {
         // Handle memory allocation failure
         Serial.println("Error: Unable to allocate memory for BMS flag data.");
     }
 }
 
-// REFRESH BMS FLAG LABEL ////////////////////////////////////////////////////////
-void refresh_bms_flag_label(lv_timer_t * timer) {
+// CREATE STATUS LABELS ////////////////////////////////////////////////////////////
+void create_status_label(bool reset_index, const char* label_text, bms_status_data_t* data) {
+    static uint8_t i = 0; // static variable to preserve value between function calls
+
+    if (reset_index) {
+      data->status_label_indexes = i - 1; // add last stored array index to structure with compensation for the i++
+      i = 0; // reset index if function calling has run its course
+    }
+
+    if ( ! data->status_label[i] ) { // only create label if it doesn't exist
+      data->status_label[i] = lv_label_create(data->parent);
+    }
+    lv_label_set_text(data->status_label[i], label_text);
+    lv_obj_align_to(data->status_label[i], data->title_label, LV_ALIGN_OUT_BOTTOM_MID, 0, data->y + i * 20);
+
+    // Update button position dynamically after all labels are created
+    if (reset_index && data->button) {
+      lv_obj_align_to(data->button, data->status_label[data->status_label_indexes], LV_ALIGN_OUT_BOTTOM_MID, 0, 10); // Align button below last label with a gap
+      lv_obj_clear_flag(data->button, LV_OBJ_FLAG_HIDDEN); // Show the button
+    }
+
+    i++;
+}
+
+// REFRESH BMS STATUS DATA ////////////////////////////////////////////////////////////////////
+void refresh_bms_status_data(lv_timer_t * timer) {
     bms_status_data_t *data = (bms_status_data_t *)timer->user_data;
 
-    int label_index = 0;
-    data->balancing = false; // reset balancing flag before updating
+    // This is to let the label creator know when the function has run its course
+    static bool previous_run = false;
+    bool reset_index = false;
+    if (previous_run) {
+        previous_run = false;
+        reset_index = true;
+    }
 
-    // bms flags
+    data->balancing = false; // Reset balancing flag before updating
+
+    // BMS flags
     if ((combinedData.canData.fu & 0x0100) == 0x0100) {
-        lv_label_set_text(data->labels[label_index++], "Internal Hardware Fault");
+        create_status_label(reset_index, "Internal Hardware Fault", data);
     }
     if ((combinedData.canData.fu & 0x0200) == 0x0200) {
-        lv_label_set_text(data->labels[label_index++], "Internal Cell Comm Fault");
+        create_status_label(reset_index, "Internal Cell Comm Fault", data);
     }
     if ((combinedData.canData.fu & 0x0400) == 0x0400) {
-        lv_label_set_text(data->labels[label_index++], "Weak Cell Fault");
+        create_status_label(reset_index, "Weak Cell Fault", data);
     }
     if ((combinedData.canData.fu & 0x0800) == 0x0800) {
-        lv_label_set_text(data->labels[label_index++], "Low Cell Voltage");
+        create_status_label(reset_index, "Low Cell Voltage", data);
     }
     if ((combinedData.canData.fu & 0x1000) == 0x1000) {
-        lv_label_set_text(data->labels[label_index++], "Open Wire Fault");
+        create_status_label(reset_index, "Open Wire Fault", data);
     }
     if ((combinedData.canData.fu & 0x2000) == 0x2000) {
-        lv_label_set_text(data->labels[label_index++], "Current Sensor Fault");
+        create_status_label(reset_index, "Current Sensor Fault", data);
     }
     if ((combinedData.canData.fu & 0x4000) == 0x4000) {
-        lv_label_set_text(data->labels[label_index++], "Abnormal SOC Behavior");
+        create_status_label(reset_index, "Abnormal SOC Behavior", data);
     }
     if ((combinedData.canData.fu & 0x8000) == 0x8000) {
-        lv_label_set_text(data->labels[label_index++], "Pack Too Hot Fault");
+        create_status_label(reset_index, "Pack Too Hot Fault", data);
     }
     if ((combinedData.canData.fu & 0x0001) == 0x0001) {
-        lv_label_set_text(data->labels[label_index++], "Weak Pack Fault");
+        create_status_label(reset_index, "Weak Pack Fault", data);
     }
     if ((combinedData.canData.fu & 0x0002) == 0x0002) {
-        lv_label_set_text(data->labels[label_index++], "External Thermistor Fault");
+        create_status_label(reset_index, "External Thermistor Fault", data);
     }
     if ((combinedData.canData.fu & 0x0004) == 0x0004) {
-        lv_label_set_text(data->labels[label_index++], "Charge Relay Failure");
+        create_status_label(reset_index, "Charge Relay Failure", data);
     }
     if ((combinedData.canData.fu & 0x0008) == 0x0008) {
-        lv_label_set_text(data->labels[label_index++], "Discharge Relay Fault");
+        create_status_label(reset_index, "Discharge Relay Fault", data);
     }
     if ((combinedData.canData.fu & 0x0010) == 0x0010) {
-        lv_label_set_text(data->labels[label_index++], "Safety Relay Fault");
+        create_status_label(reset_index, "Safety Relay Fault", data);
     }
     if ((combinedData.canData.fu & 0x0020) == 0x0020) {
-        lv_label_set_text(data->labels[label_index++], "CAN communication Fault");
+        create_status_label(reset_index, "CAN communication Fault", data);
     }
     if ((combinedData.canData.fu & 0x0040) == 0x0040) {
-        lv_label_set_text(data->labels[label_index++], "Internal Thermistor Fault");
+        create_status_label(reset_index, "Internal Thermistor Fault", data);
     }
     if ((combinedData.canData.fu & 0x0080) == 0x0080) {
-        lv_label_set_text(data->labels[label_index++], "Internal Logic Fault");
+        create_status_label(reset_index, "Internal Logic Fault", data);
     }
-    // failsafe status
+    // Failsafe status
     if ((combinedData.canData.st & 0x0001) == 0x0001) {
-        lv_label_set_text(data->labels[label_index++], "Voltage Failsafe");
+        create_status_label(reset_index, "Voltage Failsafe", data);
     }
     if ((combinedData.canData.st & 0x0002) == 0x0002) {
-        lv_label_set_text(data->labels[label_index++], "Current Failsafe");
+        create_status_label(reset_index, "Current Failsafe", data);
     }
     if ((combinedData.canData.st & 0x0004) == 0x0004) {
-        lv_label_set_text(data->labels[label_index++], "Relay Failsafe");
+        create_status_label(reset_index, "Relay Failsafe", data);
     }
     if ((combinedData.canData.st & 0x0008) == 0x0008) {
-        lv_label_set_text(data->labels[label_index++], "Cell Balancing Active");
+        create_status_label(reset_index, "Cell Balancing Active", data);
         data->balancing = true;
     }
     if ((combinedData.canData.st & 0x0010) == 0x0010) {
-        lv_label_set_text(data->labels[label_index++], "Charge Interlock Failsafe");
+        create_status_label(reset_index, "Charge Interlock Failsafe", data);
     }
     if ((combinedData.canData.st & 0x0020) == 0x0020) {
-        lv_label_set_text(data->labels[label_index++], "Thermistor B-value Table Invalid");
+        create_status_label(reset_index, "Thermistor B-value Table Invalid", data);
     }
     if ((combinedData.canData.st & 0x0040) == 0x0040) {
-        lv_label_set_text(data->labels[label_index++], "Input Power Supply Failsafe");
+        create_status_label(reset_index, "Input Power Supply Failsafe", data);
     }
     if ((combinedData.canData.st & 0x0100) == 0x0100) {
-        lv_label_set_text(data->labels[label_index++], "Relays Opened under Load Failsafe");
+        create_status_label(reset_index, "Relays Opened under Load Failsafe", data);
     }
     if ((combinedData.canData.st & 0x1000) == 0x1000) {
-        lv_label_set_text(data->labels[label_index++], "Polarization Model 1 Active");
+        create_status_label(reset_index, "Polarization Model 1 Active", data);
     }
     if ((combinedData.canData.st & 0x2000) == 0x2000) {
-        lv_label_set_text(data->labels[label_index++], "Polarization Model 2 Active");
+        create_status_label(reset_index, "Polarization Model 2 Active", data);
     }
     if ((combinedData.canData.st & 0x4000) == 0x4000) {
-        lv_label_set_text(data->labels[label_index++], "Polarization Compensation Inactive");
+        create_status_label(reset_index, "Polarization Compensation Inactive", data);
     }
     if ((combinedData.canData.st & 0x8000) == 0x8000) {
-        lv_label_set_text(data->labels[label_index++], "Charge Mode Activated over CANBUS");
+        create_status_label(reset_index, "Charge Mode Activated over CANBUS", data);
     }
 
-    // Clear remaining labels
-    while (label_index < 28) {
-        lv_label_set_text(data->labels[label_index++], "");
-    }
+    previous_run = true; // Set for the next call
 }
 
 // SETUP //////////////////////////////////////////////////////////////////////////////
@@ -875,8 +901,8 @@ void setup() {
   create_can_label(cont, "Capacity", "Ah", &(combinedData.canData.ah), CAN_DATA_TYPE_FLOAT, 20, 270, &canLabel[12]);
   create_can_label(cont, "Internal Heatsink Temperature", "\u00B0C", &(combinedData.canData.hs), CAN_DATA_TYPE_BYTE, 20, 300, &canLabel[13]);
   
-  // Display bms messages
-  create_bms_flag_label(cont, 70, 350, &bmsStatusData);
+  // Display bms messages arg2: y_pos
+  create_bms_status_label(cont, 350, &bmsStatusData);
   
   // create right column container instance
   cont = lv_obj_create(parent);
@@ -887,7 +913,7 @@ void setup() {
 
   // arguments 1:obj  2:label 3:relay_pin 4:y_offset 5:dcl_limit 6:timeout_ms 7:user_data struct
   
-  // Create Button 4 - INVERTER - first to allow others to send click event
+  // Create Button 4 - INVERTER - try creating this first to allow others to send click event
   create_button(cont, "Inverter",       RELAY4, 320, 5, inverter_startup_ms, &userData[3]);
 
   // Create Button 1 - CEILING HEATER
