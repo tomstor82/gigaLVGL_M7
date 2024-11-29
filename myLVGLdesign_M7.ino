@@ -710,25 +710,27 @@ void create_bms_status_label(lv_obj_t* parent, lv_coord_t y, bms_status_data_t* 
 }
 
 // CREATE STATUS LABELS ////////////////////////////////////////////////////////////
-void create_status_label(bool reset_index, const char* label_text, bms_status_data_t* data) {
+void create_status_label(const char* label_text, bms_status_data_t* data, bool finished = false) {
     static uint8_t i = 0; // static variable to preserve value between function calls
 
-    if (reset_index) {
-      data->status_label_indexes = i - 1; // add last stored array index to structure with compensation for the i++
-      i = 0; // reset index if function calling has run its course
+    // if finised is passed from refresh function, store last index to struct and reset static index ready for next refresh cycle
+    if ( finished ) {
+      data->status_label_indexes = i - 1; // add last stored array index to structure with compensation for the last i++ (not array length)
+      // Only set button pos and vis once refresh function is finished and labels are present, for dynamic positioning
+      if ( data->button && i > 0 ) {
+        lv_obj_align_to(data->button, data->status_label[data->status_label_indexes], LV_ALIGN_OUT_BOTTOM_MID, 0, 20); // Align button below last label with a gap
+        lv_obj_clear_flag(data->button, LV_OBJ_FLAG_HIDDEN); // Show the button
+      }
+      i = 0; // reset index
+      return; // exit function as finished is only passed by end of refresh function logic without label
     }
-
-    if ( ! data->status_label[i] ) { // only create label if it doesn't exist
+    
+    // only create label if it doesn't exist
+    if ( ! data->status_label[i] ) {
       data->status_label[i] = lv_label_create(data->parent);
     }
     lv_label_set_text(data->status_label[i], label_text);
     lv_obj_align_to(data->status_label[i], data->title_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 15 + i * 10);
-
-    // Update button position dynamically after all labels are created (button not visible if no messages)
-    if (reset_index && data->button) {
-      lv_obj_align_to(data->button, data->status_label[data->status_label_indexes], LV_ALIGN_OUT_BOTTOM_MID, 0, 20); // Align button below last label with a gap
-      lv_obj_clear_flag(data->button, LV_OBJ_FLAG_HIDDEN); // Show the button
-    }
 
     i++;
 }
@@ -737,105 +739,98 @@ void create_status_label(bool reset_index, const char* label_text, bms_status_da
 void refresh_bms_status_data(lv_timer_t * timer) {
     bms_status_data_t *data = (bms_status_data_t *)timer->user_data;
 
-    // This is to let the label creator know when the function has run its course
-    static bool previous_run = false;
-    bool reset_index = false;
-    if (previous_run) {
-        previous_run = false;
-        reset_index = true;
-    }
-
     data->balancing = false; // Reset balancing flag before updating
 
     // BMS flags
     if ((combinedData.canData.fu & 0x0100) == 0x0100) {
-        create_status_label(reset_index, "Internal Hardware Fault", data);
+        create_status_label("Internal Hardware Fault", data);
     }
     if ((combinedData.canData.fu & 0x0200) == 0x0200) {
-        create_status_label(reset_index, "Internal Cell Comm Fault", data);
+        create_status_label("Internal Cell Comm Fault", data);
     }
     if ((combinedData.canData.fu & 0x0400) == 0x0400) {
-        create_status_label(reset_index, "Weak Cell Fault", data);
+        create_status_label("Weak Cell Fault", data);
     }
     if ((combinedData.canData.fu & 0x0800) == 0x0800) {
-        create_status_label(reset_index, "Low Cell Voltage", data);
+        create_status_label("Low Cell Voltage", data);
     }
     if ((combinedData.canData.fu & 0x1000) == 0x1000) {
-        create_status_label(reset_index, "Open Wire Fault", data);
+        create_status_label("Open Wire Fault", data);
     }
     if ((combinedData.canData.fu & 0x2000) == 0x2000) {
-        create_status_label(reset_index, "Current Sensor Fault", data);
+        create_status_label("Current Sensor Fault", data);
     }
     if ((combinedData.canData.fu & 0x4000) == 0x4000) {
-        create_status_label(reset_index, "Abnormal SOC Behavior", data);
+        create_status_label("Abnormal SOC Behavior", data);
     }
     if ((combinedData.canData.fu & 0x8000) == 0x8000) {
-        create_status_label(reset_index, "Pack Too Hot Fault", data);
+        create_status_label("Pack Too Hot Fault", data);
     }
     if ((combinedData.canData.fu & 0x0001) == 0x0001) {
-        create_status_label(reset_index, "Weak Pack Fault", data);
+        create_status_label("Weak Pack Fault", data);
     }
     if ((combinedData.canData.fu & 0x0002) == 0x0002) {
-        create_status_label(reset_index, "External Thermistor Fault", data);
+        create_status_label("External Thermistor Fault", data);
     }
     if ((combinedData.canData.fu & 0x0004) == 0x0004) {
-        create_status_label(reset_index, "Charge Relay Failure", data);
+        create_status_label("Charge Relay Failure", data);
     }
     if ((combinedData.canData.fu & 0x0008) == 0x0008) {
-        create_status_label(reset_index, "Discharge Relay Fault", data);
+        create_status_label("Discharge Relay Fault", data);
     }
     if ((combinedData.canData.fu & 0x0010) == 0x0010) {
-        create_status_label(reset_index, "Safety Relay Fault", data);
+        create_status_label("Safety Relay Fault", data);
     }
     if ((combinedData.canData.fu & 0x0020) == 0x0020) {
-        create_status_label(reset_index, "CAN communication Fault", data);
+        create_status_label("CAN communication Fault", data);
     }
     if ((combinedData.canData.fu & 0x0040) == 0x0040) {
-        create_status_label(reset_index, "Internal Thermistor Fault", data);
+        create_status_label("Internal Thermistor Fault", data);
     }
     if ((combinedData.canData.fu & 0x0080) == 0x0080) {
-        create_status_label(reset_index, "Internal Logic Fault", data);
+        create_status_label("Internal Logic Fault", data);
     }
     // Failsafe status
     if ((combinedData.canData.st & 0x0001) == 0x0001) {
-        create_status_label(reset_index, "Voltage Failsafe", data);
+        create_status_label("Voltage Failsafe", data);
     }
     if ((combinedData.canData.st & 0x0002) == 0x0002) {
-        create_status_label(reset_index, "Current Failsafe", data);
+        create_status_label("Current Failsafe", data);
     }
     if ((combinedData.canData.st & 0x0004) == 0x0004) {
-        create_status_label(reset_index, "Relay Failsafe", data);
+        create_status_label("Relay Failsafe", data);
     }
     if ((combinedData.canData.st & 0x0008) == 0x0008) {
-        create_status_label(reset_index, "Cell Balancing Active", data);
+        create_status_label("Cell Balancing Active", data);
         data->balancing = true;
     }
     if ((combinedData.canData.st & 0x0010) == 0x0010) {
-        create_status_label(reset_index, "Charge Interlock Failsafe", data);
+        create_status_label("Charge Interlock Failsafe", data);
     }
     if ((combinedData.canData.st & 0x0020) == 0x0020) {
-        create_status_label(reset_index, "Thermistor B-value Table Invalid", data);
+        create_status_label("Thermistor B-value Table Invalid", data);
     }
     if ((combinedData.canData.st & 0x0040) == 0x0040) {
-        create_status_label(reset_index, "Input Power Supply Failsafe", data);
+        create_status_label("Input Power Supply Failsafe", data);
     }
     if ((combinedData.canData.st & 0x0100) == 0x0100) {
-        create_status_label(reset_index, "Relays Opened under Load Failsafe", data);
+        create_status_label("Relays Opened under Load Failsafe", data);
     }
     if ((combinedData.canData.st & 0x1000) == 0x1000) {
-        create_status_label(reset_index, "Polarization Model 1 Active", data);
+        create_status_label("Polarization Model 1 Active", data);
     }
     if ((combinedData.canData.st & 0x2000) == 0x2000) {
-        create_status_label(reset_index, "Polarization Model 2 Active", data);
+        create_status_label("Polarization Model 2 Active", data);
     }
     if ((combinedData.canData.st & 0x4000) == 0x4000) {
-        create_status_label(reset_index, "Polarization Compensation Inactive", data);
+        create_status_label("Polarization Compensation Inactive", data);
     }
     if ((combinedData.canData.st & 0x8000) == 0x8000) {
-        create_status_label(reset_index, "Charge Mode Activated over CANBUS", data);
+        create_status_label("Charge Mode Activated over CANBUS", data);
     }
-
-    previous_run = true; // Set for the next call
+    // calling create function with finished flag as arg 3 for its index resetting
+    create_status_label("", data, true);
+    
 }
 
 // SETUP //////////////////////////////////////////////////////////////////////////////
