@@ -161,7 +161,7 @@ uint32_t previous_touch_ms;
 const uint16_t touch_timeout_ms = 20000; // 20s before screen dimming
 
 //**************************************************************************************//
-//   REMOVE MALLOC AND SEPARATE EVENT_HANDLER FOR INVERTER TO ALLOW CALL FROM OTHERS    //
+//   FIX DCL CHARGE BATTERY TEXT NOT SHOWING ISSUE                                      //
 // 
 //**************************************************************************************//
 
@@ -191,7 +191,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   data->dcl_label = lv_label_create(lv_obj_get_parent(data->button));
   lv_label_set_long_mode(data->dcl_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
   lv_obj_set_width(data->dcl_label, 150);
-  lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_MID, 10, 50);
+  lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_RIGHT, 10, 0);
   lv_label_set_text(data->dcl_label, "Please Charge Battery                                            "); // spaces to allow a pause
   lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
   lv_timer_create(dcl_check, 10000, data); // check every 10s
@@ -220,7 +220,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     // create inverter status label
     data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
     lv_obj_set_width(data->label_obj, 120);
-    lv_obj_align_to(data->label_obj, data->button, LV_ALIGN_OUT_RIGHT_MID, 80, 0);
+    lv_obj_align_to(data->label_obj, data->button, LV_ALIGN_OUT_BOTTOM_RIGHT, 20, 0);
     // initialise label text
     lv_label_set_text(data->label_obj, "Inverter OFF");
   }
@@ -229,7 +229,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 // DCL CHECK TIMER ////////////////////////////////////////////////////////////////////////////
 void dcl_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
-  // create scrolling label and disable button
+  // make label visible and disable button
   if ( combinedData.canData.dcl < data->dcl_limit ) {
     lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
