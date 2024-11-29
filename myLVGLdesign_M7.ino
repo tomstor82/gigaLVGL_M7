@@ -190,8 +190,8 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   // Disable all buttons by DCL limit
   data->dcl_label = lv_label_create(lv_obj_get_parent(data->button));
   lv_label_set_long_mode(data->dcl_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
-  lv_obj_set_width(data->dcl_label, 150);
-  lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_RIGHT, 10, 0);
+  lv_obj_set_width(data->dcl_label, 140);
+  lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
   lv_label_set_text(data->dcl_label, "Please Charge Battery                                            "); // spaces to allow a pause
   lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
   lv_timer_create(dcl_check, 10000, data); // check every 10s
@@ -200,7 +200,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   if ( ! timeout_ms ) {
     // create label and update the user data member for access within timer to allow only to update text not object
     data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
-     create_temperature_dropdown(parent, data);//create_arc(parent, data);
+    create_temperature_dropdown(parent, data);//create_arc(parent, data);
     // create time updated temperature labels
     lv_timer_create(update_temp, 10000, data);
     lv_obj_set_pos(data->label_obj, 180, y_offset + 13);
@@ -220,7 +220,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     // create inverter status label
     data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
     lv_obj_set_width(data->label_obj, 120);
-    lv_obj_align_to(data->label_obj, data->button, LV_ALIGN_OUT_BOTTOM_RIGHT, 20, 0);
+    lv_obj_align_to(data->label_obj, data->button, LV_ALIGN_OUT_RIGHT_MID, 80, 0);
     // initialise label text
     lv_label_set_text(data->label_obj, "Inverter OFF");
   }
@@ -256,7 +256,7 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
       }
       // if inverter off don't allow hot water button to be marked as clicked
       else if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
-        lv_event_send(inv_btn, LV_EVENT_CLICKED, NULL); // send click event to start inverter
+        lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL); // send click event to start inverter
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
@@ -911,7 +911,7 @@ void setup() {
   create_button(cont, "Inverter",       RELAY4, 320, 5, inverter_startup_ms, &userData[3]);
 
   // Create Button 1 - CEILING HEATER
-  create_button(cont, "Ceiling Heater", RELAY1, 20, 70, 0, &userData[0]);
+  create_button(cont, "Ceiling Heater", RELAY1, 20, 70, 0, &userData[0]); // dcl for test max 255 uint8_t
 
   // Create Button 2 - SHOWER HEATER
   create_button(cont, "Shower Heater",  RELAY2, 120, 10, 0, &userData[1]);
@@ -972,7 +972,7 @@ void loop() {
     if (RPC.read()) {
       static String buffer = ""; // clean buffer before reading
       buffer += (char)RPC.read();  // Fill the buffer with characters
-      //if (buffer.length() > 0) Serial.print(buffer);
+      //if (buffer.length() > 0) Serial.println(buffer);
     }
     else Serial.println("RPC is available but no messages received from M4");
   }
