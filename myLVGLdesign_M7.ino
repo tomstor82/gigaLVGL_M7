@@ -65,8 +65,8 @@ struct CanData {
     byte hCid;              // High Cell ID
     byte lCid;              // Low Cell ID
 
-    uint8_t fu;             // BMS faults
-    uint8_t st;             // BMS Status
+    uint16_t fu;            // BMS Faults
+    uint16_t st;            // BMS Status
     uint8_t cc;             // Total pack cycles
 
     float kw;               // Active power 0,1kW
@@ -256,7 +256,7 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
       }
       // if inverter off don't allow hot water button to be marked as clicked
       else if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
-        lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL); // send click event to start inverter
+        lv_event_send(inv_btn, LV_EVENT_CLICKED, NULL); // send click event to start inverter
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
@@ -730,7 +730,7 @@ void create_status_label(const char* label_text, bms_status_data_t* data, bool f
       data->status_label[i] = lv_label_create(data->parent);
     }
     lv_label_set_text(data->status_label[i], label_text);
-    lv_obj_align_to(data->status_label[i], data->title_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 15 + i * 10);
+    lv_obj_align_to(data->status_label[i], data->title_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 15 + i * 20);
 
     i++;
 }
@@ -822,9 +822,9 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     if ((combinedData.canData.st & 0x2000) == 0x2000) {
         create_status_label("Polarization Model 2 Active", data);
     }
-    if ((combinedData.canData.st & 0x4000) == 0x4000) {
+    /*if ((combinedData.canData.st & 0x4000) == 0x4000) {
         create_status_label("Polarization Compensation Inactive", data);
-    }
+    }*/
     if ((combinedData.canData.st & 0x8000) == 0x8000) {
         create_status_label("Charge Mode Activated over CANBUS", data);
     }
