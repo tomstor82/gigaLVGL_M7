@@ -67,7 +67,7 @@ struct CanData {
 
     uint16_t fu;            // BMS Faults
     uint16_t st;            // BMS Status
-    uint8_t cc;             // Total pack cycles
+    int cc;            // Total pack cycles
 
     float kw;               // Active power 0,1kW
     byte hs;                // Internal Heatsink
@@ -192,7 +192,6 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   lv_label_set_long_mode(data->dcl_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
   lv_obj_set_width(data->dcl_label, 140);
   lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
-  lv_label_set_text(data->dcl_label, "Please Charge Battery                                            "); // spaces to allow a pause
   lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
   lv_timer_create(dcl_check, 10000, data); // check every 10s
 
@@ -229,13 +228,21 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 // DCL CHECK TIMER ////////////////////////////////////////////////////////////////////////////
 void dcl_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
-  // make label visible and disable button
-  if ( combinedData.canData.dcl < data->dcl_limit ) {
+  // disable inverter if discharge relay is tripped
+  if ( data->relay_pin == RELAY4 && (combinedData.canData.ry & 0x0001) == 0x0001 ) {
+    lv_label_set_text(data->dcl_label, "Discharge Relay Tripped by BMS                                      "); // spaces to allow a pause
     lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }
+  // disable buttons if dcl limit below appliance minimum operating dcl
+  else if ( combinedData.canData.dcl < data->dcl_limit ) {
+    lv_label_set_text(data->dcl_label, "Please Charge Battery                                            "); // spaces to allow a pause
+    lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
+    lv_obj_add_state(data->button, LV_STATE_DISABLED);
+  }
+  // add hide flag to hide label if all ok
   else {
-    lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // add hidden flag to hide
+    lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
   }
 }
 
@@ -297,20 +304,25 @@ void switch_off(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
   bool on = false;
   
-  // inverter - reset timer if demand or negative avgI if soc or dcl within limits
-  if ( data->relay_pin == RELAY4 && combinedData.canData.soc > 10 || combinedData.canData.dcl > data->dcl_limit ) {
-    if ( pwr_demand || combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) { // keep inverter on above 50% SOC if heaters or hot water demand or charge current
+  // inverter conditions
+  if ( data->relay_pin == RELAY4 ) {
+    // if demand and soc>10% and dcl ok - 1st priority test LOW PACK
+    if ( pwr_demand && combinedData.canData.soc > 10 || combinedData.canData.dcl > data->dcl_limit ) {
       on = true;
       //Serial.println("inverter on due to demand or charge");
     }
-    // inverter - reset timer if power has risen by more than 75W compared to before start and power is above 75W (solar issue otherwise). (Inverter Standby ~75W)
+    // if charging and soc>50% - 2nd priority test CHARGING
+    else if ( combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) {
+      on = true;
+    }
+    // if power consumption exceeds inverter standby (75W) and charge or discharge is greater than 75W - 3rd priority test DEMAND
     else if ( pre_start_p + 75 < combinedData.canData.p && abs(combinedData.canData.p) > 75 ) {
       on = true;
       //Serial.println("inverter on due power above inverter start power detected");
     }
   }
-  // hot water tank - reset timer if excess power generation
-  else if ( data->relay_pin != RELAY4 && combinedData.canData.ccl < 10 || combinedData.canData.avgI < 0 ) {
+  // hot water tank - reset timer if charging
+  else if ( combinedData.canData.ccl < 10 && combinedData.canData.avgI < 0 ) {
     on = true;
   }
 
@@ -495,11 +507,11 @@ void update_temp(lv_timer_t *timer) {
   char buf[10];
   // ceiling heater use avg temp
   if ( data->relay_pin == RELAY1 ) {
-    snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp); // use the global shared instance for temp and humidity
+     snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp); // use the global shared instance for temp and humidity
   }
   // shower heater use temp3
   else {
-    snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp3);
+     snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp3);
   }
   // update label text only and not the label object
   lv_label_set_text(data->label_obj, buf);
@@ -952,19 +964,7 @@ void loop() {
     }
   }
   //else { Serial.println("M7 CAN not available"); } // crazy messages despite working
-  /*Serial.print("instI: ");
-  Serial.println(combinedData.canData.instI);
-  Serial.print("Power: ");
-  Serial.println(combinedData.canData.p);
-  Serial.print("absI: ");
-  Serial.println(combinedData.canData.absI);
-  Serial.print("avgI: ");
-  Serial.println(combinedData.canData.avgI);
-  Serial.print("low cell id: ");
-  Serial.println(combinedData.canData.lCid);
-  Serial.print("high cell id: ");
-  Serial.println(combinedData.canData.hCid);*/
-
+  
   if (RPC.available()) {
     // call func to get sensors and can data from M4 core
     retrieve_M4_data();
@@ -976,12 +976,7 @@ void loop() {
     }
     else Serial.println("RPC is available but no messages received from M4");
   }
-  //else Serial.println("RPC not available");
-  /*if ( combinedData.sensorData.temp3 ) {
-    Serial.print("Temperature from M4 core: ");
-    Serial.println(combinedData.sensorData.temp3);
-  }*/
-
+  
   // if no touch within timeout dim display and brightness above 0
   if (previous_touch_ms + touch_timeout_ms < millis() && brightness) {
     dim_display();
