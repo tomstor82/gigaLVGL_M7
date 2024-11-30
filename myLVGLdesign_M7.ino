@@ -155,6 +155,7 @@ uint8_t pwr_demand = 0;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
 const uint16_t inverter_startup_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
 const uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 75Wh to around 12,5Wh -84%
+const float temp_offset = 0.5; // dht22 temp offset for wall
 
 uint8_t brightness = 70;
 uint32_t previous_touch_ms;
@@ -537,17 +538,17 @@ void update_temp(lv_timer_t *timer) {
 
     // Ceiling heater uses avg temp if available or single sensor with notification each 8s
     if (data->relay_pin == RELAY1) {
-        if (combinedData.sensorData.avg_temp != 999) {
-            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp);
+        if (combinedData.sensorData.avg_temp != 999.0f) {
+            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp + temp_offset);
         }
         // sensor 2 fault
-        else if (combinedData.sensorData.temp1 != 999) {
-            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp1);
+        else if (combinedData.sensorData.temp1 != 999.0f) {
+            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp1 + temp_offset);
             lv_timer_create(sensor_fault, 8000, data);
         }
         // sensor 1 fault
-        else if (combinedData.sensorData.temp2 != 999) {
-            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp2);
+        else if (combinedData.sensorData.temp2 != 999.0f) {
+            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp2 + temp_offset);
             lv_timer_create(sensor_fault, 8000, data);
         }
         // both sensors are faulty
@@ -560,8 +561,8 @@ void update_temp(lv_timer_t *timer) {
     }
     // Shower heater uses temp3
     else {
-        if (combinedData.sensorData.temp3 != 999) {
-            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp3);
+        if (combinedData.sensorData.temp3 != 999.0f) {
+            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp3 + temp_offset);
         }
         else {
             snprintf(buf, sizeof(buf), "#3 --");
