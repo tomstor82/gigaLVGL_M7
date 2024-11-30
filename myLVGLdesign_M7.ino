@@ -67,7 +67,7 @@ struct CanData {
 
     uint16_t fu;            // BMS Faults
     uint16_t st;            // BMS Status
-    int cc;            // Total pack cycles
+    uint16_t cc;            // Total pack cycles
 
     float kw;               // Active power 0,1kW
     byte hs;                // Internal Heatsink
@@ -161,7 +161,7 @@ uint32_t previous_touch_ms;
 const uint16_t touch_timeout_ms = 20000; // 20s before screen dimming
 
 //**************************************************************************************//
-//   FIX DCL CHARGE BATTERY TEXT NOT SHOWING ISSUE                                      //
+//   TURN OFF HEATERS & HOT WATER IF INVERTER IS OFF                                    //
 // 
 //**************************************************************************************//
 
@@ -281,7 +281,16 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
     else {
       digitalWrite(data->relay_pin, LOW);
       if (timeroi) lv_timer_del(timeroi);
-      if ( data->relay_pin == RELAY4 ) lv_label_set_text(data->label_obj, "OFF"); // inverter only
+      if ( data->relay_pin == RELAY4 ) {
+        lv_label_set_text(data->label_obj, "OFF"); // inverter only
+        // turn off the other buttons
+        for ( uint8_t i = 0; i < 2; i++ ) {
+          if ( lv_obj_has_state(userData[i].button, LV_STATE_CHECKED) ) {
+            lv_obj_clear_state(userData[i].button, LV_STATE_CHECKED);
+          }
+        }
+        pwr_demand = 0;
+      }
       else {
         pwr_demand ? pwr_demand-- : NULL;
       }
@@ -501,23 +510,70 @@ void thermostat_timer(lv_timer_t * timer) {
   }
 }
 
+// TEMP SENSOR WARNING TIMER /////////////////////////////////////////////////////////////////
+void sensor_fault(lv_timer_t* timer) {
+    user_data_t* data = (user_data_t*)timer->user_data;
+    char warning_msg[10];
+
+    if (combinedData.sensorData.temp1 == 999) {
+        snprintf(warning_msg, sizeof(warning_msg), "#1 --");
+    }
+    else if (combinedData.sensorData.temp2 == 999) {
+        snprintf(warning_msg, sizeof(warning_msg), "#2 --");
+    }
+    else {
+      snprintf(warning_msg, sizeof(warning_msg), "#1+2 --");
+    }
+
+    // Update the label directly with the warning message
+    lv_label_set_text(data->label_obj, warning_msg);
+    lv_timer_del(timer); // delete timer as it is called from within other timer
+}
+
 // DISPLAY TEMP TIMER ////////////////////////////////////////////////////////////////////////
 void update_temp(lv_timer_t *timer) {
-  user_data_t * data = (user_data_t *)timer->user_data;
-  char buf[10];
-  // ceiling heater use avg temp
-  if ( data->relay_pin == RELAY1 ) {
-     snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp); // use the global shared instance for temp and humidity
-  }
-  // shower heater use temp3
-  else {
-     snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp3);
-  }
-  // update label text only and not the label object
-  lv_label_set_text(data->label_obj, buf);
-  // DEBUG
-  Serial.print("M7 core: ");
-  Serial.println(buf);
+    user_data_t *data = (user_data_t *)timer->user_data;
+    char buf[10];
+
+    // Ceiling heater uses avg temp if available or single sensor with notification each 8s
+    if (data->relay_pin == RELAY1) {
+        if (combinedData.sensorData.avg_temp != 999) {
+            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp);
+        }
+        // sensor 2 fault
+        else if (combinedData.sensorData.temp1 != 999) {
+            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp1);
+            lv_timer_create(sensor_fault, 8000, data);
+        }
+        // sensor 1 fault
+        else if (combinedData.sensorData.temp2 != 999) {
+            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp2);
+            lv_timer_create(sensor_fault, 8000, data);
+        }
+        // both sensors are faulty
+        else {
+          snprintf(buf, sizeof(buf), "--");
+          lv_timer_create(sensor_fault, 8000, data);
+          // disable thermostat button as there's no valid temperature data
+          lv_obj_add_state(data->button, LV_STATE_DISABLED);
+        }
+    }
+    // Shower heater uses temp3
+    else {
+        if (combinedData.sensorData.temp3 != 999) {
+            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp3);
+        }
+        else {
+            snprintf(buf, sizeof(buf), "#3 --");
+        }
+    }
+
+    // Update the label text with the temperature or warning message
+    lv_label_set_text(data->label_obj, buf);
+
+    // DEBUG
+    Serial.print("M7 core: ");
+    Serial.println(buf);
 }
 
 // CLEAR CAN EVENT HANDLER ////////////////////////////////////////////////////////////////////
@@ -964,7 +1020,7 @@ void loop() {
     }
   }
   //else { Serial.println("M7 CAN not available"); } // crazy messages despite working
-  
+
   if (RPC.available()) {
     // call func to get sensors and can data from M4 core
     retrieve_M4_data();
@@ -976,7 +1032,7 @@ void loop() {
     }
     else Serial.println("RPC is available but no messages received from M4");
   }
-  
+
   // if no touch within timeout dim display and brightness above 0
   if (previous_touch_ms + touch_timeout_ms < millis() && brightness) {
     dim_display();
