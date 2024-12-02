@@ -149,17 +149,18 @@ static can_label_t canLabel[14]; // 14 labels so far
 static CombinedData combinedData;
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size)
-lv_obj_t* inv_btn = nullptr;
 int pre_start_p;
 uint8_t pwr_demand = 0;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
 const uint16_t inverter_startup_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
-const uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 75Wh to around 12,5Wh -84%
-const float temp_offset = 0.5; // dht22 temp offset for wall
+const uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 85Wh to around 12,5Wh -84%
 
 uint8_t brightness = 70;
 uint32_t previous_touch_ms;
 const uint16_t touch_timeout_ms = 20000; // 20s before screen dimming
+
+// for M4 messages
+String buffer = "";
 
 //**************************************************************************************//
 //   TURN OFF HEATERS & HOT WATER IF INVERTER IS OFF                                    //
@@ -216,13 +217,12 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   // adding inverter button to global variable as it needs to be read by the other buttons and
   // creating inverter status label
   if ( relay_pin == RELAY4 ) {
-    inv_btn = data->button;
     // create inverter status label
     data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
     lv_obj_set_width(data->label_obj, 120);
     lv_obj_align_to(data->label_obj, data->button, LV_ALIGN_OUT_RIGHT_MID, 80, 0);
     // initialise label text
-    lv_label_set_text(data->label_obj, "Inverter OFF");
+    lv_label_set_text(data->label_obj, "OFF");
   }
 }
 
@@ -254,7 +254,7 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
   lv_obj_t * obj = lv_event_get_target(e);
   if(code == LV_EVENT_CLICKED) {
     LV_UNUSED(obj);
-    lv_timer_t* timeroi = NULL; // declare timer to be able to delete if button off prematurely
+    lv_timer_t* timeout_timer = NULL; // declare timer to be able to delete if button off prematurely
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       if ( data->relay_pin == RELAY4 ) { // only for inverter for sweeping
         pre_start_p = combinedData.canData.p;
@@ -263,10 +263,10 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
         Serial.println(pre_start_p);*/
       }
       // if inverter off don't allow hot water button to be marked as clicked
-      else if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
-        lv_event_send(inv_btn, LV_EVENT_CLICKED, NULL); // send click event to start inverter
+      else if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
+        lv_event_send(userData[3].button, LV_EVENT_VALUE_CHANGED, &userData[3]); // send click event to start inverter
         // DEBUG if inverter is still off disable change flag
-        if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
+        if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
           Serial.println("DEBUG hot_water_inverter_event_handler - Unable to send start inverter event");
           return; // exit function if inverter is off
@@ -277,15 +277,15 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
 
       digitalWrite(data->relay_pin, HIGH);
       // Create delay timer for inverter sweep and for hot water
-      timeroi = lv_timer_create(switch_off, data->timeout_ms, data); // want to reset timer once excess solar to hot water is activated
+      timeout_timer = lv_timer_create(power_check, data->timeout_ms, data); // want to reset timer once excess solar to hot water is activated
     }
     else {
       digitalWrite(data->relay_pin, LOW);
-      if (timeroi) lv_timer_del(timeroi);
+      if (timeout_timer) lv_timer_del(timeout_timer);
       if ( data->relay_pin == RELAY4 ) {
         lv_label_set_text(data->label_obj, "OFF"); // inverter only
         // turn off the other buttons
-        for ( uint8_t i = 0; i < 2; i++ ) {
+        for ( uint8_t i = 0; i < 3; i++ ) {
           if ( lv_obj_has_state(userData[i].button, LV_STATE_CHECKED) ) {
             lv_obj_clear_state(userData[i].button, LV_STATE_CHECKED);
           }
@@ -309,15 +309,15 @@ void sweep_timer (lv_timer_t* timer) {
 }
 
 
-// SWITCH OFF TIMER ///////////////////////////////////////////////////////////////////////
-void switch_off(lv_timer_t * timer) {
+// POWER CHECK TIMER ///////////////////////////////////////////////////////////////////////
+void power_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
   bool on = false;
   
   // inverter conditions
   if ( data->relay_pin == RELAY4 ) {
     // if demand and soc>10% and dcl ok - 1st priority test LOW PACK
-    if ( pwr_demand && combinedData.canData.soc > 10 || combinedData.canData.dcl > data->dcl_limit ) {
+    if ( pwr_demand && combinedData.canData.soc > 10 && combinedData.canData.dcl > data->dcl_limit ) {
       on = true;
       //Serial.println("inverter on due to demand or charge");
     }
@@ -325,8 +325,8 @@ void switch_off(lv_timer_t * timer) {
     else if ( combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) {
       on = true;
     }
-    // if power consumption exceeds inverter standby (75W) and charge or discharge is greater than 75W - 3rd priority test DEMAND
-    else if ( pre_start_p + 75 < combinedData.canData.p && abs(combinedData.canData.p) > 75 ) {
+    // if power consumption exceeds inverter standby (85W) and charge or discharge is greater than 85W - 3rd priority test DEMAND
+    else if ( pre_start_p + 85 < combinedData.canData.p && abs(combinedData.canData.p) > 85 ) {
       on = true;
       //Serial.println("inverter on due power above inverter start power detected");
     }
@@ -370,10 +370,10 @@ void thermostat_event_handler(lv_event_t * e) {
     LV_UNUSED(obj);
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       // check if inverter is on
-      if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
-        lv_event_send(inv_btn, LV_EVENT_CLICKED, NULL); // send click event to start inverter
+      if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
+        lv_event_send(userData[3].button, LV_EVENT_CLICKED, &userData[3]); // send click event to start inverter
         // DEBUG if inverter is still off disable change flag
-        if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
+        if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
           Serial.println("DEBUG thermostat_event_handler - Unable to send start inverter event");
           return; // exit function if inverter is off
@@ -430,35 +430,6 @@ void dropdown_event_handler(lv_event_t *e) {
         data->set_temp = 23;
     }
 }
-// CREATE TEMPERATURE ARC ///////////////////////////////////////////////////////////
-/*void create_arc(lv_obj_t* parent, user_data_t* data) {
-  // temp selection label
-  data->arc_label = lv_label_create(parent);
-
-  // create arc
-  lv_obj_t* arc = lv_arc_create(parent);
-  lv_obj_set_size(arc, 100, 100);
-  lv_arc_set_range(arc, 5, 25);
-  lv_arc_set_rotation(arc, 180);
-  lv_arc_set_bg_angles(arc, 0, 180);
-  lv_arc_set_value(arc, 20); // default value
-  // position arc
-  lv_obj_set_pos(arc, 230, data->y_offset - 10);
-  lv_obj_add_event_cb(arc, arc_temp_change, LV_EVENT_VALUE_CHANGED, data);
-  // initiate label
-  lv_event_send(arc, LV_EVENT_VALUE_CHANGED, NULL);
-}
-// ARC EVENT HANDLER ///////////////////////////////////////////////////////////////
-static void arc_temp_change(lv_event_t* e) {
-  user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
-  lv_obj_t* arc = lv_event_get_target(e);
-  // update struct
-  data->set_temp = lv_arc_get_value(arc);
-  // set label
-  lv_label_set_text_fmt(data->arc_label, "%d\u00B0C", data->set_temp);
-  // rotate label with arc slider
-  lv_arc_rotate_obj_to_angle(arc, data->arc_label, 20); // radius_offset
-}*/
 
 // CREATE TEMPERATURE SELECTION DROPDOWN MENU ///////////////////////////////////////
 void create_temperature_dropdown(lv_obj_t * parent, user_data_t *data) {
@@ -482,7 +453,7 @@ void thermostat_timer(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
 
   // if inverter is off don't proceed
-  if ( ! lv_obj_has_state(inv_btn, LV_STATE_CHECKED) ) {
+  if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
     lv_timer_del(timer);
     return;
   }
@@ -511,70 +482,99 @@ void thermostat_timer(lv_timer_t * timer) {
   }
 }
 
-// TEMP SENSOR WARNING TIMER /////////////////////////////////////////////////////////////////
+// TEMP SENSOR FAULT DETECTOR /////////////////////////////////////////////////////////////////
 void sensor_fault(lv_timer_t* timer) {
-    user_data_t* data = (user_data_t*)timer->user_data;
-    char warning_msg[10];
+  user_data_t* data = (user_data_t*)timer->user_data;
 
-    if (combinedData.sensorData.temp1 == 999) {
-        snprintf(warning_msg, sizeof(warning_msg), "#1 --");
-    }
-    else if (combinedData.sensorData.temp2 == 999) {
-        snprintf(warning_msg, sizeof(warning_msg), "#2 --");
-    }
-    else {
-      snprintf(warning_msg, sizeof(warning_msg), "#1+2 --");
-    }
+  uint8_t faultArr[3];
+  uint8_t index = 0;
+  char faultMsg[20];
 
-    // Update the label directly with the warning message
-    lv_label_set_text(data->label_obj, warning_msg);
-    lv_timer_del(timer); // delete timer as it is called from within other timer
+  if (combinedData.sensorData.temp1 == 999.0f) {
+    faultArr[index] = 1;
+    index++;
+  }
+  if (combinedData.sensorData.temp2 == 999.0f) {
+    faultArr[index] = 2;
+    index++;
+  }
+  if (combinedData.sensorData.temp4 == 999.0f) {
+    faultArr[index] = 4;
+    index++;
+  }
+
+  if (index == 0) {
+    strcpy(faultMsg, "");
+    return;
+  }
+
+  strcpy(faultMsg, "#"); // Start with a #
+  
+  for (uint8_t i = 0; i < index; ++i) {
+    char buffer[10]; // Buffer to hold the string representation of the number
+    if (i > 0) {
+      strcat(faultMsg, "+"); // Add + before each element except the first
+    }
+    snprintf(buffer, sizeof(buffer), "%d", faultArr[i]);
+    strcat(faultMsg, buffer);
+  }
+
+   // Add whitespace followed by two dashes at the end for single sensor fault
+  if ( index = 0 ) {
+    strcat(faultMsg, " --");
+  }
+  
+  // Update the label directly with the warning message
+  lv_label_set_text(data->label_obj, faultMsg);
+  
+  // Delete the timer as it is called from within another timer
+  lv_timer_del(timer);
 }
 
-// DISPLAY TEMP TIMER ////////////////////////////////////////////////////////////////////////
+// UPDATE TEMPERATURE AND CALL FAULT DETECT FUNCTION IF NEEDED ///////////////////////////////////
 void update_temp(lv_timer_t *timer) {
     user_data_t *data = (user_data_t *)timer->user_data;
     char buf[10];
 
+    // clear previously set disabled state
+    if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
+      lv_obj_clear_state(data->button, LV_STATE_DISABLED);
+    }
     // Ceiling heater uses avg temp if available or single sensor with notification each 8s
     if (data->relay_pin == RELAY1) {
         if (combinedData.sensorData.avg_temp != 999.0f) {
-            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp + temp_offset);
-        }
-        // sensor 2 fault
-        else if (combinedData.sensorData.temp1 != 999.0f) {
-            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp1 + temp_offset);
+            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp);
+        } else if (combinedData.sensorData.temp1 != 999.0f) {
+            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp1);
             lv_timer_create(sensor_fault, 8000, data);
-        }
-        // sensor 1 fault
-        else if (combinedData.sensorData.temp2 != 999.0f) {
-            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp2 + temp_offset);
+        } else if (combinedData.sensorData.temp2 != 999.0f) {
+            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp2);
             lv_timer_create(sensor_fault, 8000, data);
-        }
-        // both sensors are faulty
-        else {
-          snprintf(buf, sizeof(buf), "--");
-          lv_timer_create(sensor_fault, 8000, data);
-          // disable thermostat button as there's no valid temperature data
-          lv_obj_add_state(data->button, LV_STATE_DISABLED);
+        } else if (combinedData.sensorData.temp4 != 999.0f) {
+            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp4);
+            lv_timer_create(sensor_fault, 8000, data);
+        } else {
+            snprintf(buf, sizeof(buf), "----");
+            lv_timer_create(sensor_fault, 5000, data);
+            
+            // Disable button as there's no valid temperature data
+            lv_obj_add_state(data->button, LV_STATE_DISABLED);
         }
     }
     // Shower heater uses temp3
     else {
-        if (combinedData.sensorData.temp3 != 999.0f) {
-            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp3 + temp_offset);
-        }
-        else {
-            snprintf(buf, sizeof(buf), "#3 --");
-        }
+      if (combinedData.sensorData.temp3 != 999.0f) {
+        snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp3);
+      }
+      else {
+        snprintf(buf, sizeof(buf), "#3 --");
+        // Disable button as there's no valid temperature data
+        lv_obj_add_state(data->button, LV_STATE_DISABLED);
+      }
     }
 
     // Update the label text with the temperature or warning message
     lv_label_set_text(data->label_obj, buf);
-
-    // DEBUG
-    Serial.print("M7 core: ");
-    Serial.println(buf);
 }
 
 // CLEAR CAN EVENT HANDLER ////////////////////////////////////////////////////////////////////
@@ -1020,18 +1020,22 @@ void loop() {
       else canMsgData.msg_cnt = 0; // sent successfully
     }
   }
-  //else { Serial.println("M7 CAN not available"); } // crazy messages despite working
-
   if (RPC.available()) {
     // call func to get sensors and can data from M4 core
     retrieve_M4_data();
-    // check for messages from M4 core
-    if (RPC.read()) {
-      static String buffer = ""; // clean buffer before reading
-      buffer += (char)RPC.read();  // Fill the buffer with characters
-      //if (buffer.length() > 0) Serial.println(buffer);
+    
+    // check for messages from M4 core if Serial connection
+    
+    if ( Serial ) {
+      while (RPC.available()) {
+        buffer += (char)RPC.read();  // Fill the buffer with characters
+      }
+      if (buffer.length() > 0) {
+        Serial.println(buffer);
+        buffer = ""; // Clear buffer after printing
+      }
+      else Serial.println("RPC is available but no messages received from M4");
     }
-    else Serial.println("RPC is available but no messages received from M4");
   }
 
   // if no touch within timeout dim display and brightness above 0
