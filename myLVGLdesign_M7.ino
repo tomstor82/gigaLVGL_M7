@@ -195,7 +195,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   lv_obj_set_width(data->dcl_label, 140);
   lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
   lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
-  lv_timer_create(dcl_check, 10000, data); // check every 10s
+  lv_timer_create(dcl_check, 1000, data); // check every second to allow prompt off if dch relay open
 
   // create temperature dropdown and dynamic temperature labels for thermostat buttons
   if ( ! timeout_ms ) {
@@ -214,10 +214,8 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   else { // heaters
     lv_obj_add_event_cb(data->button, thermostat_event_handler, LV_EVENT_ALL, data);
   }
-  // adding inverter button to global variable as it needs to be read by the other buttons and
   // creating inverter status label
   if ( relay_pin == RELAY4 ) {
-    // create inverter status label
     data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
     lv_obj_set_width(data->label_obj, 120);
     lv_obj_align_to(data->label_obj, data->button, LV_ALIGN_OUT_RIGHT_MID, 80, 0);
@@ -255,16 +253,18 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
   if(code == LV_EVENT_CLICKED) {
     LV_UNUSED(obj);
     lv_timer_t* timeout_timer = NULL; // declare timer to be able to delete if button off prematurely
+
+    // Button ON
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
+
       if ( data->relay_pin == RELAY4 ) { // only for inverter for sweeping
         pre_start_p = combinedData.canData.p;
         lv_label_set_text(data->label_obj, "Inverter ON");
-        /*Serial.print("event handler pre-start power: ");
-        Serial.println(pre_start_p);*/
       }
+
       // if inverter off don't allow hot water button to be marked as clicked
       else if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
-        lv_event_send(userData[3].button, LV_EVENT_VALUE_CHANGED, &userData[3]); // send click event to start inverter
+        lv_event_send(userData[3].button, LV_EVENT_CLICKED, &userData[3]); // send click event to start inverter ** NOT WORKING
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
@@ -272,16 +272,21 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
           return; // exit function if inverter is off
         }
       }
+
       // hot water if inverter is on
       else pwr_demand++; // only for hot water
 
       digitalWrite(data->relay_pin, HIGH);
-      // Create delay timer for inverter sweep and for hot water
+      // Create delay timer for inverter sweep and for hot water timout
       timeout_timer = lv_timer_create(power_check, data->timeout_ms, data); // want to reset timer once excess solar to hot water is activated
     }
+
+    // Button OFF
     else {
       digitalWrite(data->relay_pin, LOW);
-      if (timeout_timer) lv_timer_del(timeout_timer);
+      if (timeout_timer) {
+        lv_timer_del(timeout_timer);
+      }
       if ( data->relay_pin == RELAY4 ) {
         lv_label_set_text(data->label_obj, "OFF"); // inverter only
         // turn off the other buttons
@@ -290,7 +295,7 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
             lv_obj_clear_state(userData[i].button, LV_STATE_CHECKED);
           }
         }
-        pwr_demand = 0;
+        pwr_demand = 0; // reset power demand
       }
       else {
         pwr_demand ? pwr_demand-- : NULL;
@@ -509,7 +514,7 @@ void sensor_fault(lv_timer_t* timer) {
   }
 
   strcpy(faultMsg, "#"); // Start with a #
-  
+
   for (uint8_t i = 0; i < index; ++i) {
     char buffer[10]; // Buffer to hold the string representation of the number
     if (i > 0) {
@@ -523,10 +528,10 @@ void sensor_fault(lv_timer_t* timer) {
   if ( index = 0 ) {
     strcat(faultMsg, " --");
   }
-  
+
   // Update the label directly with the warning message
   lv_label_set_text(data->label_obj, faultMsg);
-  
+
   // Delete the timer as it is called from within another timer
   lv_timer_del(timer);
 }
@@ -556,7 +561,7 @@ void update_temp(lv_timer_t *timer) {
         } else {
             snprintf(buf, sizeof(buf), "----");
             lv_timer_create(sensor_fault, 5000, data);
-            
+
             // Disable button as there's no valid temperature data
             lv_obj_add_state(data->button, LV_STATE_DISABLED);
         }
@@ -1023,9 +1028,9 @@ void loop() {
   if (RPC.available()) {
     // call func to get sensors and can data from M4 core
     retrieve_M4_data();
-    
+
     // check for messages from M4 core if Serial connection
-    
+
     if ( Serial ) {
       while (RPC.available()) {
         buffer += (char)RPC.read();  // Fill the buffer with characters
