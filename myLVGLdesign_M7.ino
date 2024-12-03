@@ -204,7 +204,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     create_temperature_dropdown(parent, data);//create_arc(parent, data);
     // create time updated temperature labels
     lv_timer_create(update_temp, 10000, data);
-    lv_obj_set_pos(data->label_obj, 180, y_offset + 13);
+    update_label_position(data->label_obj, y_offset);
   }
      
   // create event handlers with custom user_data
@@ -487,6 +487,23 @@ void thermostat_timer(lv_timer_t * timer) {
   }
 }
 
+// UPDATE LABEL POSITION BY WIDTH /////////////////////////////////////////////////////////////
+void update_label_position(lv_obj_t * label, int y_offset) {
+
+  // Set the label text (example text)
+//  lv_label_set_text(label, "Example Text");
+
+  // Get the width of the label
+  lv_coord_t label_width = lv_obj_get_width(label);
+
+  // Calculate the new x position based on the width of the text
+  int new_x_pos = 210 - (label_width / 2);
+  // Center the label horizontally around x = 180
+
+  // Set the new position of the label
+  lv_obj_set_pos(label, new_x_pos, y_offset + 13);
+}
+
 // TEMP SENSOR FAULT DETECTOR /////////////////////////////////////////////////////////////////
 void sensor_fault(lv_timer_t* timer) {
   user_data_t* data = (user_data_t*)timer->user_data;
@@ -532,6 +549,9 @@ void sensor_fault(lv_timer_t* timer) {
   // Update the label directly with the warning message
   lv_label_set_text(data->label_obj, faultMsg);
 
+  // Adjust the label position dynamically based on the text width
+  update_label_position(data->label_obj, data->y_offset);
+
   // Delete the timer as it is called from within another timer
   lv_timer_del(timer);
 }
@@ -573,6 +593,10 @@ void update_temp(lv_timer_t *timer) {
       }
       else {
         snprintf(buf, sizeof(buf), "#3 --");
+        // Clear ON state of button
+        if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
+          lv_obj_clear_state(data->button, LV_STATE_CHECKED);
+        }
         // Disable button as there's no valid temperature data
         lv_obj_add_state(data->button, LV_STATE_DISABLED);
       }
@@ -580,6 +604,9 @@ void update_temp(lv_timer_t *timer) {
 
     // Update the label text with the temperature or warning message
     lv_label_set_text(data->label_obj, buf);
+
+    // Adjust the label position dynamically based on the text width
+    update_label_position(data->label_obj, data->y_offset);
 }
 
 // CLEAR CAN EVENT HANDLER ////////////////////////////////////////////////////////////////////
