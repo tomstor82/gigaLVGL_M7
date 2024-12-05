@@ -157,7 +157,7 @@ const uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces st
 
 uint8_t brightness = 70;
 uint32_t previous_touch_ms;
-const uint16_t touch_timeout_ms = 20000; // 20s before screen dimming
+const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 
 // for M4 messages
 String buffer = "";
@@ -202,9 +202,13 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     // create label and update the user data member for access within timer to allow only to update text not object
     data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
     create_temperature_dropdown(parent, data);//create_arc(parent, data);
-    // create time updated temperature labels
+    // Set temp label width
+    lv_obj_set_width(data->label_obj, 60);
+    lv_obj_set_pos(data->label_obj, 170, data->y_offset + 13);
+    // Align the text in the center
+    lv_obj_set_style_text_align(data->label_obj, LV_TEXT_ALIGN_CENTER, 0);
+    // Create timer for updating temperature labels
     lv_timer_create(update_temp, 10000, data);
-    update_label_position(data->label_obj, y_offset);
   }
      
   // create event handlers with custom user_data
@@ -487,23 +491,6 @@ void thermostat_timer(lv_timer_t * timer) {
   }
 }
 
-// UPDATE LABEL POSITION BY WIDTH /////////////////////////////////////////////////////////////
-void update_label_position(lv_obj_t * label, int y_offset) {
-
-  // Set the label text (example text)
-//  lv_label_set_text(label, "Example Text");
-
-  // Get the width of the label
-  lv_coord_t label_width = lv_obj_get_width(label);
-
-  // Calculate the new x position based on the width of the text
-  int new_x_pos = 210 - (label_width / 2);
-  // Center the label horizontally around x = 180
-
-  // Set the new position of the label
-  lv_obj_set_pos(label, new_x_pos, y_offset + 13);
-}
-
 // TEMP SENSOR FAULT DETECTOR /////////////////////////////////////////////////////////////////
 void sensor_fault(lv_timer_t* timer) {
   user_data_t* data = (user_data_t*)timer->user_data;
@@ -549,23 +536,20 @@ void sensor_fault(lv_timer_t* timer) {
   // Update the label directly with the warning message
   lv_label_set_text(data->label_obj, faultMsg);
 
-  // Adjust the label position dynamically based on the text width
-  update_label_position(data->label_obj, data->y_offset);
-
   // Delete the timer as it is called from within another timer
   lv_timer_del(timer);
 }
 
-// UPDATE TEMPERATURE AND CALL FAULT DETECT FUNCTION IF NEEDED ///////////////////////////////////
 void update_temp(lv_timer_t *timer) {
     user_data_t *data = (user_data_t *)timer->user_data;
-    char buf[10];
+    char buf[20];
 
-    // clear previously set disabled state
-    if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
-      lv_obj_clear_state(data->button, LV_STATE_DISABLED);
+    // Clear previously set disabled state
+    if (lv_obj_has_state(data->button, LV_STATE_DISABLED)) {
+        lv_obj_clear_state(data->button, LV_STATE_DISABLED);
     }
-    // Ceiling heater uses avg temp if available or single sensor with notification each 8s
+
+    // Update temperature based on sensor data
     if (data->relay_pin == RELAY1) {
         if (combinedData.sensorData.avg_temp != 999.0f) {
             snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp);
@@ -582,32 +566,34 @@ void update_temp(lv_timer_t *timer) {
             snprintf(buf, sizeof(buf), "----");
             lv_timer_create(sensor_fault, 5000, data);
 
-            // Disable button as there's no valid temperature data
+            // Button OFF
+            if (lv_obj_has_state(data->button, LV_STATE_CHECKED)) {
+                lv_obj_clear_state(data->button, LV_STATE_CHECKED);
+                pwr_demand--;
+            }
+
+            // Button DISABLED
+            lv_obj_add_state(data->button, LV_STATE_DISABLED);
+        }
+    } else {
+        if (combinedData.sensorData.temp3 != 999.0f) {
+            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp3);
+        } else {
+            snprintf(buf, sizeof(buf), "#3 --");
+            // Button OFF
+            if (lv_obj_has_state(data->button, LV_STATE_CHECKED)) {
+                lv_obj_clear_state(data->button, LV_STATE_CHECKED);
+                pwr_demand--;
+            }
+            // Button DISABLED
             lv_obj_add_state(data->button, LV_STATE_DISABLED);
         }
     }
-    // Shower heater uses temp3
-    else {
-      if (combinedData.sensorData.temp3 != 999.0f) {
-        snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp3);
-      }
-      else {
-        snprintf(buf, sizeof(buf), "#3 --");
-        // Clear ON state of button
-        if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
-          lv_obj_clear_state(data->button, LV_STATE_CHECKED);
-        }
-        // Disable button as there's no valid temperature data
-        lv_obj_add_state(data->button, LV_STATE_DISABLED);
-      }
-    }
 
-    // Update the label text with the temperature or warning message
+    // Update the label text and set fixed width
     lv_label_set_text(data->label_obj, buf);
-
-    // Adjust the label position dynamically based on the text width
-    update_label_position(data->label_obj, data->y_offset);
 }
+
 
 // CLEAR CAN EVENT HANDLER ////////////////////////////////////////////////////////////////////
 void clear_bms_flag(lv_event_t * e) {
