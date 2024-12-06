@@ -13,10 +13,10 @@ Arduino_GigaDisplayTouch TouchDetector;
 GigaDisplayBacklight backlight;
 
 // Define relay pins
-#define RELAY1 64   // living space
-#define RELAY2 62   // shower room
-#define RELAY3 60   // water heater
-#define RELAY4 58   // inverter
+#define RELAY1 10   // inverter
+#define RELAY2 11   // ceiling heater
+#define RELAY3 12   // water heater
+#define RELAY4 13   // shower room
 
 // INVESTIGATE ABS_AMP FROM ORION
 //  CANBUS data Identifier List
@@ -219,7 +219,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     lv_obj_add_event_cb(data->button, thermostat_event_handler, LV_EVENT_ALL, data);
   }
   // creating inverter status label
-  if ( relay_pin == RELAY4 ) {
+  if ( relay_pin == RELAY1 ) {
     data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
     lv_obj_set_width(data->label_obj, 120);
     lv_obj_align_to(data->label_obj, data->button, LV_ALIGN_OUT_RIGHT_MID, 80, 0);
@@ -232,7 +232,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 void dcl_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
   // disable inverter if discharge relay is tripped
-  if ( data->relay_pin == RELAY4 && (combinedData.canData.ry & 0x0001) == 0x0001 ) {
+  if ( data->relay_pin == RELAY1 && (combinedData.canData.ry & 0x0001) == 0x0001 ) {
     lv_label_set_text(data->dcl_label, "Discharge Relay Tripped by BMS                                      "); // spaces to allow a pause
     lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
@@ -261,7 +261,7 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
     // Button ON
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
 
-      if ( data->relay_pin == RELAY4 ) { // only for inverter for sweeping
+      if ( data->relay_pin == RELAY1 ) { // only for inverter for sweeping
         pre_start_p = combinedData.canData.p;
         lv_label_set_text(data->label_obj, "Inverter ON");
       }
@@ -291,7 +291,7 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
       if (timeout_timer) {
         lv_timer_del(timeout_timer);
       }
-      if ( data->relay_pin == RELAY4 ) {
+      if ( data->relay_pin == RELAY1 ) {
         lv_label_set_text(data->label_obj, "OFF"); // inverter only
         // turn off the other buttons
         for ( uint8_t i = 0; i < 3; i++ ) {
@@ -324,7 +324,7 @@ void power_check(lv_timer_t * timer) {
   bool on = false;
   
   // inverter conditions
-  if ( data->relay_pin == RELAY4 ) {
+  if ( data->relay_pin == RELAY1 ) {
     // if demand and soc>10% and dcl ok - 1st priority test LOW PACK
     if ( pwr_demand && combinedData.canData.soc > 10 && combinedData.canData.dcl > data->dcl_limit ) {
       on = true;
@@ -356,7 +356,7 @@ void power_check(lv_timer_t * timer) {
     lv_timer_del(timer);
 
     // Inverter sweep timer starting after turning off relay
-    if ( data->relay_pin == RELAY4 ) {
+    if ( data->relay_pin == RELAY1 ) {
       lv_label_set_text(data->label_obj, "Eco Sweep - 3 min OFF");
       lv_timer_create(sweep_timer, sweep_interval_ms, data);
     }
@@ -468,7 +468,7 @@ void thermostat_timer(lv_timer_t * timer) {
   }
 
   // ceiling heater thermostat
-  if ( data->relay_pin == RELAY1 ) {
+  if ( data->relay_pin == RELAY2 ) {
     // Close relay if temperature is below selected and button has been pressed
     if ( combinedData.sensorData.avg_temp < data->set_temp && lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
     digitalWrite(data->relay_pin, HIGH);
@@ -550,7 +550,7 @@ void update_temp(lv_timer_t *timer) {
     }
 
     // Update temperature based on sensor data
-    if (data->relay_pin == RELAY1) {
+    if (data->relay_pin == RELAY2) {
         if (combinedData.sensorData.avg_temp != 999.0f) {
             snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp);
         } else if (combinedData.sensorData.temp1 != 999.0f) {
@@ -609,28 +609,31 @@ void clear_bms_flag(lv_event_t * e) {
 }
 // REFRESH CAN LABEL DATA //////////////////////////////////////////////////////////////////////
 void refresh_can_data(lv_timer_t* timer) {
-    can_label_t *data = (can_label_t *)timer->user_data;
-    char buf[50];
+  can_label_t *data = (can_label_t *)timer->user_data;
+  char buf[50];
 
-    switch (data->canDataType) {
-        case CAN_DATA_TYPE_INT:
-            snprintf(buf, sizeof(buf), "%s %d %s", data->label_prefix, *(data->canDataProperty.intData), data->label_unit);
-            break;
-        case CAN_DATA_TYPE_FLOAT:
-            snprintf(buf, sizeof(buf), "%s %.1f %s", data->label_prefix, *(data->canDataProperty.floatData), data->label_unit);
-            break;
-        case CAN_DATA_TYPE_DOUBLE_FLOAT:
-            snprintf(buf, sizeof(buf), "%s %.2f %s", data->label_prefix, *(data->canDataProperty.floatData), data->label_unit);
-            break;
-        case CAN_DATA_TYPE_BYTE:
-            snprintf(buf, sizeof(buf), "%s %d %s", data->label_prefix, *(data->canDataProperty.byteData), data->label_unit);
-            break;
-        default:
-            snprintf(buf, sizeof(buf), "%s %s %s", data->label_prefix, "Unknown", data->label_unit);
-            break;
-    }
-
-    lv_label_set_text(data->label_obj, buf);
+  switch (data->canDataType) {
+    case CAN_DATA_TYPE_INT:
+      if (data->label_unit && strlen(data->label_unit) > 0) {
+        snprintf(buf, sizeof(buf), "%s %d %s", data->label_prefix, *(data->canDataProperty.intData), data->label_unit);
+      } else {
+        snprintf(buf, sizeof(buf), "%s %d", data->label_prefix, *(data->canDataProperty.intData));
+      }
+      break;
+    case CAN_DATA_TYPE_FLOAT:
+      snprintf(buf, sizeof(buf), "%s %.1f %s", data->label_prefix, *(data->canDataProperty.floatData), data->label_unit);
+      break;
+    case CAN_DATA_TYPE_DOUBLE_FLOAT:
+      snprintf(buf, sizeof(buf), "%s %.2f %s", data->label_prefix, *(data->canDataProperty.floatData), data->label_unit);
+      break;
+    case CAN_DATA_TYPE_BYTE:
+      snprintf(buf, sizeof(buf), "%s %d %s", data->label_prefix, *(data->canDataProperty.byteData), data->label_unit);
+      break;
+    default:
+      snprintf(buf, sizeof(buf), "%s %s %s", data->label_prefix, "Unknown", data->label_unit && strlen(data->label_unit) > 0 ? data->label_unit : "");
+      break;
+  }
+  lv_label_set_text(data->label_obj, buf);
 }
 
 // CREATE CAN LABELS ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -995,13 +998,13 @@ void setup() {
   // arguments 1:obj  2:label 3:relay_pin 4:y_offset 5:dcl_limit 6:timeout_ms 7:user_data struct
   
   // Create Button 4 - INVERTER - try creating this first to allow others to send click event
-  create_button(cont, "Inverter",       RELAY4, 320, 5, inverter_startup_ms, &userData[3]);
+  create_button(cont, "Inverter",       RELAY1, 320, 5, inverter_startup_ms, &userData[3]);
 
   // Create Button 1 - CEILING HEATER
-  create_button(cont, "Ceiling Heater", RELAY1, 20, 70, 0, &userData[0]); // dcl for test max 255 uint8_t
+  create_button(cont, "Ceiling Heater", RELAY2, 20, 70, 0, &userData[0]); // dcl for test max 255 uint8_t
 
   // Create Button 2 - SHOWER HEATER
-  create_button(cont, "Shower Heater",  RELAY2, 120, 10, 0, &userData[1]);
+  create_button(cont, "Shower Heater",  RELAY4, 120, 10, 0, &userData[1]);
 
   // Create Button 3 - HOT WATER
   create_button(cont, "Hot Water",      RELAY3, 220, 60, hot_water_interval_ms, &userData[2]);
