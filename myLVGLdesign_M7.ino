@@ -268,7 +268,7 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
 
       // if inverter off don't allow hot water button to be marked as clicked
       else if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
-        lv_event_send(userData[3].button, LV_EVENT_CLICKED, &userData[3]); // send click event to start inverter ** NOT WORKING
+        lv_event_send(userData[3].button, LV_EVENT_VALUE_CHANGED, &userData[3]); // send click event to start inverter ** NOT WORKING
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
@@ -296,7 +296,7 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
         // turn off the other buttons
         for ( uint8_t i = 0; i < 3; i++ ) {
           if ( lv_obj_has_state(userData[i].button, LV_STATE_CHECKED) ) {
-            lv_obj_clear_state(userData[i].button, LV_STATE_CHECKED);
+            lv_event_send(userData[i].button, LV_EVENT_VALUE_CHANGED, NULL);
           }
         }
         pwr_demand = 0; // reset power demand
@@ -380,7 +380,7 @@ void thermostat_event_handler(lv_event_t * e) {
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       // check if inverter is on
       if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
-        lv_event_send(userData[3].button, LV_EVENT_CLICKED, &userData[3]); // send click event to start inverter
+        lv_event_send(userData[3].button, LV_EVENT_VALUE_CHANGED, &userData[3]); // send click event to start inverter ** NOT WORKING
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
@@ -614,11 +614,11 @@ void refresh_can_data(lv_timer_t* timer) {
 
   switch (data->canDataType) {
     case CAN_DATA_TYPE_INT:
-      if (data->label_unit && strlen(data->label_unit) > 0) {
+      //if (data->label_unit && strlen(data->label_unit) > 0) {
         snprintf(buf, sizeof(buf), "%s %d %s", data->label_prefix, *(data->canDataProperty.intData), data->label_unit);
-      } else {
+      /*} else {
         snprintf(buf, sizeof(buf), "%s %d", data->label_prefix, *(data->canDataProperty.intData));
-      }
+      }*/
       break;
     case CAN_DATA_TYPE_FLOAT:
       snprintf(buf, sizeof(buf), "%s %.1f %s", data->label_prefix, *(data->canDataProperty.floatData), data->label_unit);
@@ -1039,6 +1039,11 @@ void loop() {
         canMsgData.msg_cnt++;
       }
       else canMsgData.msg_cnt = 0; // sent successfully
+    }
+    // DEBUG
+    if ( Serial ) {
+      Serial.print("Cycles :");
+      Serial.println(combinedData.canData.cc);
     }
   }
   if (RPC.available()) {
