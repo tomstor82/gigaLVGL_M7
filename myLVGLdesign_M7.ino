@@ -67,7 +67,7 @@ struct CanData {
 
     uint16_t fu;            // BMS Faults
     uint16_t st;            // BMS Status
-    int cc;            // Total pack cycles
+    int cc;                 // Total pack cycles (int to avoid overrun issues with uint16_t)
 
     float kw;               // Active power 0,1kW
     byte hs;                // Internal Heatsink
@@ -210,6 +210,8 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     lv_obj_set_style_text_align(data->label_obj, LV_TEXT_ALIGN_CENTER, 0);
     // Create timer for updating temperature labels
     lv_timer_create(update_temp, 10000, data);
+    // Set initial text
+    lv_label_set_text(data->label_obj, ":)");
     // Add event handler for showing dht22 message box
     lv_obj_add_event_cb(data->label_obj, sensorData_msgBox, LV_EVENT_CLICKED, data);
     // Create Drop down for temperature selection
@@ -331,7 +333,7 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
 
       // if inverter off don't allow hot water button to be marked as clicked
       else if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
-        lv_event_send(userData[3].button, LV_EVENT_PRESSED, &userData[3]); // send click event to start inverter ** NOT WORKING
+        lv_event_send(userData[3].button, LV_EVENT_CLICKED, &userData[3]); // send click event to start inverter ** NOT WORKING
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
@@ -445,7 +447,7 @@ void thermostat_event_handler(lv_event_t * e) {
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       // check if inverter is on
       if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
-        lv_event_send(userData[3].button, LV_EVENT_VALUE_CHANGED, &userData[3]); // send click event to start inverter ** NOT WORKING
+        lv_event_send(userData[3].button, LV_EVENT_CLICKED, &userData[3]); // send click event to start inverter ** NOT WORKING
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
@@ -605,6 +607,7 @@ void sensor_fault(lv_timer_t* timer) {
   lv_timer_del(timer);
 }
 
+// TEMPERATURE UPDATER //////////////////////////////////////////////////////
 void update_temp(lv_timer_t *timer) {
     user_data_t *data = (user_data_t *)timer->user_data;
     char buf[20];
@@ -655,7 +658,7 @@ void update_temp(lv_timer_t *timer) {
         }
     }
 
-    // Update the label text and set fixed width
+    // Update the label text
     lv_label_set_text(data->label_obj, buf);
 }
 
