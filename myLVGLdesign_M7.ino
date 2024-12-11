@@ -911,6 +911,13 @@ void refresh_bms_status_data(lv_timer_t * timer) {
 
     data->balancing = false; // Reset balancing flag before updating
 
+    // Clear all status labels initially
+    for (uint8_t i = 0; i <= data->status_label_indexes; i++) {
+      if (data->status_label[i] != NULL) {
+        lv_obj_add_flag(data->status_label[i], LV_OBJ_FLAG_HIDDEN);
+      }
+    }
+
     // BMS flags
     if ((combinedData.canData.fu & 0x0100) == 0x0100) {
         create_status_label("Internal Hardware Fault", data);
@@ -993,7 +1000,7 @@ void refresh_bms_status_data(lv_timer_t * timer) {
         create_status_label("Polarization Model 2 Active", data);
     }
     /*if ((combinedData.canData.st & 0x4000) == 0x4000) {
-        create_status_label("Polarization Compensation Inactive", data);
+        create_status_label("Polarization Compensation Inactive", data); // removed as it is present in normal operation
     }*/
     if ((combinedData.canData.st & 0x8000) == 0x8000) {
         create_status_label("Charge Mode Activated over CANBUS", data);
