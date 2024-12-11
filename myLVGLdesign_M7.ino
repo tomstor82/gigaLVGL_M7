@@ -67,7 +67,7 @@ struct CanData {
 
     uint16_t fu;            // BMS Faults
     uint16_t st;            // BMS Status
-    uint16_t cc;            // Total pack cycles
+    int cc;            // Total pack cycles
 
     float kw;               // Active power 0,1kW
     byte hs;                // Internal Heatsink
@@ -121,6 +121,8 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   lv_obj_t* button;
   lv_obj_t* dcl_label;
   lv_obj_t* label_obj;
+  lv_obj_t* mbox;
+  lv_timer_t* mbox_update_timer;
   uint8_t relay_pin;
   uint8_t y_offset;
   unsigned long timeout_ms;
@@ -162,10 +164,10 @@ const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 // for M4 messages
 String buffer = "";
 
-//**************************************************************************************//
-//   TURN OFF HEATERS & HOT WATER IF INVERTER IS OFF                                    //
-// 
-//**************************************************************************************//
+//**************************************************************************************
+//   Made changes to event sending to buttons once inverter is turned off
+//   Adding message box for dht22 sensor data once temperature reading is touched
+//**************************************************************************************
 
 // CREATE BUTTON INSTANCE
 void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms, user_data_t* data) {
@@ -201,7 +203,6 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   if ( ! timeout_ms ) {
     // create label and update the user data member for access within timer to allow only to update text not object
     data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
-    create_temperature_dropdown(parent, data);//create_arc(parent, data);
     // Set temp label width
     lv_obj_set_width(data->label_obj, 60);
     lv_obj_set_pos(data->label_obj, 170, data->y_offset + 13);
@@ -209,9 +210,13 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     lv_obj_set_style_text_align(data->label_obj, LV_TEXT_ALIGN_CENTER, 0);
     // Create timer for updating temperature labels
     lv_timer_create(update_temp, 10000, data);
+    // Add event handler for showing dht22 message box
+    lv_obj_add_event_cb(data->label_obj, sensorData_msgBox, LV_EVENT_CLICKED, data);
+    // Create Drop down for temperature selection
+    create_temperature_dropdown(parent, data);
   }
      
-  // create event handlers with custom user_data
+  // Hot Water and Inverter Event Handler
   if ( timeout_ms ) { // hot water and inverter
     lv_obj_add_event_cb(data->button, hot_water_inverter_event_handler, LV_EVENT_ALL, data);
   }
@@ -232,7 +237,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 void dcl_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
   // disable inverter if discharge relay is tripped
-  if ( data->relay_pin == RELAY1 && (combinedData.canData.ry & 0x0001) == 0x0001 ) {
+  if ( data->relay_pin == RELAY1 && (combinedData.canData.ry & 0x0001) != 0x0001 ) {
     lv_label_set_text(data->dcl_label, "Discharge Relay Tripped by BMS                                      "); // spaces to allow a pause
     lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
@@ -249,8 +254,66 @@ void dcl_check(lv_timer_t * timer) {
   }
 }
 
+// MESSAGE BOX FOR SENSOR-DATA EVENT HANDLERS AND UPDATE TIMER /////////////////////////////////
+const char* set_msgbox_text() {
+  static char mbox_text[256]; // Static buffer to retain the value
+  snprintf(mbox_text, sizeof(mbox_text),
+           "Temp1: %.1f°C\nHumidity1: %.1f%%\n"
+           "Temp2: %.1f°C\nHumidity2: %.1f%%\n"
+           "Temp3: %.1f°C\nHumidity3: %.1f%%\n"
+           "Temp4: %.1f°C\nHumidity4: %.1f%%",
+           combinedData.sensorData.temp1, combinedData.sensorData.humi1,
+           combinedData.sensorData.temp2, combinedData.sensorData.humi2,
+           combinedData.sensorData.temp3, combinedData.sensorData.humi3,
+           combinedData.sensorData.temp4, combinedData.sensorData.humi4);
+  return mbox_text; // Return the text in the message box
+}
+
+void close_message_box_event_handler(lv_event_t* e) {
+    user_data_t* data = (user_data_t*)lv_event_get_user_data(e);
+    lv_event_code_t code = lv_event_get_code(e);
+
+    if (code == LV_EVENT_CLICKED) {
+        lv_timer_del(data->mbox_update_timer); // Delete the timer
+        lv_obj_del(data->mbox);           // Delete the message box
+
+        // Remove the screen overlay object
+        lv_obj_del(lv_event_get_current_target(e));
+    }
+}
+
+void sensorData_msgBox_update_timer(lv_timer_t* timer) {
+    user_data_t* data = (user_data_t*)timer->user_data;
+    lv_obj_t* label = lv_msgbox_get_text(data->mbox);
+    lv_label_set_text(label, set_msgbox_text()); // Update the text in the message box
+}
+
+void sensorData_msgBox(lv_event_t* e) {
+    user_data_t* data = (user_data_t*)lv_event_get_user_data(e);
+    lv_event_code_t code = lv_event_get_code(e);
+    lv_obj_t* obj = lv_event_get_target(e);
+    Serial.println("Touch detected for msgBox event handler");
+
+    if (code == LV_EVENT_CLICKED) {
+        LV_UNUSED(obj);
+        static const char* btn_txts[] = {}; // No buttons
+        data->mbox = lv_msgbox_create(lv_obj_get_parent(data->label_obj), "Sensor Data", set_msgbox_text(), btn_txts, false);
+        lv_obj_set_width(data->mbox, LV_PCT(80)); // Set width to 80% of the screen
+        lv_obj_align(data->mbox, LV_ALIGN_CENTER, 0, 0); // Center the message box on the screen
+
+        // Create a full-screen overlay to detect clicks for closing the message box
+        lv_obj_t* overlay = lv_obj_create(lv_scr_act());
+        lv_obj_set_size(overlay, LV_HOR_RES, LV_VER_RES);
+        lv_obj_set_style_opa(overlay, LV_OPA_TRANSP, 0); // Transparent overlay
+        lv_obj_add_event_cb(overlay, close_message_box_event_handler, LV_EVENT_CLICKED, data);
+
+        // Create timer to update data every 10s
+        data->mbox_update_timer = lv_timer_create(sensorData_msgBox_update_timer, 10000, data);
+    }
+}
+
 // HOT WATER AND INVERTER EVENT HANDLER ////////////////////////////////////////////////////
-void hot_water_inverter_event_handler(lv_event_t * e) {
+void hot_water_inverter_event_handler(lv_event_t* e) {
   user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
   lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t * obj = lv_event_get_target(e);
@@ -268,7 +331,7 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
 
       // if inverter off don't allow hot water button to be marked as clicked
       else if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
-        lv_event_send(userData[3].button, LV_EVENT_VALUE_CHANGED, &userData[3]); // send click event to start inverter ** NOT WORKING
+        lv_event_send(userData[3].button, LV_EVENT_PRESSED, &userData[3]); // send click event to start inverter ** NOT WORKING
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
@@ -296,7 +359,9 @@ void hot_water_inverter_event_handler(lv_event_t * e) {
         // turn off the other buttons
         for ( uint8_t i = 0; i < 3; i++ ) {
           if ( lv_obj_has_state(userData[i].button, LV_STATE_CHECKED) ) {
-            lv_event_send(userData[i].button, LV_EVENT_VALUE_CHANGED, NULL);
+            //lv_event_send(userData[i].button, LV_EVENT_DELETE, &userData[i]);
+            lv_obj_clear_state(userData[i].button, LV_STATE_CHECKED);
+            digitalWrite(userData[i].relay_pin, LOW);
           }
         }
         pwr_demand = 0; // reset power demand
@@ -614,11 +679,7 @@ void refresh_can_data(lv_timer_t* timer) {
 
   switch (data->canDataType) {
     case CAN_DATA_TYPE_INT:
-      //if (data->label_unit && strlen(data->label_unit) > 0) {
-        snprintf(buf, sizeof(buf), "%s %d %s", data->label_prefix, *(data->canDataProperty.intData), data->label_unit);
-      /*} else {
-        snprintf(buf, sizeof(buf), "%s %d", data->label_prefix, *(data->canDataProperty.intData));
-      }*/
+      snprintf(buf, sizeof(buf), "%s %d %s", data->label_prefix, *(data->canDataProperty.intData), data->label_unit);
       break;
     case CAN_DATA_TYPE_FLOAT:
       snprintf(buf, sizeof(buf), "%s %.1f %s", data->label_prefix, *(data->canDataProperty.floatData), data->label_unit);
@@ -671,6 +732,22 @@ void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* la
       Serial.println("Error: Unable to allocate memory for CAN label data.");
     }
 }
+// VERIFY CAN DATA
+/*int verifyData(int canValue, int bitLength) {
+  int range = std::pow(2, bitLength) - 1;
+  
+  // Check if the data is within the expected range (optional, depending on your needs)
+  if (canValue >= 0 && canValue <= range) {
+    // Process the data as needed
+    return canValue;
+  }
+  else {
+    // Handle out-of-range data
+    char errorMsg[100];
+    snprintf(errorMsg, sizeof(errorMsg), "Error: Invalid CAN data. Bit Length: %d, CAN Value: %u", bitLength, canValue);
+    Serial.println(errorMsg);
+  }
+}*/
 
 // CONVERT UNSIGNED TO SIGNED FUNCTION ////////////////////////////////////////
 int16_t signValue(uint16_t canValue) {
@@ -996,9 +1073,6 @@ void setup() {
 
 
   // arguments 1:obj  2:label 3:relay_pin 4:y_offset 5:dcl_limit 6:timeout_ms 7:user_data struct
-  
-  // Create Button 4 - INVERTER - try creating this first to allow others to send click event
-  create_button(cont, "Inverter",       RELAY1, 320, 5, inverter_startup_ms, &userData[3]);
 
   // Create Button 1 - CEILING HEATER
   create_button(cont, "Ceiling Heater", RELAY2, 20, 70, 0, &userData[0]); // dcl for test max 255 uint8_t
@@ -1008,6 +1082,9 @@ void setup() {
 
   // Create Button 3 - HOT WATER
   create_button(cont, "Hot Water",      RELAY3, 220, 60, hot_water_interval_ms, &userData[2]);
+
+  // Create Button 4 - INVERTER - makes no difference if this is created first or not when it comes to sending events
+  create_button(cont, "Inverter",       RELAY1, 320, 5, inverter_startup_ms, &userData[3]);
 
 }
 
@@ -1041,10 +1118,10 @@ void loop() {
       else canMsgData.msg_cnt = 0; // sent successfully
     }
     // DEBUG
-    if ( Serial ) {
+    /*if ( Serial ) {
       Serial.print("Cycles :");
       Serial.println(combinedData.canData.cc);
-    }
+    }*/
   }
   if (RPC.available()) {
     // call func to get sensors and can data from M4 core
