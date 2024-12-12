@@ -5,6 +5,16 @@
 #include "Arduino_GigaDisplayTouch.h"
 #include <Arduino_CAN.h>
 #include <Arduino_GigaDisplay.h>
+//#include "CRC.h"
+#include "CRC8.h"
+
+CRC8 crc(
+  0x1D, // Polynomial
+  0xFF, // Initial value
+  0xFF, // XOR out value
+  false, // Reflect input bytes
+  false // Reflect final CRC value
+);
 
 Arduino_H7_Video Display(800, 480, GigaDisplayShield);
 Arduino_GigaDisplayTouch TouchDetector;
@@ -146,19 +156,19 @@ typedef struct {
 //Initialise structures
 static CanMsgData canMsgData;
 static bms_status_data_t bmsStatusData;
-static user_data_t userData[4]; // 4 buttons with user_data
-static can_label_t canLabel[14]; // 14 labels so far
+static user_data_t userData[4] = {}; // 4 buttons with user_data
+static can_label_t canLabel[14] = {}; // 14 labels so far
 static CombinedData combinedData;
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size)
-int pre_start_p;
+int pre_start_p = 0;
 uint8_t pwr_demand = 0;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
 const uint16_t inverter_startup_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
 const uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 85Wh to around 12,5Wh -84%
 
 uint8_t brightness = 70;
-uint32_t previous_touch_ms;
+uint32_t previous_touch_ms = 0;
 const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 
 // for M4 messages
@@ -242,6 +252,10 @@ void dcl_check(lv_timer_t * timer) {
   if ( data->relay_pin == RELAY1 && (combinedData.canData.ry & 0x0001) != 0x0001 ) {
     lv_label_set_text(data->dcl_label, "Discharge Relay Tripped by BMS                                      "); // spaces to allow a pause
     lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
+    // if inverter is on turn it off
+    if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
+      lv_event_send(data->button, LV_EVENT_RELEASED, data);
+    }
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }
   // disable buttons if dcl limit below appliance minimum operating dcl
@@ -361,9 +375,9 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         // turn off the other buttons
         for ( uint8_t i = 0; i < 3; i++ ) {
           if ( lv_obj_has_state(userData[i].button, LV_STATE_CHECKED) ) {
-            //lv_event_send(userData[i].button, LV_EVENT_DELETE, &userData[i]);
-            lv_obj_clear_state(userData[i].button, LV_STATE_CHECKED);
-            digitalWrite(userData[i].relay_pin, LOW);
+            lv_event_send(userData[i].button, LV_EVENT_RELEASED, &userData[i]);
+            //lv_obj_clear_state(userData[i].button, LV_STATE_CHECKED);
+            //digitalWrite(userData[i].relay_pin, LOW);
           }
         }
         pwr_demand = 0; // reset power demand
@@ -735,60 +749,86 @@ void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* la
       Serial.println("Error: Unable to allocate memory for CAN label data.");
     }
 }
-// VERIFY CAN DATA
-/*int verifyData(int canValue, int bitLength) {
-  int range = std::pow(2, bitLength) - 1;
-  
-  // Check if the data is within the expected range (optional, depending on your needs)
-  if (canValue >= 0 && canValue <= range) {
-    // Process the data as needed
-    return canValue;
-  }
-  else {
-    // Handle out-of-range data
-    char errorMsg[100];
-    snprintf(errorMsg, sizeof(errorMsg), "Error: Invalid CAN data. Bit Length: %d, CAN Value: %u", bitLength, canValue);
-    Serial.println(errorMsg);
-  }
-}*/
 
-// CONVERT UNSIGNED TO SIGNED FUNCTION ////////////////////////////////////////
+// Function to sign value
 int16_t signValue(uint16_t canValue) {
-  int16_t signedValue = (canValue > 32767) ? canValue - 65536 : canValue;
-  return signedValue;
+    int16_t signedValue = (canValue > 32767) ? canValue - 65536 : canValue;
+    return signedValue;
 }
 
-// SORT CANBUS DATA ////////////////////////////////////////////////////////////
+// Sort CAN bus data
 void sort_can() {
+    uint8_t* data = canMsgData.rxBuf;
+    uint8_t length = canMsgData.len;
 
-    // I WOULD LIKE TO COMPARE CHECKSUM BUT CPP STD LIBRARY NOT AVAILABLE I BELIEVE
+    // Process CAN message if CRC check passes
     if (canMsgData.rxId == 0x3B) {
+        uint8_t received_crc = data[length - 1]; // Assuming CRC is the last byte
+        crc.restart();
+        crc.add(data, length - 1); // Add data bytes to CRC calculation
+        uint8_t calculated_crc = crc.calc();
+        if (received_crc != calculated_crc) {
+            Serial.println("CRC check failed for ID 0x3B");
+            return; // Exit function if CRC check fails
+        }
         combinedData.canData.instU = ((canMsgData.rxBuf[0] << 8) + canMsgData.rxBuf[1]) / 10.0;
         combinedData.canData.instI = (signValue((canMsgData.rxBuf[2] << 8) + canMsgData.rxBuf[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
         combinedData.canData.absI = ((canMsgData.rxBuf[4] << 8) + canMsgData.rxBuf[5]) / 10.0; // orion2jr issue: set signed and -32767 to fix
         combinedData.canData.soc = canMsgData.rxBuf[6] / 2;
     }
-    if(canMsgData.rxId == 0x6B2) {
+    if (canMsgData.rxId == 0x6B2) {
+        uint8_t received_crc = data[length - 1];
+        crc.restart();
+        crc.add(data, length - 1);
+        uint8_t calculated_crc = crc.calc();
+        if (received_crc != calculated_crc) {
+            Serial.println("CRC check failed for ID 0x6B2");
+            return;
+        }
         combinedData.canData.lC = ((canMsgData.rxBuf[0] << 8) + canMsgData.rxBuf[1]) / 10000.00;
         combinedData.canData.hC = ((canMsgData.rxBuf[2] << 8) + canMsgData.rxBuf[3]) / 10000.00;
         combinedData.canData.h = canMsgData.rxBuf[4];
         combinedData.canData.cc = (canMsgData.rxBuf[5] << 8) + canMsgData.rxBuf[6];
     }
-    if(canMsgData.rxId == 0x0A9) {
+    if (canMsgData.rxId == 0x0A9) {
+        uint8_t received_crc = data[length - 1];
+        crc.restart();
+        crc.add(data, length - 1);
+        uint8_t calculated_crc = crc.calc();
+        if (received_crc != calculated_crc) {
+            Serial.println("CRC check failed for ID 0x0A9");
+            return;
+        }
         combinedData.canData.ry = canMsgData.rxBuf[0];
         combinedData.canData.ccl = canMsgData.rxBuf[1];
         combinedData.canData.dcl = canMsgData.rxBuf[2];
         combinedData.canData.ah = ((canMsgData.rxBuf[3] << 8) + canMsgData.rxBuf[4]) / 10.0;
         combinedData.canData.avgI = (signValue((canMsgData.rxBuf[5] << 8) + canMsgData.rxBuf[6])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
     }
-    if(canMsgData.rxId == 0x0BD) {
+    if (canMsgData.rxId == 0x0BD) {
+        uint8_t received_crc = data[length - 1];
+        crc.restart();
+        crc.add(data, length - 1);
+        uint8_t calculated_crc = crc.calc();
+        if (received_crc != calculated_crc) {
+            Serial.println("CRC check failed for ID 0x0BD");
+            return;
+        }
         combinedData.canData.fu = (canMsgData.rxBuf[0] << 8) + canMsgData.rxBuf[1];
         combinedData.canData.hT = canMsgData.rxBuf[2];
         combinedData.canData.lT = canMsgData.rxBuf[3];
         combinedData.canData.ct = canMsgData.rxBuf[4];
         combinedData.canData.st = (canMsgData.rxBuf[5] << 8) + canMsgData.rxBuf[6];
     }
-    if(canMsgData.rxId == 0x0BE) {
+    if (canMsgData.rxId == 0x0BE) {
+        uint8_t received_crc = data[length - 1];
+        crc.restart();
+        crc.add(data, length - 1);
+        uint8_t calculated_crc = crc.calc();
+        if (received_crc != calculated_crc) {
+            Serial.println("CRC check failed for ID 0x0BE");
+            return;
+        }
         combinedData.canData.hCid = canMsgData.rxBuf[0];
         combinedData.canData.lCid = canMsgData.rxBuf[1];
         combinedData.canData.hs = canMsgData.rxBuf[2];
