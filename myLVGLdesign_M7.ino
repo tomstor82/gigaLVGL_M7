@@ -244,19 +244,28 @@ void dcl_check(lv_timer_t * timer) {
     lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
     // if inverter is on turn it off
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
-      lv_event_send(data->button, LV_EVENT_RELEASED, data);
+      lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
     }
+    // disable button
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }
   // disable buttons if dcl limit below appliance minimum operating dcl
   else if ( combinedData.canData.dcl < data->dcl_limit ) {
     lv_label_set_text(data->dcl_label, "Please Charge Battery                                            "); // spaces to allow a pause
     lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
+    // if button is on turn it off
+    if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
+      lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
+    }
+    // disable button
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }
-  // add hide flag to hide label if all ok
+  // add hidden flag to label if all ok and enable button if previously disabled
   else {
     lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
+    if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
+      lv_obj_clear_flag(data->button, LV_STATE_DISABLED);
+    }
   }
 }
 
@@ -337,7 +346,7 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
 
       // if inverter off don't allow hot water button to be marked as clicked
       else if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
-        lv_event_send(userData[3].button, LV_EVENT_CLICKED, &userData[3]); // send click event to start inverter ** NOT WORKING
+        lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL); // send click event to start inverter ** NOT WORKING
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
@@ -451,7 +460,7 @@ void thermostat_event_handler(lv_event_t * e) {
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       // check if inverter is on
       if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
-        lv_event_send(userData[3].button, LV_EVENT_CLICKED, &userData[3]); // send click event to start inverter ** NOT WORKING
+        lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL); // send click event to start inverter ** NOT WORKING
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
@@ -532,21 +541,37 @@ void create_temperature_dropdown(lv_obj_t * parent, user_data_t *data) {
 void thermostat_timer(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
 
-  // if inverter is off don't proceed
-  if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
-    lv_timer_del(timer);
+  // variable to check if heaters have been on already as I don't want off interval timer on initial ON
+  static bool previous_function_calls = false;
+
+  static uint32_t thermostat_off_ms = 0;
+
+  // confirm heater has been on already before timing the off cycle ( prevents flapping every 10s )
+  if ( previous_function_calls && thermostat_off_ms + 120000 > millis() ) { // heater OFF for minimum 2 minutes
+    // return if off time interval not yet met
     return;
   }
 
-  // ceiling heater thermostat
+  // ceiling heater thermostat ( uses 3 or 1 sensors )
   if ( data->relay_pin == RELAY2 ) {
-    // Close relay if temperature is below selected and button has been pressed
-    if ( combinedData.sensorData.avg_temp < data->set_temp && lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
-    digitalWrite(data->relay_pin, HIGH);
+    // need to check which sensor is working ( if none is the temp updater will disable button )
+    if ( combinedData.sensorData.avg_temp != 999.0f && combinedData.sensorData.avg_temp < data->set_temp ) {
+      digitalWrite(data->relay_pin, HIGH);
     }
+    else if ( combinedData.sensorData.temp1 != 999.0f && combinedData.sensorData.temp1 < data->set_temp ) {
+      digitalWrite(data->relay_pin, HIGH);
+    }
+    else if ( combinedData.sensorData.temp2 != 999.0f && combinedData.sensorData.temp2 < data->set_temp ) {
+      digitalWrite(data->relay_pin, HIGH);
+    }
+    else if ( combinedData.sensorData.temp3 != 999.0f && combinedData.sensorData.temp4 < data->set_temp ) {
+      digitalWrite(data->relay_pin, HIGH);
+    }
+
     // Open relay when temperature is higher or equal to selected
     else {
       digitalWrite(data->relay_pin, LOW);
+      thermostat_off_ms = millis();
     }
   }
   // shower heater thermostat
@@ -560,6 +585,7 @@ void thermostat_timer(lv_timer_t * timer) {
       digitalWrite(data->relay_pin, LOW);
     }
   }
+  previous_function_calls = true;
 }
 
 // TEMP SENSOR FAULT DETECTOR /////////////////////////////////////////////////////////////////
@@ -621,7 +647,7 @@ void update_temp(lv_timer_t *timer) {
         lv_obj_clear_state(data->button, LV_STATE_DISABLED);
     }
 
-    // Update temperature based on sensor data
+    // check sensors for living room. If no avg_temp use single working sensor.
     if (data->relay_pin == RELAY2) {
         if (combinedData.sensorData.avg_temp != 999.0f) {
             snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp);
@@ -638,26 +664,26 @@ void update_temp(lv_timer_t *timer) {
             snprintf(buf, sizeof(buf), "----");
             lv_timer_create(sensor_fault, 5000, data);
 
-            // Button OFF
+            // Button OFF if no sensor data
             if (lv_obj_has_state(data->button, LV_STATE_CHECKED)) {
-                lv_obj_clear_state(data->button, LV_STATE_CHECKED);
-                pwr_demand--;
+                lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
             }
 
-            // Button DISABLED
+            // Button DISABLED after being turned OFF (no need to test here as state disabled in beginning)
             lv_obj_add_state(data->button, LV_STATE_DISABLED);
         }
-    } else {
+    }
+    // check single sensor for shower room
+    else {
         if (combinedData.sensorData.temp3 != 999.0f) {
             snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp3);
         } else {
             snprintf(buf, sizeof(buf), "#3 --");
-            // Button OFF
+            // Button OFF if no sensor data
             if (lv_obj_has_state(data->button, LV_STATE_CHECKED)) {
-                lv_obj_clear_state(data->button, LV_STATE_CHECKED);
-                pwr_demand--;
+                lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
             }
-            // Button DISABLED
+            // Button DISABLED after being turned OFF (no need to test here as state disabled in beginning)
             lv_obj_add_state(data->button, LV_STATE_DISABLED);
         }
     }
