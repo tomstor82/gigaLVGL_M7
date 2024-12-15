@@ -5,16 +5,6 @@
 #include "Arduino_GigaDisplayTouch.h"
 #include <Arduino_CAN.h>
 #include <Arduino_GigaDisplay.h>
-//#include "CRC.h"
-#include "CRC8.h"
-
-CRC8 crc(
-  0x1D, // Polynomial
-  0xFF, // Initial value
-  0xFF, // XOR out value
-  false, // Reflect input bytes
-  false // Reflect final CRC value
-);
 
 Arduino_H7_Video Display(800, 480, GigaDisplayShield);
 Arduino_GigaDisplayTouch TouchDetector;
@@ -221,7 +211,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     // Create timer for updating temperature labels
     lv_timer_create(update_temp, 10000, data);
     // Set initial text
-    lv_label_set_text(data->label_obj, ":)");
+    lv_label_set_text(data->label_obj, LV_SYMBOL_REFRESH);
     // Add event handler for showing dht22 message box
     lv_obj_add_event_cb(data->label_obj, sensorData_msgBox, LV_EVENT_CLICKED, data);
     // Create Drop down for temperature selection
@@ -758,47 +748,20 @@ int16_t signValue(uint16_t canValue) {
 
 // Sort CAN bus data
 void sort_can() {
-    uint8_t* data = canMsgData.rxBuf;
-    uint8_t length = canMsgData.len;
 
-    // Process CAN message if CRC check passes
     if (canMsgData.rxId == 0x3B) {
-        uint8_t received_crc = data[length - 1]; // Assuming CRC is the last byte
-        crc.restart();
-        crc.add(data, length - 1); // Add data bytes to CRC calculation
-        uint8_t calculated_crc = crc.calc();
-        if (received_crc != calculated_crc) {
-            Serial.println("CRC check failed for ID 0x3B");
-            return; // Exit function if CRC check fails
-        }
         combinedData.canData.instU = ((canMsgData.rxBuf[0] << 8) + canMsgData.rxBuf[1]) / 10.0;
         combinedData.canData.instI = (signValue((canMsgData.rxBuf[2] << 8) + canMsgData.rxBuf[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
         combinedData.canData.absI = ((canMsgData.rxBuf[4] << 8) + canMsgData.rxBuf[5]) / 10.0; // orion2jr issue: set signed and -32767 to fix
         combinedData.canData.soc = canMsgData.rxBuf[6] / 2;
     }
     if (canMsgData.rxId == 0x6B2) {
-        uint8_t received_crc = data[length - 1];
-        crc.restart();
-        crc.add(data, length - 1);
-        uint8_t calculated_crc = crc.calc();
-        if (received_crc != calculated_crc) {
-            Serial.println("CRC check failed for ID 0x6B2");
-            return;
-        }
         combinedData.canData.lC = ((canMsgData.rxBuf[0] << 8) + canMsgData.rxBuf[1]) / 10000.00;
         combinedData.canData.hC = ((canMsgData.rxBuf[2] << 8) + canMsgData.rxBuf[3]) / 10000.00;
         combinedData.canData.h = canMsgData.rxBuf[4];
         combinedData.canData.cc = (canMsgData.rxBuf[5] << 8) + canMsgData.rxBuf[6];
     }
     if (canMsgData.rxId == 0x0A9) {
-        uint8_t received_crc = data[length - 1];
-        crc.restart();
-        crc.add(data, length - 1);
-        uint8_t calculated_crc = crc.calc();
-        if (received_crc != calculated_crc) {
-            Serial.println("CRC check failed for ID 0x0A9");
-            return;
-        }
         combinedData.canData.ry = canMsgData.rxBuf[0];
         combinedData.canData.ccl = canMsgData.rxBuf[1];
         combinedData.canData.dcl = canMsgData.rxBuf[2];
@@ -806,14 +769,6 @@ void sort_can() {
         combinedData.canData.avgI = (signValue((canMsgData.rxBuf[5] << 8) + canMsgData.rxBuf[6])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
     }
     if (canMsgData.rxId == 0x0BD) {
-        uint8_t received_crc = data[length - 1];
-        crc.restart();
-        crc.add(data, length - 1);
-        uint8_t calculated_crc = crc.calc();
-        if (received_crc != calculated_crc) {
-            Serial.println("CRC check failed for ID 0x0BD");
-            return;
-        }
         combinedData.canData.fu = (canMsgData.rxBuf[0] << 8) + canMsgData.rxBuf[1];
         combinedData.canData.hT = canMsgData.rxBuf[2];
         combinedData.canData.lT = canMsgData.rxBuf[3];
@@ -821,14 +776,6 @@ void sort_can() {
         combinedData.canData.st = (canMsgData.rxBuf[5] << 8) + canMsgData.rxBuf[6];
     }
     if (canMsgData.rxId == 0x0BE) {
-        uint8_t received_crc = data[length - 1];
-        crc.restart();
-        crc.add(data, length - 1);
-        uint8_t calculated_crc = crc.calc();
-        if (received_crc != calculated_crc) {
-            Serial.println("CRC check failed for ID 0x0BE");
-            return;
-        }
         combinedData.canData.hCid = canMsgData.rxBuf[0];
         combinedData.canData.lCid = canMsgData.rxBuf[1];
         combinedData.canData.hs = canMsgData.rxBuf[2];
@@ -925,13 +872,13 @@ void create_status_label(const char* label_text, bms_status_data_t* data, bool f
 
     // if finised is passed from refresh function, store last index to struct and reset static index ready for next refresh cycle
     if ( finished ) {
-      data->status_label_indexes = i - 1; // add last stored array index to structure with compensation for the last i++ (not array length)
-      // Only set button pos and vis once refresh function is finished and labels are present, for dynamic positioning
+      data->status_label_indexes = i - 1; // add last stored array index to structure with compensation for the last i++. This is not the array length which is fixed
+      // Button is only visible and position set if refresh function has passed finished argument and there are flags present
       if ( data->button && i > 0 ) {
-        lv_obj_align_to(data->button, data->status_label[data->status_label_indexes], LV_ALIGN_OUT_BOTTOM_MID, 0, 20); // Align button below last label with a gap
+        lv_obj_align_to(data->button, data->status_label[data->status_label_indexes], LV_ALIGN_OUT_BOTTOM_MID, 0, 20); // Align button below last label with index controlled gap
         lv_obj_clear_flag(data->button, LV_OBJ_FLAG_HIDDEN); // Show the button
       }
-      i = 0; // reset index
+      i = 0; // reset index once finished argument is passed at end fo refresher function
       return; // exit function as finished is only passed by end of refresh function logic without label
     }
     
@@ -939,6 +886,7 @@ void create_status_label(const char* label_text, bms_status_data_t* data, bool f
     if ( ! data->status_label[i] ) {
       data->status_label[i] = lv_label_create(data->parent);
     }
+    // add text to label index and allign vertically by index
     lv_label_set_text(data->status_label[i], label_text);
     lv_obj_align_to(data->status_label[i], data->title_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 15 + i * 20);
 
