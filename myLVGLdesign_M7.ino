@@ -150,10 +150,12 @@ static can_label_t canLabel[14] = {}; // 14 labels so far
 static CombinedData combinedData;
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size)
-int pre_start_p = 0;
+uint16_t inverter_prestart_p = 0;
+uint16_t inverter_standby_p = 85;
+uint32_t inverter_startup_ms = 0;
 uint8_t pwr_demand = 0;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
-const uint16_t inverter_startup_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
+const uint16_t inverter_startup_delay_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
 const uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 85Wh to around 12,5Wh -84%
 
 uint8_t brightness = 70;
@@ -202,17 +204,24 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   if ( ! timeout_ms ) {
     // create label and update the user data member for access within timer to allow only to update text not object
     data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
+
     // Set temp label width
     lv_obj_set_width(data->label_obj, 60);
     lv_obj_set_pos(data->label_obj, 170, data->y_offset + 13);
+
     // Align the text in the center
     lv_obj_set_style_text_align(data->label_obj, LV_TEXT_ALIGN_CENTER, 0);
+
     // Create timer for updating temperature labels
     lv_timer_create(update_temp, 10000, data);
+
     // Set initial text
     lv_label_set_text(data->label_obj, LV_SYMBOL_REFRESH);
-    // Add event handler for showing dht22 message box
+
+    // Make label clickable and add event handler for showing sensor message box
+    lv_obj_add_flag(data->label_obj, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(data->label_obj, sensorData_msgBox, LV_EVENT_CLICKED, data);
+
     // Create Drop down for temperature selection
     create_temperature_dropdown(parent, data);
   }
@@ -237,10 +246,12 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 // DCL CHECK TIMER ////////////////////////////////////////////////////////////////////////////
 void dcl_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
+
   // disable inverter if discharge relay is tripped
   if ( data->relay_pin == RELAY1 && (combinedData.canData.ry & 0x0001) != 0x0001 ) {
     lv_label_set_text(data->dcl_label, "Discharge Relay Tripped by BMS                                      "); // spaces to allow a pause
     lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
+
     // if inverter is on turn it off
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
@@ -252,6 +263,7 @@ void dcl_check(lv_timer_t * timer) {
   else if ( combinedData.canData.dcl < data->dcl_limit ) {
     lv_label_set_text(data->dcl_label, "Please Charge Battery                                            "); // spaces to allow a pause
     lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
+
     // if button is on turn it off
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
@@ -259,6 +271,7 @@ void dcl_check(lv_timer_t * timer) {
     // disable button
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }
+
   // add hidden flag to label if all ok and enable button if previously disabled
   else {
     lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
@@ -339,7 +352,8 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
 
       if ( data->relay_pin == RELAY1 ) { // only for inverter for sweeping
-        pre_start_p = combinedData.canData.p;
+        inverter_prestart_p = combinedData.canData.p;
+        inverter_startup_ms = millis();
         lv_label_set_text(data->label_obj, "Inverter ON");
       }
 
@@ -390,8 +404,10 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
 // INVERTER SWEEP TIMER ///////////////////////////////////////////////////////////////////
 void sweep_timer (lv_timer_t* timer) {
   user_data_t* data = (user_data_t *)timer->user_data;
+
   // stimulate button with click to start inverter again
   lv_event_send(data->button, LV_EVENT_CLICKED, NULL);
+
   // delete timer so it only runs once as this function is called continiously by other timer
   lv_timer_del(timer);
 }
@@ -413,8 +429,8 @@ void power_check(lv_timer_t * timer) {
     else if ( combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) {
       on = true;
     }
-    // if power consumption exceeds inverter standby (85W) and charge or discharge is greater than 85W - 3rd priority test DEMAND
-    else if ( pre_start_p + 85 < combinedData.canData.p && abs(combinedData.canData.p) > 85 ) {
+    // if power consumption exceeds inverter standby which is measured in loop - 3rd priority test DEMAND
+    else if ( inverter_standby_p < combinedData.canData.p && abs(combinedData.canData.p) > inverter_standby_p ) {
       on = true;
       //Serial.println("inverter on due power above inverter start power detected");
     }
@@ -1070,7 +1086,7 @@ void setup() {
   create_button(cont, "Hot Water",      RELAY3, 220, 60, hot_water_interval_ms, &userData[2]);
 
   // Create Button 4 - INVERTER - makes no difference if this is created first or not when it comes to sending events
-  create_button(cont, "Inverter",       RELAY1, 320, 5, inverter_startup_ms, &userData[3]);
+  create_button(cont, "Inverter",       RELAY1, 320, 5, inverter_startup_delay_ms, &userData[3]);
 
 }
 
@@ -1131,6 +1147,14 @@ void loop() {
   if (previous_touch_ms + touch_timeout_ms < millis() && brightness) {
     dim_display();
   }
-    
+
+  // record inverter standby power consumption after startup delay between 10 - 10,5s
+  if ( inverter_startup_ms + 10000 < millis() && inverter_startup_ms + 10500 > millis() ) {
+    inverter_standby_p = combinedData.canData.p - inverter_prestart_p;
+    if ( inverter_standby_p < 0 ) { // if charging detected set documented value
+      inverter_standby_p = 85;
+    }
+  }
+
   delay(5); // calming loop
 }
