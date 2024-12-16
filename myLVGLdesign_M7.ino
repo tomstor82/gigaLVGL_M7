@@ -151,7 +151,7 @@ static CombinedData combinedData;
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size)
 uint16_t inverter_prestart_p = 0;
-uint16_t inverter_standby_p = 85;
+uint8_t inverter_standby_p = 94; // came to this after many tests despite 75W in specsheet
 uint32_t inverter_startup_ms = 0;
 uint8_t pwr_demand = 0;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
@@ -167,7 +167,7 @@ String buffer = "";
 
 //**************************************************************************************
 //   Made changes to event sending to buttons once inverter is turned off
-//   Adding message box for dht22 sensor data once temperature reading is touched
+//   
 //**************************************************************************************
 
 // CREATE BUTTON INSTANCE
@@ -294,12 +294,12 @@ void dcl_check(lv_timer_t * timer) {
 
 // MESSAGE BOX FOR SENSOR-DATA EVENT HANDLERS AND UPDATE TIMER /////////////////////////////////
 const char* set_msgbox_text() {
-  static char mbox_text[256]; // Static buffer to retain the value
+  static char mbox_text[312]; // Static buffer to retain the value
   snprintf(mbox_text, sizeof(mbox_text),
-           "Temperature #1: %.1f°C\nHumidity #1: %.1f%%\n\n"
-           "Temperature #2: %.1f°C\nHumidity #2: %.1f%%\n\n"
-           "Temperature #3: %.1f°C\nHumidity #3: %.1f%%\n\n"
-           "Temperature #4: %.1f°C\nHumidity #4: %.1f%%",
+           "Temperature 1:            %.1f°C\nHumidity 1:                   %.1f%%\n\n"
+           "Temperature 2:            %.1f°C\nHumidity 2:                   %.1f%%\n\n"
+           "Temperature 3:            %.1f°C\nHumidity 3:                   %.1f%%\n\n"
+           "Temperature 4:            %.1f°C\nHumidity 4:                   %.1f%%",
            combinedData.sensorData.temp1, combinedData.sensorData.humi1,
            combinedData.sensorData.temp2, combinedData.sensorData.humi2,
            combinedData.sensorData.temp3, combinedData.sensorData.humi3,
@@ -369,7 +369,6 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
 
       if ( data->relay_pin == RELAY1 ) { // only for inverter for sweeping
         inverter_prestart_p = combinedData.canData.p;
-        inverter_startup_ms = millis();
         lv_label_set_text(data->label_obj, "Inverter ON");
       }
 
@@ -451,8 +450,8 @@ void power_check(lv_timer_t * timer) {
     else if ( combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) {
       on = true;
     }
-    // if power consumption exceeds inverter standby which is measured in loop - 3rd priority test DEMAND
-    else if ( inverter_standby_p < combinedData.canData.p && abs(combinedData.canData.p) > inverter_standby_p ) {
+    // if power consumption exceeds inverter standby 94W - 3rd priority test DEMAND
+    else if ( (inverter_standby_p - inverter_prestart_p) < combinedData.canData.p && abs(combinedData.canData.p) > (inverter_standby_p - abs(inverter_prestart_p)) ) {
       on = true;
       //Serial.println("inverter on due power above inverter start power detected");
     }
@@ -1215,17 +1214,17 @@ void loop() {
     dim_display();
   }
 
-  // record inverter standby power consumption after startup delay between 15 - 15,5s
-  if ( inverter_startup_ms && inverter_startup_ms + 14000 < millis() && inverter_startup_ms + 15500 > millis() ) {
+  // Tried to accurately determine inverter standby power but that reading coincides with any usage being applied 94W for now
+  /*if ( inverter_startup_ms && inverter_startup_ms + 14150 < millis() && inverter_startup_ms + 14400 > millis() ) {
     inverter_standby_p = combinedData.canData.p - inverter_prestart_p;
 
-    Serial.print(millis()); // need to pin point when peak standby power is achieved accurately
+    Serial.print(millis() - inverter_startup_ms); // need to pin point when peak standby power is achieved accurately
     Serial.print("ms - Inverter Standby Power: ");
     Serial.println(inverter_standby_p);
     if ( inverter_standby_p < 0 ) { // if charging detected set estimated value
       inverter_standby_p = 85;
     }
-  }
+  }*/
 
   delay(5); // calming loop
 }
