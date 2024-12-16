@@ -451,7 +451,7 @@ void power_check(lv_timer_t * timer) {
       on = true;
     }
     // if power consumption exceeds inverter standby 94W - 3rd priority test DEMAND
-    else if ( (inverter_standby_p - inverter_prestart_p) < combinedData.canData.p && abs(combinedData.canData.p) > (inverter_standby_p - abs(inverter_prestart_p)) ) {
+    else if ( (inverter_standby_p + inverter_prestart_p) < combinedData.canData.p && abs(combinedData.canData.p) > (inverter_standby_p + abs(inverter_prestart_p)) ) {
       on = true;
       //Serial.println("inverter on due power above inverter start power detected");
     }
