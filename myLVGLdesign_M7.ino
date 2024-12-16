@@ -441,19 +441,23 @@ void power_check(lv_timer_t * timer) {
   
   // inverter conditions
   if ( data->relay_pin == RELAY1 ) {
-    // if demand and soc>10% and dcl ok - 1st priority test LOW PACK
-    if ( pwr_demand && combinedData.canData.soc > 10 && combinedData.canData.dcl > data->dcl_limit ) {
+
+    // BUTTON DEMAND AND ABOVE 10% SOC
+    if ( pwr_demand && combinedData.canData.soc > 10 ) {
       on = true;
-      //Serial.println("inverter on due to demand or charge");
+      //Serial.println("inverter on due to button demand");
     }
-    // if charging and soc>50% - 2nd priority test CHARGING
+
+    // CHARGING AND ABOVE 50% SOC
     else if ( combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) {
       on = true;
+      //Serial.println("inverter on due to battery charging");
     }
-    // if power consumption exceeds inverter standby 94W - 3rd priority test DEMAND
-    else if ( (inverter_standby_p + inverter_prestart_p) < combinedData.canData.p && abs(combinedData.canData.p) > (inverter_standby_p + abs(inverter_prestart_p)) ) {
+
+    // MEASURED DEMAND
+    else if ( (inverter_standby_p + inverter_prestart_p) < combinedData.canData.p ) {
       on = true;
-      //Serial.println("inverter on due power above inverter start power detected");
+      //Serial.println("inverter on due to power usage");
     }
   }
   // hot water tank - reset timer if charging
