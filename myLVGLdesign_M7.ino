@@ -104,6 +104,7 @@ typedef struct {
     lv_obj_t* button;
     lv_obj_t* status_label[28]; // can be expanded beyond the current 28 bms messages
     uint8_t y;
+    int8_t flag_index;
     bool balancing;
 } bms_status_data_t;
 
@@ -937,7 +938,7 @@ void flash_label(lv_timer_t * timer) {
   if (data->balancing) {
     int cell_balancing_label_index = -1;
     // Find the "Cell Balancing Active" label
-    for (uint8_t i = 0; i < (sizeof(data->status_label) / sizeof(data->status_label[0])); i++) {
+    for ( uint8_t i = 0; i < data->flag_index + 1; i++ ) {//for (uint8_t i = 0; i < (sizeof(data->status_label) / sizeof(data->status_label[0])); i++) {
       if (strcmp(lv_label_get_text(data->status_label[i]), "Cell Balancing Active") == 0) {
         cell_balancing_label_index = i;
         break;
@@ -964,18 +965,26 @@ void create_status_label(const char* label_text, bms_status_data_t* data, bool f
   if ( finished ) {
 
     // Make button visible if there are flags present
-    if ( i > 0 && lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
+   /* if ( i > 0 && lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(data->button, LV_OBJ_FLAG_HIDDEN); // Remove hide flag
       lv_obj_align_to(data->button, data->status_label[i-1], LV_ALIGN_OUT_BOTTOM_MID, 0, 20); // Align button below last label with index controlled gap
     }
+    // Hide title if no flags
+    else if ( ! lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_add_flag(data->title_label, LV_OBJ_FLAG_HIDDEN);
+    }
+    // Hide button if no flags
+    else if ( ! lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
+    }*/
     i = 0;
   }
 
   else {
     // Reveal title label so alignment to it is possible
-    if ( lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ) {
+   /* if ( lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(data->title_label, LV_OBJ_FLAG_HIDDEN); // Remove hide flag
-    }
+    }*/
 
     // only create label if it doesn't exist
     if ( ! data->status_label[i] ) {
@@ -992,6 +1001,8 @@ void create_status_label(const char* label_text, bms_status_data_t* data, bool f
 void refresh_bms_status_data(lv_timer_t * timer) {
     bms_status_data_t *data = (bms_status_data_t *)timer->user_data;
 
+    data->flag_index = -1; // initialise as -1 as this in array index
+
     data->balancing = false; // Reset balancing flag before updating
 
     // Clear all status labels initially
@@ -1003,41 +1014,62 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     }
 
     // BMS flags
-    if ((combinedData.canData.fu & 0x0100) == 0x0100) { create_status_label("Internal Hardware Fault", data); }
-    if ((combinedData.canData.fu & 0x0200) == 0x0200) { create_status_label("Internal Cell Comm Fault", data); }
-    if ((combinedData.canData.fu & 0x0400) == 0x0400) { create_status_label("Weak Cell Fault", data); }
-    if ((combinedData.canData.fu & 0x0800) == 0x0800) { create_status_label("Low Cell Voltage", data); }
-    if ((combinedData.canData.fu & 0x1000) == 0x1000) { create_status_label("Open Wire Fault", data); }
-    if ((combinedData.canData.fu & 0x2000) == 0x2000) { create_status_label("Current Sensor Fault", data); }
-    if ((combinedData.canData.fu & 0x4000) == 0x4000) { create_status_label("Abnormal SOC Behavior", data); }
-    if ((combinedData.canData.fu & 0x8000) == 0x8000) { create_status_label("Pack Too Hot Fault", data); }
-    if ((combinedData.canData.fu & 0x0001) == 0x0001) { create_status_label("Weak Pack Fault", data); }
-    if ((combinedData.canData.fu & 0x0002) == 0x0002) { create_status_label("External Thermistor Fault", data); }
-    if ((combinedData.canData.fu & 0x0004) == 0x0004) { create_status_label("Charge Relay Failure", data); }
-    if ((combinedData.canData.fu & 0x0008) == 0x0008) { create_status_label("Discharge Relay Fault", data); }
-    if ((combinedData.canData.fu & 0x0010) == 0x0010) { create_status_label("Safety Relay Fault", data); }
-    if ((combinedData.canData.fu & 0x0020) == 0x0020) { create_status_label("CAN communication Fault", data); }
-    if ((combinedData.canData.fu & 0x0040) == 0x0040) { create_status_label("Internal Thermistor Fault", data); }
-    if ((combinedData.canData.fu & 0x0080) == 0x0080) { create_status_label("Internal Logic Fault", data); }
+    if ((combinedData.canData.fu & 0x0100) == 0x0100) { create_status_label("Internal Hardware Fault", data); data->flag_index++; }
+    if ((combinedData.canData.fu & 0x0200) == 0x0200) { create_status_label("Internal Cell Comm Fault", data); data->flag_index++; }
+    if ((combinedData.canData.fu & 0x0400) == 0x0400) { create_status_label("Weak Cell Fault", data); data->flag_index++; }
+    if ((combinedData.canData.fu & 0x0800) == 0x0800) { create_status_label("Low Cell Voltage", data); data->flag_index++; }
+    if ((combinedData.canData.fu & 0x1000) == 0x1000) { create_status_label("Open Wire Fault", data); data->flag_index++; }
+    if ((combinedData.canData.fu & 0x2000) == 0x2000) { create_status_label("Current Sensor Fault", data); data->flag_index++; }
+    if ((combinedData.canData.fu & 0x4000) == 0x4000) { create_status_label("Abnormal SOC Behavior", data); data->flag_index++; }
+    if ((combinedData.canData.fu & 0x8000) == 0x8000) { create_status_label("Pack Too Hot Fault", data); data->flag_index++; }
+    if ((combinedData.canData.fu & 0x0001) == 0x0001) { create_status_label("Weak Pack Fault", data); data->flag_index++; }
+    if ((combinedData.canData.fu & 0x0002) == 0x0002) { create_status_label("External Thermistor Fault", data); data->flag_index++; }
+    if ((combinedData.canData.fu & 0x0004) == 0x0004) { create_status_label("Charge Relay Failure", data); data->flag_index++; }
+    if ((combinedData.canData.fu & 0x0008) == 0x0008) { create_status_label("Discharge Relay Fault", data); data->flag_index++; }
+    if ((combinedData.canData.fu & 0x0010) == 0x0010) { create_status_label("Safety Relay Fault", data); data->flag_index++; }
+    if ((combinedData.canData.fu & 0x0020) == 0x0020) { create_status_label("CAN communication Fault", data); data->flag_index++; }
+    if ((combinedData.canData.fu & 0x0040) == 0x0040) { create_status_label("Internal Thermistor Fault", data); data->flag_index++; }
+    if ((combinedData.canData.fu & 0x0080) == 0x0080) { create_status_label("Internal Logic Fault", data); data->flag_index++; }
 
     // Failsafe status
-    if ((combinedData.canData.st & 0x0001) == 0x0001) { create_status_label("Voltage Failsafe", data); }
-    if ((combinedData.canData.st & 0x0002) == 0x0002) { create_status_label("Current Failsafe", data); }
-    if ((combinedData.canData.st & 0x0004) == 0x0004) { create_status_label("Relay Failsafe", data); }
+    if ((combinedData.canData.st & 0x0001) == 0x0001) { create_status_label("Voltage Failsafe", data); data->flag_index++; }
+    if ((combinedData.canData.st & 0x0002) == 0x0002) { create_status_label("Current Failsafe", data); data->flag_index++; }
+    if ((combinedData.canData.st & 0x0004) == 0x0004) { create_status_label("Relay Failsafe", data); data->flag_index++; }
     if ((combinedData.canData.st & 0x0008) == 0x0008) {
         create_status_label("Cell Balancing Active", data);
         data->balancing = true;
-
+        data->flag_index++; 
     }
-    if ((combinedData.canData.st & 0x0010) == 0x0010) { create_status_label("Charge Interlock Failsafe", data); }
-    if ((combinedData.canData.st & 0x0020) == 0x0020) { create_status_label("Thermistor B-value Table Invalid", data); }
-    if ((combinedData.canData.st & 0x0040) == 0x0040) { create_status_label("Input Power Supply Failsafe", data); }
-    if ((combinedData.canData.st & 0x0100) == 0x0100) { create_status_label("Relays Opened under Load Failsafe", data); }
-    if ((combinedData.canData.st & 0x1000) == 0x1000) { create_status_label("Polarization Model 1 Active", data); }
-    if ((combinedData.canData.st & 0x2000) == 0x2000) { create_status_label("Polarization Model 2 Active", data); }
-    if ((combinedData.canData.st & 0x8000) == 0x8000) { create_status_label("Charge Mode Activated over CANBUS", data); }
+    if ((combinedData.canData.st & 0x0010) == 0x0010) { create_status_label("Charge Interlock Failsafe", data); data->flag_index++; }
+    if ((combinedData.canData.st & 0x0020) == 0x0020) { create_status_label("Thermistor B-value Table Invalid", data); data->flag_index++; }
+    if ((combinedData.canData.st & 0x0040) == 0x0040) { create_status_label("Input Power Supply Failsafe", data); data->flag_index++; }
+    if ((combinedData.canData.st & 0x0100) == 0x0100) { create_status_label("Relays Opened under Load Failsafe", data); data->flag_index++; }
+    if ((combinedData.canData.st & 0x1000) == 0x1000) { create_status_label("Polarization Model 1 Active", data); data->flag_index++; }
+    if ((combinedData.canData.st & 0x2000) == 0x2000) { create_status_label("Polarization Model 2 Active", data); data->flag_index++; }
+    if ((combinedData.canData.st & 0x8000) == 0x8000) { create_status_label("Charge Mode Activated over CANBUS", data); data->flag_index++; }
 
-    create_status_label("", data, true);
+  // Show title and button if flags are present
+  if ( data->flag_index > -1 ) {
+    if ( lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_clear_flag(data->title_label, LV_OBJ_FLAG_HIDDEN); // Remove hide flag
+    }
+    if ( lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_clear_flag(data->button, LV_OBJ_FLAG_HIDDEN); // Remove hide flag
+    }
+  }
+
+  // Hide title and button if no flags are present
+  else {
+    if ( ! lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ){
+       lv_obj_add_flag(data->title_label, LV_OBJ_FLAG_HIDDEN);
+    }
+    if ( ! lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
+       lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+
+  // run the function with true argument to tell it we are finished checking bms for messages
+  create_status_label("", data, true);
 }
 
 // CREATE BMS STATUS LABELS //////////////////////////////////////////////////////
