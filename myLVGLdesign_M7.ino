@@ -1258,22 +1258,19 @@ void loop() {
     dim_display();
   }
 
-  // Attempting to accurately determine inverter standby power but as reading is instantanious with load use documented value ( Approximately 94W standby measured )
+  // Attempting to accurately determine inverter standby power but as reading is instantanious with load use predetermined value
   if ( inverter_startup_ms && inverter_startup_ms + 14150 < millis() && inverter_startup_ms + 14400 > millis() ) {
     inverter_standby_p = combinedData.canData.p - inverter_prestart_p;
     //DEBUG
     Serial.print(millis() - inverter_startup_ms); // need to pin point when peak standby power is achieved accurately
     Serial.print("ms - Inverter Standby Power: ");
     Serial.println(inverter_standby_p);
-    // if measured value is higher than documented value use documented value
+    // if measured value is higher than documented value use predetermined value ( measured 94W previously but set 90W for room )
     if ( inverter_standby_p > 0 && inverter_standby_p > 90 ) {
       inverter_standby_p = 90;
     }
     Serial.print("Set inverter standby power = ");
     Serial.print(inverter_standby_p);
-    Serial.println(" W");
-    Serial.print("Current power consumption = ");
-    Serial.print(combinedData.canData.p);
     Serial.println(" W");
   }
 
