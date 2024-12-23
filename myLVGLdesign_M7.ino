@@ -283,7 +283,7 @@ void dcl_check(lv_timer_t * timer) {
   else {
     lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
     if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
-      lv_obj_clear_flag(data->button, LV_STATE_DISABLED);
+      lv_obj_clear_state(data->button, LV_STATE_DISABLED);
     }
   }
 }
@@ -1054,13 +1054,16 @@ void refresh_bms_status_data(lv_timer_t * timer) {
 
   // Show title and button if flags are present
   if ( data->flag_index > -1 ) {
+
     if ( lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(data->title_label, LV_OBJ_FLAG_HIDDEN); // Remove hide flag
     }
+
     // Don't show button if only balancing flag is present
-    if ( data->flag_index == 0 && data->balancing ) {
-      // leave it hidden by inaction
+    if ( data->flag_index == 0 && data->balancing && ! lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
     }
+
     else if ( lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(data->button, LV_OBJ_FLAG_HIDDEN); // Remove hide flag
     }
@@ -1201,7 +1204,7 @@ void setup() {
   create_button(cont, "Hot Water",      RELAY3, 220, 60, hot_water_interval_ms, &userData[2]);
 
   // Create Button 4 - INVERTER - makes no difference if this is created first or not when it comes to sending events
-  create_button(cont, "Inverter",       RELAY1, 320, 5, inverter_startup_delay_ms, &userData[3]);
+  create_button(cont, "Inverter",       RELAY1, 320, 10, inverter_startup_delay_ms, &userData[3]);
 
 }
 
