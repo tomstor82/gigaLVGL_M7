@@ -1,3 +1,4 @@
+
 #include <Arduino.h>
 #include <RPC.h>
 #include <Arduino_H7_Video.h>
@@ -373,7 +374,7 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
 
       // if inverter off don't allow hot water button to be marked as clicked
       else if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
-        lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL); // send click event to start inverter ** NOT WORKING ** TESTING PRESSED WITH NULL WORKS
+        lv_event_send(userData[3].button, LV_EVENT_SHORT_CLICKED, NULL); // send click event to start inverter ** NOT WORKING ** pressed works, clicked does not
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
@@ -542,7 +543,7 @@ void thermostat_event_handler(lv_event_t * e) {
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       // check if inverter is on
       if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
-        lv_event_send(userData[3].button, LV_EVENT_CLICKED, &userData[3]); // send click event to start inverter ** NOT WORKING
+        lv_event_send(userData[3].button, LV_EVENT_SHORT_CLICKED, NULL); // ********************** not working yet **** pressed works not clicked
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
@@ -935,7 +936,7 @@ void create_status_label(const char* label_text, bms_status_data_t* data, bool f
     }
     // add text to label index and allign vertically by index
     lv_label_set_text(data->status_label[i], label_text);
-    lv_obj_align_to(data->status_label[i], data->title_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 15 + i * 20);
+    lv_obj_align_to(data->status_label[i], data->title_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 10 + i * 20); // 10 was 15 before underline added
 
     // move to next index for next function call
     i++;
@@ -1029,6 +1030,8 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     if ( ! lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
        lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
     }
+    // refresh screen to remove scroll bar
+    lv_event_send(data->parent, LV_EVENT_REFRESH, NULL);
   }
 
   // run the function with true argument to tell it we are finished checking bms for messages to reset function index
@@ -1041,8 +1044,14 @@ void create_bms_status_label(lv_obj_t* parent, lv_coord_t y, bms_status_data_t* 
         data->parent = parent;
         data->y = y;
 
+        // Create underline style for title label text
+        lv_style_t style;
+        lv_style_init(&style);
+        lv_style_set_text_decor(&style, LV_TEXT_DECOR_UNDERLINE);
+        
         // Create title label (hidden initially)
         data->title_label = lv_label_create(parent);
+        lv_obj_add_style(data->title_label, &style, 0);
         lv_label_set_text(data->title_label, "BMS Status Messages");
         lv_obj_align(data->title_label, LV_ALIGN_TOP_MID, 0, y);
         lv_obj_add_flag(data->title_label, LV_OBJ_FLAG_HIDDEN);
@@ -1057,8 +1066,6 @@ void create_bms_status_label(lv_obj_t* parent, lv_coord_t y, bms_status_data_t* 
         // Refresh status labels every second
         lv_timer_create(refresh_bms_status_data, 1000, data);
 
-        // Create a timer for flashing effect
-        //lv_timer_create(flash_label, 1000, data); // 1000ms interval for flashing
     }
     else {
         // Handle memory allocation failure
