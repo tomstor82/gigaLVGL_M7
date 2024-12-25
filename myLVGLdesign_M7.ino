@@ -69,10 +69,10 @@ struct CanData {
     uint16_t st;            // BMS Status
     int cc;                 // Total pack cycles (int to avoid overrun issues with uint16_t)
 
-    float kw;               // Active power 0,1kW
+    //float kw;               // Active power 0,1kW
     byte hs;                // Internal Heatsink
     
-    MSGPACK_DEFINE_ARRAY(instU, instI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, ct, st, cc, avgI, hCid, lCid, p, absI, kw, hs);
+    MSGPACK_DEFINE_ARRAY(instU, instI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, ct, st, cc, avgI, hCid, lCid, p, absI, hs);
 };
 
 // Create combined struct with sensor and can data
@@ -104,8 +104,6 @@ typedef struct {
     lv_obj_t* button;
     lv_obj_t* status_label[28]; // can be expanded beyond the current 28 bms messages
     uint8_t y;
-    int8_t flag_index;
-    bool balancing;
 } bms_status_data_t;
 
 // Define an enumeration for the different data types.
@@ -154,7 +152,6 @@ static CombinedData combinedData;
 uint16_t inverter_prestart_p = 0;
 uint8_t inverter_standby_p = 94; // came to this after many tests despite 75W in specsheet
 uint32_t inverter_startup_ms = 0;
-//uint8_t pwr_demand = 0;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
 const uint16_t inverter_startup_delay_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
 const uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 85Wh to around 12,5Wh -84%
@@ -405,16 +402,10 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         for ( uint8_t i = 0; i < 3; i++ ) {
           if ( lv_obj_has_state(userData[i].button, LV_STATE_CHECKED) ) {
             lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL);
-            //lv_obj_clear_state(userData[i].button, LV_STATE_CHECKED);
-            //digitalWrite(userData[i].relay_pin, LOW);
           }
         }
-        //pwr_demand = 0; // reset power demand
         inverter_prestart_p = 0;
       }
-      /*else {
-        pwr_demand ? pwr_demand-- : NULL;
-      }*/
     }
   }
 }
@@ -443,12 +434,6 @@ void power_check(lv_timer_t * timer) {
   
   // inverter conditions
   if ( data->relay_pin == RELAY1 ) {
-
-    // BUTTON DEMAND AND ABOVE 10% SOC
-    /*if ( combinedData.canData.soc > 10 ) {//&& pwr_demand ) {
-      on = true;
-      //Serial.println("inverter on due to button demand");
-    }*/
 
     // CHARGING AND ABOVE 50% SOC
     if ( combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) {
@@ -484,7 +469,6 @@ void power_check(lv_timer_t * timer) {
     }
     else { // clear button flag for hot water
       lv_obj_clear_state(data->button, LV_STATE_CHECKED);
-      //pwr_demand ? pwr_demand-- : NULL;
     }
   }
 }
@@ -569,11 +553,9 @@ void thermostat_event_handler(lv_event_t * e) {
       if ( ! thermostat ) {
         thermostat = lv_timer_create(thermostat_timer, 10000, data); // check temp diff every 10s
       }
-      //pwr_demand++; // set global var to enable inverter if heater or hot water activated
     }
     else {
       digitalWrite(data->relay_pin, LOW);
-      //pwr_demand ? pwr_demand-- : NULL;
       // delete timer if it exists
       if ( thermostat ) {
         lv_timer_del(thermostat);
@@ -630,7 +612,6 @@ void dropdown_event_handler(lv_event_t *e) {
 // CREATE TEMPERATURE SELECTION DROPDOWN MENU ///////////////////////////////////////
 void create_temperature_dropdown(lv_obj_t * parent, user_data_t *data) {
   lv_obj_t *dd = lv_dropdown_create(parent);
-  //uint8_t y_offset = data->y_offset;
   lv_dropdown_set_options(dd,
     "5\u00B0C\n18\u00B0C\n19\u00B0C\n20\u00B0C\n21\u00B0C\n22\u00B0C\n23\u00B0C");
     
@@ -886,7 +867,7 @@ void sort_can() {
         combinedData.canData.hCid = canMsgData.rxBuf[0];
         combinedData.canData.lCid = canMsgData.rxBuf[1];
         combinedData.canData.hs = canMsgData.rxBuf[2];
-        combinedData.canData.kw = ((canMsgData.rxBuf[3] << 8) + canMsgData.rxBuf[4]) / 10.0;
+        //combinedData.canData.kw = ((canMsgData.rxBuf[3] << 8) + canMsgData.rxBuf[4]) / 10.0; // unusable
     }
     combinedData.canData.p = combinedData.canData.avgI * combinedData.canData.instU;
 }
@@ -932,71 +913,31 @@ void screen_touch(lv_event_t* e) {
 
 
 
-// FLASH LABEL FOR CELL BALANCING /////////////////////////////////////////////
-void flash_label(lv_timer_t * timer) {
-  bms_status_data_t *data = (bms_status_data_t *)timer->user_data;
-
-  if (data->balancing) {
-    int cell_balancing_label_index = -1;
-    // Find the "Cell Balancing Active" label
-    for ( uint8_t i = 0; i < data->flag_index + 1; i++ ) {//for (uint8_t i = 0; i < (sizeof(data->status_label) / sizeof(data->status_label[0])); i++) {
-      if (strcmp(lv_label_get_text(data->status_label[i]), "Cell Balancing Active") == 0) {
-        cell_balancing_label_index = i;
-        break;
-      }
-    }
-
-    // If the label is found, toggle its visibility
-    if (cell_balancing_label_index != -1) {
-      if (lv_obj_has_flag(data->status_label[cell_balancing_label_index], LV_OBJ_FLAG_HIDDEN)) {
-        lv_obj_clear_flag(data->status_label[cell_balancing_label_index], LV_OBJ_FLAG_HIDDEN);
-      }
-      else {
-        lv_obj_add_flag(data->status_label[cell_balancing_label_index], LV_OBJ_FLAG_HIDDEN);
-      }
-    }
-  }
-}
 
 // CREATE STATUS LABELS ////////////////////////////////////////////////////////////
 void create_status_label(const char* label_text, bms_status_data_t* data, bool finished = false) {
+
   static uint8_t i = 0; // static variable to preserve value between function calls
 
-  // if finised is passed from refresh function let's zero index to be ready for next round of calls
+  // if finised argument is true zero index to be ready for next round of calls
   if ( finished ) {
-
-    // Make button visible if there are flags present
-   /* if ( i > 0 && lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_clear_flag(data->button, LV_OBJ_FLAG_HIDDEN); // Remove hide flag
-      lv_obj_align_to(data->button, data->status_label[i-1], LV_ALIGN_OUT_BOTTOM_MID, 0, 20); // Align button below last label with index controlled gap
-    }
-    // Hide title if no flags
-    else if ( ! lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_add_flag(data->title_label, LV_OBJ_FLAG_HIDDEN);
-    }
-    // Hide button if no flags
-    else if ( ! lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
-    }*/
+    i = 0;
+    
+    // Align button if it is visible
     if ( ! lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_align_to(data->button, data->status_label[i-1], LV_ALIGN_OUT_BOTTOM_MID, 0, 20); // Align button below last label with index controlled gap
     }
-    i = 0;
   }
-
+  // create label if it doesn't exist
   else {
-    // Reveal title label so alignment to it is possible
-   /* if ( lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_clear_flag(data->title_label, LV_OBJ_FLAG_HIDDEN); // Remove hide flag
-    }*/
-
-    // only create label if it doesn't exist
     if ( ! data->status_label[i] ) {
       data->status_label[i] = lv_label_create(data->parent);
     }
     // add text to label index and allign vertically by index
     lv_label_set_text(data->status_label[i], label_text);
     lv_obj_align_to(data->status_label[i], data->title_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 15 + i * 20);
+
+    // move to next index for next function call
     i++;
   }
 }
@@ -1005,9 +946,11 @@ void create_status_label(const char* label_text, bms_status_data_t* data, bool f
 void refresh_bms_status_data(lv_timer_t * timer) {
     bms_status_data_t *data = (bms_status_data_t *)timer->user_data;
 
-    data->flag_index = -1; // initialise as -1 as this in array index
+    static bool balancing_label_showing = false; // Static to remember between calls
 
-    data->balancing = false; // Reset balancing flag before updating
+    bool charge_only = false;
+
+    int8_t flag_index = -1; // initialise as -1 as this in array index
 
     // Clear all status labels initially
     for (uint8_t i = 0; i < (sizeof(data->status_label) / sizeof(data->status_label[0])); i++) {
@@ -1018,53 +961,62 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     }
 
     // BMS flags
-    if ((combinedData.canData.fu & 0x0100) == 0x0100) { create_status_label("Internal Hardware Fault", data); data->flag_index++; }
-    if ((combinedData.canData.fu & 0x0200) == 0x0200) { create_status_label("Internal Cell Comm Fault", data); data->flag_index++; }
-    if ((combinedData.canData.fu & 0x0400) == 0x0400) { create_status_label("Weak Cell Fault", data); data->flag_index++; }
-    if ((combinedData.canData.fu & 0x0800) == 0x0800) { create_status_label("Low Cell Voltage", data); data->flag_index++; }
-    if ((combinedData.canData.fu & 0x1000) == 0x1000) { create_status_label("Open Wire Fault", data); data->flag_index++; }
-    if ((combinedData.canData.fu & 0x2000) == 0x2000) { create_status_label("Current Sensor Fault", data); data->flag_index++; }
-    if ((combinedData.canData.fu & 0x4000) == 0x4000) { create_status_label("Abnormal SOC Behavior", data); data->flag_index++; }
-    if ((combinedData.canData.fu & 0x8000) == 0x8000) { create_status_label("Pack Too Hot Fault", data); data->flag_index++; }
-    if ((combinedData.canData.fu & 0x0001) == 0x0001) { create_status_label("Weak Pack Fault", data); data->flag_index++; }
-    if ((combinedData.canData.fu & 0x0002) == 0x0002) { create_status_label("External Thermistor Fault", data); data->flag_index++; }
-    if ((combinedData.canData.fu & 0x0004) == 0x0004) { create_status_label("Charge Relay Failure", data); data->flag_index++; }
-    if ((combinedData.canData.fu & 0x0008) == 0x0008) { create_status_label("Discharge Relay Fault", data); data->flag_index++; }
-    if ((combinedData.canData.fu & 0x0010) == 0x0010) { create_status_label("Safety Relay Fault", data); data->flag_index++; }
-    if ((combinedData.canData.fu & 0x0020) == 0x0020) { create_status_label("CAN communication Fault", data); data->flag_index++; }
-    if ((combinedData.canData.fu & 0x0040) == 0x0040) { create_status_label("Internal Thermistor Fault", data); data->flag_index++; }
-    if ((combinedData.canData.fu & 0x0080) == 0x0080) { create_status_label("Internal Logic Fault", data); data->flag_index++; }
+    if ((combinedData.canData.fu & 0x0100) == 0x0100) { create_status_label("Internal Hardware Fault", data); flag_index++; }
+    if ((combinedData.canData.fu & 0x0200) == 0x0200) { create_status_label("Internal Cell Comm Fault", data); flag_index++; }
+    if ((combinedData.canData.fu & 0x0400) == 0x0400) { create_status_label("Weak Cell Fault", data); flag_index++; }
+    if ((combinedData.canData.fu & 0x0800) == 0x0800) { create_status_label("Low Cell Voltage", data); flag_index++; }
+    if ((combinedData.canData.fu & 0x1000) == 0x1000) { create_status_label("Open Wire Fault", data); flag_index++; }
+    if ((combinedData.canData.fu & 0x2000) == 0x2000) { create_status_label("Current Sensor Fault", data); flag_index++; }
+    if ((combinedData.canData.fu & 0x4000) == 0x4000) { create_status_label("Abnormal SOC Behavior", data); flag_index++; }
+    if ((combinedData.canData.fu & 0x8000) == 0x8000) { create_status_label("Pack Too Hot Fault", data); flag_index++; }
+    if ((combinedData.canData.fu & 0x0001) == 0x0001) { create_status_label("Weak Pack Fault", data); flag_index++; }
+    if ((combinedData.canData.fu & 0x0002) == 0x0002) { create_status_label("External Thermistor Fault", data); flag_index++; }
+    if ((combinedData.canData.fu & 0x0004) == 0x0004) { create_status_label("Charge Relay Failure", data); flag_index++; }
+    if ((combinedData.canData.fu & 0x0008) == 0x0008) { create_status_label("Discharge Relay Fault", data); flag_index++; }
+    if ((combinedData.canData.fu & 0x0010) == 0x0010) { create_status_label("Safety Relay Fault", data); flag_index++; }
+    if ((combinedData.canData.fu & 0x0020) == 0x0020) { create_status_label("CAN communication Fault", data); flag_index++; }
+    if ((combinedData.canData.fu & 0x0040) == 0x0040) { create_status_label("Internal Thermistor Fault", data); flag_index++; }
+    if ((combinedData.canData.fu & 0x0080) == 0x0080) { create_status_label("Internal Logic Fault", data); flag_index++; }
 
     // Failsafe status
-    if ((combinedData.canData.st & 0x0001) == 0x0001) { create_status_label("Voltage Failsafe", data); data->flag_index++; }
-    if ((combinedData.canData.st & 0x0002) == 0x0002) { create_status_label("Current Failsafe", data); data->flag_index++; }
-    if ((combinedData.canData.st & 0x0004) == 0x0004) { create_status_label("Relay Failsafe", data); data->flag_index++; }
-    if ((combinedData.canData.st & 0x0008) == 0x0008) {
-        create_status_label("Cell Balancing Active", data);
-        data->balancing = true;
-        data->flag_index++; 
-    }
-    if ((combinedData.canData.st & 0x0010) == 0x0010) { create_status_label("Charge Interlock Failsafe", data); data->flag_index++; }
-    if ((combinedData.canData.st & 0x0020) == 0x0020) { create_status_label("Thermistor B-value Table Invalid", data); data->flag_index++; }
-    if ((combinedData.canData.st & 0x0040) == 0x0040) { create_status_label("Input Power Supply Failsafe", data); data->flag_index++; }
-    if ((combinedData.canData.st & 0x0100) == 0x0100) { create_status_label("Relays Opened under Load Failsafe", data); data->flag_index++; }
-    if ((combinedData.canData.st & 0x1000) == 0x1000) { create_status_label("Polarization Model 1 Active", data); data->flag_index++; }
-    if ((combinedData.canData.st & 0x2000) == 0x2000) { create_status_label("Polarization Model 2 Active", data); data->flag_index++; }
-    if ((combinedData.canData.st & 0x8000) == 0x8000) { create_status_label("Charge Mode Activated over CANBUS", data); data->flag_index++; }
+    if ((combinedData.canData.st & 0x0001) == 0x0001) { create_status_label("Voltage Failsafe", data); flag_index++; }
+    if ((combinedData.canData.st & 0x0002) == 0x0002) { create_status_label("Current Failsafe", data); flag_index++; }
+    if ((combinedData.canData.st & 0x0004) == 0x0004) { create_status_label("Relay Failsafe", data); flag_index++; }
+    if ((combinedData.canData.st & 0x0010) == 0x0010) { create_status_label("Charge Interlock Failsafe", data); flag_index++; }
+    if ((combinedData.canData.st & 0x0020) == 0x0020) { create_status_label("Thermistor B-value Table Invalid", data); flag_index++; }
+    if ((combinedData.canData.st & 0x0040) == 0x0040) { create_status_label("Input Power Supply Failsafe", data); flag_index++; }
+    if ((combinedData.canData.st & 0x0100) == 0x0100) { create_status_label("Relays Opened under Load Failsafe", data); flag_index++; }
+    if ((combinedData.canData.st & 0x1000) == 0x1000) { create_status_label("Polarization Model 1 Active", data); flag_index++; }
+    if ((combinedData.canData.st & 0x2000) == 0x2000) { create_status_label("Polarization Model 2 Active", data); flag_index++; }
+    if ((combinedData.canData.st & 0x8000) == 0x8000) { create_status_label("Charge Mode Activated over CANBUS", data); flag_index++; }
 
-  // Show title and button if flags are present
-  if ( data->flag_index > -1 ) {
+    // Cell balancing check at end ensures higher importance messages appear above
+    if ((combinedData.canData.st & 0x0008) == 0x0008) {
+      if ( balancing_label_showing ) {
+        create_status_label("", data); // create blank label
+        balancing_label_showing = false;
+      }
+      else {
+        create_status_label("Cell Balancing Active", data);
+        balancing_label_showing = true;
+      }
+
+      flag_index++;
+      
+      // If balancing only button should remain hidden
+      if ( flag_index == 0 ) {
+        charge_only = true;
+      }
+    }
+
+  // Show title and button
+  if ( flag_index > -1 ) {
 
     if ( lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(data->title_label, LV_OBJ_FLAG_HIDDEN); // Remove hide flag
     }
-
-    // Don't show button if only balancing flag is present
-    if ( data->flag_index == 0 && data->balancing && ! lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
-    }
-
-    else if ( lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
+    // Show button if more than just balancing flag is present
+    if ( lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) && ! charge_only ) {
       lv_obj_clear_flag(data->button, LV_OBJ_FLAG_HIDDEN); // Remove hide flag
     }
   }
@@ -1079,7 +1031,7 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     }
   }
 
-  // run the function with true argument to tell it we are finished checking bms for messages
+  // run the function with true argument to tell it we are finished checking bms for messages to reset function index
   create_status_label("", data, true);
 }
 
@@ -1106,7 +1058,7 @@ void create_bms_status_label(lv_obj_t* parent, lv_coord_t y, bms_status_data_t* 
         lv_timer_create(refresh_bms_status_data, 1000, data);
 
         // Create a timer for flashing effect
-        lv_timer_create(flash_label, 1000, data); // 1000ms interval for flashing
+        //lv_timer_create(flash_label, 1000, data); // 1000ms interval for flashing
     }
     else {
         // Handle memory allocation failure
@@ -1204,7 +1156,7 @@ void setup() {
   create_button(cont, "Hot Water",      RELAY3, 220, 60, hot_water_interval_ms, &userData[2]);
 
   // Create Button 4 - INVERTER - makes no difference if this is created first or not when it comes to sending events
-  create_button(cont, "Inverter",       RELAY1, 320, 10, inverter_startup_delay_ms, &userData[3]);
+  create_button(cont, "Inverter",       RELAY1, 320, 5, inverter_startup_delay_ms, &userData[3]);
 
 }
 
