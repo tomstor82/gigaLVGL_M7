@@ -151,7 +151,7 @@ static CombinedData combinedData;
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size)
 uint16_t inverter_prestart_p = 0;
-uint8_t inverter_standby_p = 94; // came to this after many tests despite 75W in specsheet
+uint8_t inverter_standby_p = 70; // takes around 4 minutes to settle down after start
 uint32_t inverter_startup_ms = 0;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
 const uint16_t inverter_startup_delay_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
@@ -369,13 +369,13 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
 
       if ( data->relay_pin == RELAY1 ) { // only for inverter for sweeping
         inverter_prestart_p = combinedData.canData.p;
-        inverter_startup_ms = millis(); // used in loop for determining peak inverter starting power
+        //inverter_startup_ms = millis(); // used in loop for determining peak inverter starting power
         lv_label_set_text(data->label_obj, "Inverter ON");
       }
 
       // if inverter off don't allow hot water button to be marked as clicked
       else if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
-        lv_event_send(userData[3].button, LV_EVENT_SHORT_CLICKED, NULL); // send click event to start inverter ** NOT WORKING ** pressed works, clicked does not
+        lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL); // send click event to start inverter ** NOT WORKING ** pressed works, clicked does not
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
@@ -412,11 +412,6 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
   }
 }
 
-
-
-
-
-
 // INVERTER SWEEP TIMER ///////////////////////////////////////////////////////////////////
 void sweep_timer (lv_timer_t* timer) {
   user_data_t* data = (user_data_t *)timer->user_data;
@@ -440,13 +435,13 @@ void power_check(lv_timer_t * timer) {
     // CHARGING AND ABOVE 50% SOC
     if ( combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) {
       on = true;
-      //Serial.println("inverter on due to battery charging");
+      Serial.println("DEBUG: inverter on due to battery charging");
     }
 
     // POWER DEMAND
     else if ( (inverter_standby_p + inverter_prestart_p) < combinedData.canData.p ) {
       on = true;
-      //Serial.println("inverter on due to power usage");
+      Serial.println("DEBUG: inverter on due to power usage");
     }
   }
   // hot water tank - reset timer if charging
@@ -456,13 +451,25 @@ void power_check(lv_timer_t * timer) {
 
   if (on) {
     // we start this timer again
-     lv_timer_reset(timer);
+    Serial.println("DEBUG: Resetting inverter timer");
+    Serial.print("DEBUG: Inverter standby p: ");
+    Serial.println(inverter_standby_p);
+    Serial.print("DEBUG: current power: ");
+    Serial.println(combinedData.canData.p);
+    Serial.print("DEBUG: inverter startup power level: ");
+    Serial.println(inverter_standby_p + inverter_prestart_p);
+    lv_timer_reset(timer);
   }
   // turn off relay
   else {
     digitalWrite(data->relay_pin, LOW);
     // delete timer if relay is turned off
     lv_timer_del(timer);
+    Serial.println("DEBUG: Turning off");
+    Serial.print("DEBUG: current power: ");
+    Serial.println(combinedData.canData.p);
+    Serial.print("DEBUG: inverter startup power level: ");
+    Serial.println(inverter_standby_p + inverter_prestart_p);
 
     // Inverter sweep timer starting after turning off relay
     if ( data->relay_pin == RELAY1 && lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
@@ -544,7 +551,7 @@ void thermostat_event_handler(lv_event_t * e) {
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       // check if inverter is on
       if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
-        lv_event_send(userData[3].button, LV_EVENT_SHORT_CLICKED, NULL); // ********************** not working yet **** pressed works not clicked
+        lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL); // ********************** not working yet **** pressed works not clicked
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
@@ -1221,20 +1228,15 @@ void loop() {
   }
 
   // Attempting to accurately determine inverter standby power but as reading is instantanious with load use predetermined value
-  if ( inverter_startup_ms && inverter_startup_ms + 14150 < millis() && inverter_startup_ms + 14400 > millis() ) {
+  /*if ( inverter_startup_ms && inverter_startup_ms + 14150 < millis() && inverter_startup_ms + 14400 > millis() ) {
+
     inverter_standby_p = combinedData.canData.p - inverter_prestart_p;
-    //DEBUG
-    Serial.print(millis() - inverter_startup_ms); // need to pin point when peak standby power is achieved accurately
-    Serial.print("ms - Inverter Standby Power: ");
-    Serial.println(inverter_standby_p);
-    // if measured value is higher than documented value use predetermined value ( measured 94W previously but set 90W for room )
-    if ( inverter_standby_p > 0 && inverter_standby_p > 90 ) {
-      inverter_standby_p = 90;
+
+    // if measured value is higher than documented 75W. Takes ~2m for power to settle
+    if ( inverter_standby_p > 73 ) {
+      inverter_standby_p = 73;
     }
-    Serial.print("Set inverter standby power = ");
-    Serial.print(inverter_standby_p);
-    Serial.println(" W");
-  }
+  }*/
 
   delay(5); // calming loop
 }
