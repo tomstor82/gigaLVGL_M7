@@ -156,6 +156,7 @@ uint32_t inverter_startup_ms = 0;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
 const uint16_t inverter_startup_delay_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
 const uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 85Wh to around 12,5Wh -84%
+static lv_style_t style; // cascading style for text labels
 
 uint8_t brightness = 70;
 uint32_t previous_touch_ms = 0;
@@ -1031,7 +1032,7 @@ void refresh_bms_status_data(lv_timer_t * timer) {
        lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
     }
     // refresh screen to remove scroll bar
-    lv_event_send(data->parent, LV_EVENT_REFRESH, NULL);
+    //lv_event_send(lv_obj_get_parent(data->parent), LV_EVENT_REFRESH, NULL); // does nothing for either scr or cont obj
   }
 
   // run the function with true argument to tell it we are finished checking bms for messages to reset function index
@@ -1044,14 +1045,10 @@ void create_bms_status_label(lv_obj_t* parent, lv_coord_t y, bms_status_data_t* 
         data->parent = parent;
         data->y = y;
 
-        // Create underline style for title label text
-        lv_style_t style;
-        lv_style_init(&style);
-        lv_style_set_text_decor(&style, LV_TEXT_DECOR_UNDERLINE);
-        
-        // Create title label (hidden initially)
+        // Create title label with underline style (hidden initially)
         data->title_label = lv_label_create(parent);
-        lv_obj_add_style(data->title_label, &style, 0);
+        lv_style_set_text_decor(&style, LV_TEXT_DECOR_UNDERLINE); // set underline style
+        lv_obj_add_style(data->title_label, &style, 0); // add style
         lv_label_set_text(data->title_label, "BMS Status Messages");
         lv_obj_align(data->title_label, LV_ALIGN_TOP_MID, 0, y);
         lv_obj_add_flag(data->title_label, LV_OBJ_FLAG_HIDDEN);
@@ -1106,6 +1103,9 @@ void setup() {
 
   // Set display brightness
   backlight.set(brightness);
+
+  // Initialise the style variable
+  lv_style_init(&style);
 
   // Create two columns on active screen, grid 2x1
   static lv_coord_t col_dsc[] = {370, 370, LV_GRID_TEMPLATE_LAST};
