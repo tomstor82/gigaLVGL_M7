@@ -1,4 +1,3 @@
-
 #include <Arduino.h>
 #include <RPC.h>
 #include <Arduino_H7_Video.h>
@@ -45,12 +44,12 @@ struct SensorData {
 // CanData struct
 struct CanData {
 
-    int p;                  // watt calculated by script
+    int16_t p;                  // watt calculated by script
 
     float instU;            // Voltage - multiplied by 10
     float instI;            // Current - multiplied by 10 - negative value indicates charge
     float avgI;             // Average current for clock and sun symbol calculations
-    float absI;             // Absolute Current NOT WORKING CORRECTLY
+    //float absI;             // Absolute Current NOT WORKING CORRECTLY
     float ah;               // Amp hours
     float hC;               // High Cell Voltage in 0,0001V
     float lC;               // Low Cell Voltage in 0,0001V
@@ -73,7 +72,7 @@ struct CanData {
     //float kw;               // Active power 0,1kW
     byte hs;                // Internal Heatsink
     
-    MSGPACK_DEFINE_ARRAY(instU, instI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, ct, st, cc, avgI, hCid, lCid, p, absI, hs);
+    MSGPACK_DEFINE_ARRAY(instU, instI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, ct, st, cc, avgI, hCid, lCid, p, hs);
 };
 
 // Create combined struct with sensor and can data
@@ -150,7 +149,7 @@ static can_label_t canLabel[14] = {}; // 14 labels so far
 static CombinedData combinedData;
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size)
-uint16_t inverter_prestart_p = 0;
+int16_t inverter_prestart_p = 0; // must be signed
 uint8_t inverter_standby_p = 70; // takes around 4 minutes to settle down after start
 uint32_t inverter_startup_ms = 0;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
@@ -438,7 +437,7 @@ void power_check(lv_timer_t * timer) {
       Serial.println("DEBUG: inverter on due to battery charging");
     }
 
-    // POWER DEMAND
+    // POWER DEMAND *************** HOW TO CHECK THIS WHEN SOLAR CHARGING VARIES A LOT ? *********************
     else if ( (inverter_standby_p + inverter_prestart_p) < combinedData.canData.p ) {
       on = true;
       Serial.println("DEBUG: inverter on due to power usage");
@@ -849,7 +848,7 @@ void sort_can() {
     if (canMsgData.rxId == 0x3B) {
         combinedData.canData.instU = ((canMsgData.rxBuf[0] << 8) + canMsgData.rxBuf[1]) / 10.0;
         combinedData.canData.instI = (signValue((canMsgData.rxBuf[2] << 8) + canMsgData.rxBuf[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
-        combinedData.canData.absI = ((canMsgData.rxBuf[4] << 8) + canMsgData.rxBuf[5]) / 10.0; // orion2jr issue: set signed and -32767 to fix
+        //combinedData.canData.absI = ((canMsgData.rxBuf[4] << 8) + canMsgData.rxBuf[5]) / 10.0; // orion2jr issue: set signed and -32767 to fix
         combinedData.canData.soc = canMsgData.rxBuf[6] / 2;
     }
     if (canMsgData.rxId == 0x6B2) {
@@ -1237,6 +1236,12 @@ void loop() {
       inverter_standby_p = 73;
     }
   }*/
-
+  // DEBUG
+  /*if ( millis() > 10000 && millis() < 11000 ) {
+    char buf[30];
+    sprintf(buf, "Size of int     %d bytes\nSize of int16_t  %d bytes\n\n", sizeof(int), sizeof(int16_t));
+    Serial.print(buf);
+  }*/
+  
   delay(5); // calming loop
 }
