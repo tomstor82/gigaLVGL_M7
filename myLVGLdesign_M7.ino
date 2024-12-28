@@ -44,7 +44,7 @@ struct SensorData {
 // CanData struct
 struct CanData {
 
-    int16_t p;                  // watt calculated by script
+    int p;                  // watt calculated by script
 
     float instU;            // Voltage - multiplied by 10
     float instI;            // Current - multiplied by 10 - negative value indicates charge
@@ -148,7 +148,7 @@ static user_data_t userData[4] = {}; // 4 buttons with user_data
 static can_label_t canLabel[14] = {}; // 14 labels so far
 static CombinedData combinedData;
 
-// global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size)
+// global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size) int/float = 4 bytes
 int16_t inverter_prestart_p = 0; // must be signed
 uint8_t inverter_standby_p = 70; // takes around 4 minutes to settle down after start
 uint32_t inverter_startup_ms = 0;
@@ -1236,12 +1236,6 @@ void loop() {
       inverter_standby_p = 73;
     }
   }*/
-  // DEBUG
-  /*if ( millis() > 10000 && millis() < 11000 ) {
-    char buf[30];
-    sprintf(buf, "Size of int     %d bytes\nSize of int16_t  %d bytes\n\n", sizeof(int), sizeof(int16_t));
-    Serial.print(buf);
-  }*/
-  
+
   delay(5); // calming loop
 }
