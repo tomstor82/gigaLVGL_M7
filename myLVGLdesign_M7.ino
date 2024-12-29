@@ -18,13 +18,12 @@ GigaDisplayBacklight backlight;
 #define RELAY3 12   // water heater
 #define RELAY4 13   // shower room
 
-// INVESTIGATE ABS_AMP FROM ORION
 //  CANBUS data Identifier List
 //  ID 0x03B BYT0+1:INST_VOLT BYT2+3:INST_AMP BYT4+5:ABS_AMP BYT6:SOC **** ABS_AMP from OrionJr errendous ****
 //  ID 0x6B2 BYT0+1:LOW_CELL BYT2+3:HIGH_CELL BYT4:HEALTH BYT5+6:CYCLES
 //  ID 0x0A9 BYT0:RELAY_STATE BYT1:CCL BYT2:DCL BYT3+4:PACK_AH BYT5+6:AVG_AMP
-//  ID 0x0BD BYT0+1:CUSTOM_FLAGS BYT2:HI_TMP BYT3:LO_TMP BYT4:COUNTER BYT5:BMS_STATUS
-//  ID 0x0BE BYT0:HI_CL_ID BYT1:LO_CL_ID BYT2:INT_HEATSINK
+//  ID 0x0BD BYT0+1:CUSTOM_FLAGS BYT2:HI_TMP BYT3:LO_TMP BYT4:CUSTOM_FLAGS BYT5:BMS_STATUS
+//  ID 0x0BE BYT0:HI_CL_ID BYT1:LO_CL_ID BYT2:INT_HEATSINK BYT3:COUNTER
 
 // Temp and Humidity data struct from M4
 struct SensorData {
@@ -69,10 +68,10 @@ struct CanData {
     uint16_t st;            // BMS Status
     int cc;                 // Total pack cycles (int to avoid overrun issues with uint16_t)
 
-    //float kw;               // Active power 0,1kW
     byte hs;                // Internal Heatsink
+    byte cu;                // Custom flag data * used for sending charge power enabled to start inverter
     
-    MSGPACK_DEFINE_ARRAY(instU, instI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, ct, st, cc, avgI, hCid, lCid, p, hs);
+    MSGPACK_DEFINE_ARRAY(instU, instI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, ct, st, cc, avgI, hCid, lCid, p, hs, cu);
 };
 
 // Create combined struct with sensor and can data
@@ -152,6 +151,7 @@ static CombinedData combinedData;
 int16_t inverter_prestart_p = 0; // must be signed
 uint8_t inverter_standby_p = 70; // takes around 4 minutes to settle down after start
 uint32_t inverter_startup_ms = 0;
+byte start_inverter = false;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
 const uint16_t inverter_startup_delay_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
 const uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 85Wh to around 12,5Wh -84%
@@ -239,11 +239,48 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     lv_obj_align_to(data->label_obj, data->button, LV_ALIGN_OUT_RIGHT_MID, 80, 0);
     // initialise label text
     lv_label_set_text(data->label_obj, "OFF");
+    // check for sunrise by reading BMS charge enable signal from CANbus
+    lv_timer_create(sunrise_start_inverter, 1000, data);
   }
 }
 
 
+// SUNRISE CHECK TIMER ////////////////////////////////////////////////////////////////////////
 
+void sunrise_start_inverter(lv_timer_t* timer) {
+  user_data_t * data = (user_data_t *)timer->user_data;
+
+  static uint32_t start_time = 0;
+  static bool sunrise = false;
+
+  // check if charge enable is present and that this statement hasn't run last 10 hours (dawn till dawn)
+  if ( (combinedData.canData.cu & 0x01) == 0x01 && sunrise == false ) {
+    Serial.println("DEBUG: Sunrise function - Sunrise!");
+    if ( start_time == 0 || millis() > (start_time + 36000000)) {
+      sunrise = true;
+      start_time = millis();
+    }
+  }
+  // if 30 minutes have elapsed reset previous checked
+  else if ( (start_time + 108000000) < millis() && sunrise ) {
+    sunrise = false;
+    start_inverter = false;
+    if ( ! lv_obj_has_state(data->button, LV_STATE_CHECKED)) {
+      Serial.println("DEBUG: Sunrise function - Inverter NOT switched ON");
+      digitalWrite(RELAY1, LOW);
+    }
+    Serial.println("DEBUG: Sunrise function - 30 minutes has passed");
+  }
+  // 
+  if ( sunrise ) {
+    digitalWrite(RELAY1, HIGH);
+    //lv_event_send(data->button, LV_EVENT_CLICKED, NULL);
+    Serial.println("DEBUG: Sunrise function - Starting inverter");
+    start_inverter = true;
+  }
+  // DEBUG
+  else Serial.println("DEBUG: Sunrise function - No Action");
+}
 
 
 
@@ -431,8 +468,13 @@ void power_check(lv_timer_t * timer) {
   // inverter conditions
   if ( data->relay_pin == RELAY1 ) {
 
+    if ( start_inverter ) {
+      on = true;
+      Serial.println("DEBUG: inverter on due to charge enable signal");
+    }
+
     // CHARGING AND ABOVE 50% SOC
-    if ( combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) {
+    else if ( combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) {
       on = true;
       Serial.println("DEBUG: inverter on due to battery charging");
     }
@@ -868,14 +910,14 @@ void sort_can() {
         combinedData.canData.fu = (canMsgData.rxBuf[0] << 8) + canMsgData.rxBuf[1];
         combinedData.canData.hT = canMsgData.rxBuf[2];
         combinedData.canData.lT = canMsgData.rxBuf[3];
-        combinedData.canData.ct = canMsgData.rxBuf[4];
+        combinedData.canData.cu = canMsgData.rxBuf[4];
         combinedData.canData.st = (canMsgData.rxBuf[5] << 8) + canMsgData.rxBuf[6];
     }
     if (canMsgData.rxId == 0x0BE) {
         combinedData.canData.hCid = canMsgData.rxBuf[0];
         combinedData.canData.lCid = canMsgData.rxBuf[1];
         combinedData.canData.hs = canMsgData.rxBuf[2];
-        //combinedData.canData.kw = ((canMsgData.rxBuf[3] << 8) + canMsgData.rxBuf[4]) / 10.0; // unusable
+        combinedData.canData.ct = canMsgData.rxBuf[3];
     }
     combinedData.canData.p = combinedData.canData.avgI * combinedData.canData.instU;
 }
