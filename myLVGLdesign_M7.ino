@@ -151,18 +151,18 @@ static CombinedData combinedData;
 int16_t inverter_prestart_p = 0; // must be signed
 uint8_t inverter_standby_p = 70; // takes around 4 minutes to settle down after start
 uint32_t inverter_startup_ms = 0;
-byte start_inverter = false;
+bool start_inverter = false;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
 const uint16_t inverter_startup_delay_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
 const uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 85Wh to around 12,5Wh -84%
 static lv_style_t style; // cascading style for text labels
 
-uint8_t brightness = 70;
+static uint8_t brightness = 70;
 uint32_t previous_touch_ms = 0;
 const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 
 // for M4 messages
-String buffer = "";
+static String buffer = "";
 
 //**************************************************************************************
 //   Made changes to event sending to buttons once inverter is turned off
@@ -260,16 +260,16 @@ void sunrise_start_inverter(lv_timer_t* timer) {
   if ( (combinedData.canData.cu & 0x01) == 0x01 && ! time_ms && ! charge_power ) { //start_time && ! charge_power ) {
     charge_power = true;
     //charge_power_time = millis();
-    time_ms = millis();
-    delay(50);
+    time_ms = millis(); // record charge power start time
+    if (Serial) delay(50);
     Serial.println("DEBUG: sunrise timer - charge power present and set to true");
     return;
   }
-  // if charge power not present but was in last 30s, turn on inverter
+  // if charge power flapping off within 30s, turn on inverter
   if ( ! (combinedData.canData.cu & 0x01) == 0x01 ) {
     if ( charge_power && (time_ms + 30 * 1000) > millis() ) { //charge_power_time + 30 * 1000) > millis() ) {
       //start_time = millis(); // record start time
-      time_ms = millis();
+      time_ms = millis(); // record inverter start time as charge power start time is not needed any more
       relay_closed = true;
       start_inverter = true; // global var for inverter timer
       digitalWrite(userData[3].relay_pin, HIGH);
@@ -374,7 +374,7 @@ void sensorData_msgBox(lv_event_t* e) {
     user_data_t* data = (user_data_t*)lv_event_get_user_data(e);
     lv_event_code_t code = lv_event_get_code(e);
     lv_obj_t* obj = lv_event_get_target(e);
-    Serial.println("Touch detected for msgBox event handler");
+    //Serial.println("DEBUG: Touch detected for msgBox event handler");
 
     if (code == LV_EVENT_CLICKED) {
         LV_UNUSED(obj);
@@ -425,7 +425,7 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
-          Serial.println("DEBUG hot_water_inverter_event_handler - Unable to send start inverter event");
+          Serial.println("DEBUG: hot_water_inverter_event_handler - Unable to send start inverter event");
           return; // exit function if inverter is off
         }
       }
@@ -480,19 +480,19 @@ void power_check(lv_timer_t * timer) {
 
     if ( start_inverter ) {
       on = true;
-      Serial.println("DEBUG: inverter on due to charge enable signal");
+      //Serial.println("DEBUG: inverter on due to charge enable signal");
     }
 
     // CHARGING AND ABOVE 50% SOC
     else if ( combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) {
       on = true;
-      Serial.println("DEBUG: inverter on due to battery charging");
+      //Serial.println("DEBUG: inverter on due to battery charging");
     }
 
     // POWER DEMAND *************** HOW TO CHECK THIS WHEN SOLAR CHARGING VARIES A LOT ? *********************
     else if ( (inverter_standby_p + inverter_prestart_p) < combinedData.canData.p ) {
       on = true;
-      Serial.println("DEBUG: inverter on due to power usage");
+      //Serial.println("DEBUG: inverter on due to power usage");
     }
   }
   // hot water tank - reset timer if charging
@@ -502,13 +502,13 @@ void power_check(lv_timer_t * timer) {
 
   if (on) {
     // we start this timer again
-    Serial.println("DEBUG: Resetting inverter timer");
+    /*Serial.println("DEBUG: Resetting inverter timer");
     Serial.print("DEBUG: Inverter standby p: ");
     Serial.println(inverter_standby_p);
     Serial.print("DEBUG: current power: ");
     Serial.println(combinedData.canData.p);
     Serial.print("DEBUG: inverter startup power level: ");
-    Serial.println(inverter_standby_p + inverter_prestart_p);
+    Serial.println(inverter_standby_p + inverter_prestart_p);*/
     lv_timer_reset(timer);
   }
   // turn off relay
@@ -516,11 +516,11 @@ void power_check(lv_timer_t * timer) {
     digitalWrite(data->relay_pin, LOW);
     // delete timer if relay is turned off
     lv_timer_del(timer);
-    Serial.println("DEBUG: Turning off");
+    /*Serial.println("DEBUG: Turning off");
     Serial.print("DEBUG: current power: ");
     Serial.println(combinedData.canData.p);
     Serial.print("DEBUG: inverter startup power level: ");
-    Serial.println(inverter_standby_p + inverter_prestart_p);
+    Serial.println(inverter_standby_p + inverter_prestart_p);*/
 
     // Inverter sweep timer starting after turning off relay
     if ( data->relay_pin == RELAY1 && lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
@@ -810,11 +810,11 @@ void update_temp(lv_timer_t *timer) {
 
 // CLEAR BMS FLAG EVENT HANDLER ////////////////////////////////////////////////////////////////////
 void clear_bms_flag(lv_event_t * e) {
-  Serial.println("DEBUG clear bms flag #1");
+  //Serial.println("DEBUG clear bms flag #1");
   lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t * obj = lv_event_get_target(e);
   if(code == LV_EVENT_CLICKED) {
-    Serial.println("DEBUG clear bms flag #2");
+    //Serial.println("DEBUG clear bms flag #2");
     LV_UNUSED(obj);
     canMsgData.msg_cnt = 1;
     Serial.println("Sending CAN message");
