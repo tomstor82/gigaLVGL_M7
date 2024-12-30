@@ -248,41 +248,46 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 // SUNRISE CHECK TIMER ////////////////////////////////////////////////////////////////////////
 
 void sunrise_start_inverter(lv_timer_t* timer) {
-  user_data_t * data = (user_data_t *)timer->user_data;
 
   static uint32_t start_time = 0;
-  static bool sunrise = false;
+  static uint32_t charge_power_time = 0;
 
-  // check if charge enable is present and that this statement hasn't run last 10 hours (dawn till dawn)
-  if ( (combinedData.canData.cu & 0x01) == 0x01 && sunrise == false ) {
-    Serial.println("DEBUG: Sunrise function - Sunrise!");
-    if ( start_time == 0 || millis() > (start_time + 36000000)) {
-      sunrise = true;
-      start_time = millis();
+  static bool relay_closed = false;
+  static bool charge_power = false;
+
+  // if 15 minutes has passed turn off inverter if not manually turned on and leave function (15 minute sunrise)
+  if ( start_time && (start_time + 15 * 60 * 1000) > millis() ) {
+    if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) && relay_closed ) {
+      digitalWrite(userData[3].relay_pin, LOW);
+      relay_closed = false;
     }
+    start_time = 0;
+    start_inverter = false; // global var for inverter timer
+    Serial.println("DEBUG: sunrise timer - timer expired inverter OFF");
+    return;
   }
-  // if 30 minutes have elapsed reset previous checked
-  else if ( (start_time + 108000000) < millis() && sunrise ) {
-    sunrise = false;
-    start_inverter = false;
-    if ( ! lv_obj_has_state(data->button, LV_STATE_CHECKED)) {
-      Serial.println("DEBUG: Sunrise function - Inverter NOT switched ON");
-      digitalWrite(RELAY1, LOW);
+
+  // if charge power present save this knowledge and leave function
+  if ( (combinedData.canData.cu & 0x01) == 0x01 && ! start_time && ! charge_power ) {
+    charge_power = true;
+    charge_power_time = millis();
+    delay(50);
+    Serial.println("DEBUG: sunrise timer - charge power present and set to true");
+    return;
+  }
+  // if charge power not present but was in last 30s, turn on inverter
+  if ( ! (combinedData.canData.cu & 0x01) == 0x01 ) {
+    if ( charge_power && (charge_power_time + 30 * 1000) > millis() ) {
+      start_time = millis(); // record start time
+      relay_closed = true;
+      start_inverter = true; // global var for inverter timer
+      digitalWrite(userData[3].relay_pin, HIGH);
+      Serial.println("DEBUG: sunrise timer - inverter ON");
     }
-    Serial.println("DEBUG: Sunrise function - 30 minutes has passed");
+    charge_power = false;
+    return;
   }
-  // 
-  if ( sunrise ) {
-    digitalWrite(RELAY1, HIGH);
-    //lv_event_send(data->button, LV_EVENT_CLICKED, NULL);
-    Serial.println("DEBUG: Sunrise function - Starting inverter");
-    start_inverter = true;
-  }
-  // DEBUG
-  else Serial.println("DEBUG: Sunrise function - No Action");
 }
-
-
 
 
 // DCL CHECK TIMER ////////////////////////////////////////////////////////////////////////////
@@ -411,7 +416,9 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
 
       // if inverter off don't allow hot water button to be marked as clicked
       else if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
-        lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL); // send click event to start inverter ** NOT WORKING ** pressed works, clicked does not
+        lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL); // send click event to start inverter ** NOT WORKING ** pressed works, clicked does not
+        lv_event_send(userData[3].button, LV_EVENT_RELEASED, NULL);
+        lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL);
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
@@ -592,7 +599,9 @@ void thermostat_event_handler(lv_event_t * e) {
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       // check if inverter is on
       if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
-        lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL); // ********************** not working yet **** pressed works not clicked
+        lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL); // ********************** not working yet **** pressed works not clicked
+        lv_event_send(userData[3].button, LV_EVENT_RELEASED, NULL);
+        lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL);
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
