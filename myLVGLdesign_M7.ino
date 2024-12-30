@@ -249,42 +249,45 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 
 void sunrise_start_inverter(lv_timer_t* timer) {
 
-  static uint32_t start_time = 0;
-  static uint32_t charge_power_time = 0;
+  static uint32_t time_ms = 0; // common time variable
+  /*static uint32_t start_time = 0;
+  static uint32_t charge_power_time = 0;*/
 
   static bool relay_closed = false;
   static bool charge_power = false;
 
-  // if 15 minutes has passed turn off inverter if not manually turned on and leave function (15 minute sunrise)
-  if ( start_time && (start_time + 15 * 60 * 1000) > millis() ) {
-    if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) && relay_closed ) {
-      digitalWrite(userData[3].relay_pin, LOW);
-      relay_closed = false;
-    }
-    start_time = 0;
-    start_inverter = false; // global var for inverter timer
-    Serial.println("DEBUG: sunrise timer - timer expired inverter OFF");
-    return;
-  }
-
   // if charge power present save this knowledge and leave function
-  if ( (combinedData.canData.cu & 0x01) == 0x01 && ! start_time && ! charge_power ) {
+  if ( (combinedData.canData.cu & 0x01) == 0x01 && ! time_ms && ! charge_power ) { //start_time && ! charge_power ) {
     charge_power = true;
-    charge_power_time = millis();
+    //charge_power_time = millis();
+    time_ms = millis();
     delay(50);
     Serial.println("DEBUG: sunrise timer - charge power present and set to true");
     return;
   }
   // if charge power not present but was in last 30s, turn on inverter
   if ( ! (combinedData.canData.cu & 0x01) == 0x01 ) {
-    if ( charge_power && (charge_power_time + 30 * 1000) > millis() ) {
-      start_time = millis(); // record start time
+    if ( charge_power && (time_ms + 30 * 1000) > millis() ) { //charge_power_time + 30 * 1000) > millis() ) {
+      //start_time = millis(); // record start time
+      time_ms = millis();
       relay_closed = true;
       start_inverter = true; // global var for inverter timer
       digitalWrite(userData[3].relay_pin, HIGH);
       Serial.println("DEBUG: sunrise timer - inverter ON");
     }
     charge_power = false;
+    return;
+  }
+  // if 15 minutes has passed turn off inverter if not manually turned on and leave function (15 minute sunrise)
+  if ( time_ms && (time_ms + 15 * 60 * 1000) > millis() ) { //start_time && (start_time + 15 * 60 * 1000) > millis() ) {
+    if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) && relay_closed ) {
+      digitalWrite(userData[3].relay_pin, LOW);
+      relay_closed = false;
+    }
+    //start_time = 0;
+    time_ms = 0;
+    start_inverter = false; // global var for inverter timer
+    Serial.println("DEBUG: sunrise timer - timer expired inverter OFF");
     return;
   }
 }
