@@ -261,25 +261,25 @@ void sunrise_start_inverter(lv_timer_t* timer) {
     charge_power = true;
     //charge_power_time = millis();
     time_ms = millis(); // record charge power start time
-    if (Serial) delay(50);
-    Serial.println("DEBUG: sunrise timer - charge power present and set to true");
+    /*if (Serial) delay(50);
+    Serial.println("DEBUG: sunrise timer - charge power present and set to true");*/
     return;
   }
   // if charge power flapping off within 30s, turn on inverter
   if ( ! (combinedData.canData.cu & 0x01) == 0x01 ) {
-    if ( charge_power && (time_ms + 30 * 1000) > millis() ) { //charge_power_time + 30 * 1000) > millis() ) {
+    if ( charge_power && (time_ms + (30 * 1000)) > millis() ) { //charge_power_time + 30 * 1000) > millis() ) {
       //start_time = millis(); // record start time
       time_ms = millis(); // record inverter start time as charge power start time is not needed any more
       relay_closed = true;
       start_inverter = true; // global var for inverter timer
       digitalWrite(userData[3].relay_pin, HIGH);
-      Serial.println("DEBUG: sunrise timer - inverter ON");
+      //Serial.println("DEBUG: sunrise timer - inverter ON");
     }
     charge_power = false;
     return;
   }
   // if 15 minutes has passed turn off inverter if not manually turned on and leave function (15 minute sunrise)
-  if ( time_ms && (time_ms + 15 * 60 * 1000) > millis() ) { //start_time && (start_time + 15 * 60 * 1000) > millis() ) {
+  if ( time_ms && (time_ms + (15 * 60 * 1000)) < millis() ) { //start_time && (start_time + 15 * 60 * 1000) > millis() ) {
     if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) && relay_closed ) {
       digitalWrite(userData[3].relay_pin, LOW);
       relay_closed = false;
@@ -287,8 +287,8 @@ void sunrise_start_inverter(lv_timer_t* timer) {
     //start_time = 0;
     time_ms = 0;
     start_inverter = false; // global var for inverter timer
-    Serial.println("DEBUG: sunrise timer - timer expired inverter OFF");
-    return;
+    /*Serial.println("DEBUG: sunrise timer - timer expired inverter OFF");
+    return;*/
   }
 }
 
