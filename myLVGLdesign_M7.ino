@@ -272,21 +272,23 @@ void sunrise_start_inverter(lv_timer_t* timer) {
       start_inverter = true; // global var for inverter timer
       digitalWrite(data->relay_pin, HIGH);
       if ( ! lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
-        lv_label_set_text(data->label_obj, "ON - Low \xE2\x98\x80 mode"); // /U+2600 can also be tried for unicode sun symbol
+        lv_label_set_text(data->label_obj, "ON\nWeak PV mode");
       }
       //Serial.println("DEBUG: sunrise timer - inverter ON");
+    }
+    else {
+      time_ms = 0; // reset charge power timer to enable time update for flapping again
     }
     charge_power = false;
     return;
   }
-  // if 45 minutes has passed turn off inverter if not manually turned on and leave function (45 minute winter sunrise)
-  if ( time_ms && (time_ms + (45 * 60 * 1000)) < millis() ) {
+  // if 60 minutes has passed turn off inverter if not manually turned on and leave function (60 minute winter/rainy day sunrise)
+  if ( time_ms && (time_ms + (60 * 60 * 1000)) < millis() ) {
     if ( ! lv_obj_has_state(data->button, LV_STATE_CHECKED) && relay_closed ) {
       digitalWrite(data->relay_pin, LOW);
       relay_closed = false;
       lv_label_set_text(data->label_obj, "OFF");
     }
-    //start_time = 0;
     time_ms = 0;
     start_inverter = false; // global var for inverter timer
     //Serial.println("DEBUG: sunrise timer - timer expired inverter OFF");
