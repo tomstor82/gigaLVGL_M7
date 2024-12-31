@@ -248,10 +248,9 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 // SUNRISE CHECK TIMER ////////////////////////////////////////////////////////////////////////
 
 void sunrise_start_inverter(lv_timer_t* timer) {
+  user_data_t * data = (user_data_t *)timer->user_data;
 
   static uint32_t time_ms = 0; // common time variable
-  /*static uint32_t start_time = 0;
-  static uint32_t charge_power_time = 0;*/
 
   static bool relay_closed = false;
   static bool charge_power = false;
@@ -259,36 +258,38 @@ void sunrise_start_inverter(lv_timer_t* timer) {
   // if charge power present save this knowledge and leave function
   if ( (combinedData.canData.cu & 0x01) == 0x01 && ! time_ms && ! charge_power ) { //start_time && ! charge_power ) {
     charge_power = true;
-    //charge_power_time = millis();
     time_ms = millis(); // record charge power start time
     /*if (Serial) delay(50);
-    Serial.println("DEBUG: sunrise timer - charge power present and set to true");*/
+    Serial.println("DEBUG: sunrise timer - charge power present and set to true");
+    */
     return;
   }
-  // if charge power flapping off within 30s, turn on inverter
+  // if charge power flapping off within 30s, turn on inverter after ensuring MPPT is OFF after roughly 4s
   if ( ! (combinedData.canData.cu & 0x01) == 0x01 ) {
-    if ( charge_power && (time_ms + (30 * 1000)) > millis() ) { //charge_power_time + 30 * 1000) > millis() ) {
-      //start_time = millis(); // record start time
+    if ( charge_power && (time_ms + (30 * 1000)) > millis() && (time_ms + (4 * 1000)) < millis() ) { //charge_power_time + 30 * 1000) > millis() ) {
       time_ms = millis(); // record inverter start time as charge power start time is not needed any more
       relay_closed = true;
       start_inverter = true; // global var for inverter timer
-      digitalWrite(userData[3].relay_pin, HIGH);
+      digitalWrite(data->relay_pin, HIGH);
+      if ( ! lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
+        lv_label_set_text(data->label_obj, "ON - Low \xE2\x98\x80 mode"); // /U+2600 can also be tried for unicode sun symbol
+      }
       //Serial.println("DEBUG: sunrise timer - inverter ON");
     }
     charge_power = false;
     return;
   }
-  // if 15 minutes has passed turn off inverter if not manually turned on and leave function (15 minute sunrise)
-  if ( time_ms && (time_ms + (15 * 60 * 1000)) < millis() ) { //start_time && (start_time + 15 * 60 * 1000) > millis() ) {
-    if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) && relay_closed ) {
-      digitalWrite(userData[3].relay_pin, LOW);
+  // if 45 minutes has passed turn off inverter if not manually turned on and leave function (45 minute winter sunrise)
+  if ( time_ms && (time_ms + (45 * 60 * 1000)) < millis() ) {
+    if ( ! lv_obj_has_state(data->button, LV_STATE_CHECKED) && relay_closed ) {
+      digitalWrite(data->relay_pin, LOW);
       relay_closed = false;
+      lv_label_set_text(data->label_obj, "OFF");
     }
     //start_time = 0;
     time_ms = 0;
     start_inverter = false; // global var for inverter timer
-    /*Serial.println("DEBUG: sunrise timer - timer expired inverter OFF");
-    return;*/
+    //Serial.println("DEBUG: sunrise timer - timer expired inverter OFF");
   }
 }
 
