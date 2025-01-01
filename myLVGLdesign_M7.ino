@@ -341,7 +341,7 @@ void dcl_check(lv_timer_t * timer) {
 
 // MESSAGE BOX FOR SENSOR-DATA EVENT HANDLERS AND UPDATE TIMER /////////////////////////////////
 const char* set_msgbox_text() {
-  static char mbox_text[312]; // Static buffer to retain the value
+  static char mbox_text[400]; // Static buffer to retain the value
   snprintf(mbox_text, sizeof(mbox_text),
            "Temperature 1:            %.1f°C\nHumidity 1:                   %.1f%%\n\n"
            "Temperature 2:            %.1f°C\nHumidity 2:                   %.1f%%\n\n"
@@ -1283,16 +1283,24 @@ void loop() {
     dim_display();
   }
 
-  // Attempting to accurately determine inverter standby power but as reading is instantanious with load use predetermined value
-  /*if ( inverter_startup_ms && inverter_startup_ms + 14150 < millis() && inverter_startup_ms + 14400 > millis() ) {
+  // Time around the loop checker - display on screen or serial does not seem to matter time wise ( remember the lvgl delay )
+  /*static uint8_t _i = 0;
+  static uint32_t _start_time = millis();
+  static bool _finished = false;
 
-    inverter_standby_p = combinedData.canData.p - inverter_prestart_p;
-
-    // if measured value is higher than documented 75W. Takes ~2m for power to settle
-    if ( inverter_standby_p > 73 ) {
-      inverter_standby_p = 73;
-    }
+  if ( _i <  254 && ! _finished ) {
+    _i++;
+  }
+  else if ( ! _finished ) {
+    static uint32_t _duration = 0;
+    _duration = (millis() - _start_time) / 255;
+    lv_obj_t * _loop_timer_label = lv_label_create(lv_obj_get_parent(userData[0].button));
+    char _buf[20];
+    snprintf(_buf, sizeof(_buf), "%d ms loop", _duration);
+    lv_label_set_text(_loop_timer_label, _buf);
+    lv_obj_align(_loop_timer_label, LV_ALIGN_TOP_RIGHT, 0, 0);
+    _finished = true;
   }*/
 
-  delay(5); // calming loop
+  delay(4); // lvgl recommends 5ms delay for display and I have measured average performance of 1ms with or without serial
 }
