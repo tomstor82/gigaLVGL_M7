@@ -128,6 +128,10 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
 } user_data_t;
 
 typedef struct {
+  lv_obj_t* clock_label;
+} clock_data_t;
+
+typedef struct {
   lv_obj_t* label_obj;
   lv_obj_t* label_text;
   const char* label_prefix; // To store label text prefix e.g Voltage
@@ -144,6 +148,7 @@ typedef struct {
 static CanMsgData canMsgData;
 static bms_status_data_t bmsStatusData;
 static user_data_t userData[4] = {}; // 4 buttons with user_data
+static clock_data_t clockData;
 static can_label_t canLabel[14] = {}; // 14 labels so far
 static CombinedData combinedData;
 
@@ -165,8 +170,9 @@ const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 static String buffer = "";
 
 //**************************************************************************************
-//   Made changes to event sending to buttons once inverter is turned off
-//   
+//  BUG#1 bms clear fault button wandering down each second
+//  BUG#2 occasional crash when pressing msg_box (inverter is on?) - increased buf size
+//  BUG#3 inverter doesn't always start in low PV mode - removed 4s delay
 //**************************************************************************************
 
 // CREATE BUTTON INSTANCE
@@ -262,17 +268,17 @@ void sunrise_start_inverter(lv_timer_t* timer) {
     /*if (Serial) delay(50);
     Serial.println("DEBUG: sunrise timer - charge power present and set to true");
     */
-    return;
+    return; // no point in continuing as timer will not be met on next conditions
   }
-  // if charge power flapping off within 30s, turn on inverter after ensuring MPPT is OFF after roughly 4s
+  // if charge power flapping off within 30s          //, turn on inverter after 4s delay to ensuring MPPT is OFF ******* CAN REDUCE TO 0 ONCE CHG RELAY IS CONTROLLED BY PV INPUT
   if ( ! (combinedData.canData.cu & 0x01) == 0x01 ) {
-    if ( charge_power && (time_ms + (30 * 1000)) > millis() && (time_ms + (4 * 1000)) < millis() ) { //charge_power_time + 30 * 1000) > millis() ) {
+    if ( charge_power && (time_ms + (30 * 1000)) > millis() ) {//&& (time_ms + (4 * 1000)) < millis() ) { //charge_power_time + 30 * 1000) > millis() ) {
       time_ms = millis(); // record inverter start time as charge power start time is not needed any more
       relay_closed = true;
       start_inverter = true; // global var for inverter timer
       digitalWrite(data->relay_pin, HIGH);
       if ( ! lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
-        lv_label_set_text(data->label_obj, "ON\nWeak PV mode");
+        lv_label_set_text(data->label_obj, "ON\nMPPT boost mode");
       }
       //Serial.println("DEBUG: sunrise timer - inverter ON");
     }
@@ -468,7 +474,7 @@ void sweep_timer (lv_timer_t* timer) {
   // stimulate button with click to start inverter again
   lv_event_send(data->button, LV_EVENT_CLICKED, NULL);
 
-  // delete timer so it only runs once as this function is called continiously by other timer
+  // delete timer so it only runs once as this function is called continuosly by other timer
   lv_timer_del(timer);
 }
 
@@ -517,7 +523,7 @@ void power_check(lv_timer_t * timer) {
   // turn off relay
   else {
     digitalWrite(data->relay_pin, LOW);
-    // delete timer if relay is turned off
+    // delete timer if relay is turned off as timer is created by click event handler
     lv_timer_del(timer);
     /*Serial.println("DEBUG: Turning off");
     Serial.print("DEBUG: current power: ");
@@ -813,18 +819,59 @@ void update_temp(lv_timer_t *timer) {
 
 // CLEAR BMS FLAG EVENT HANDLER ////////////////////////////////////////////////////////////////////
 void clear_bms_flag(lv_event_t * e) {
-  //Serial.println("DEBUG clear bms flag #1");
   lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t * obj = lv_event_get_target(e);
   if(code == LV_EVENT_CLICKED) {
-    //Serial.println("DEBUG clear bms flag #2");
     LV_UNUSED(obj);
     canMsgData.msg_cnt = 1;
-    Serial.println("Sending CAN message");
+    //Serial.println("Sending CAN message");
   }
 }
 
 
+
+
+
+
+// Create Clock //////////////////////////////////////////////////////////////////////////////
+void create_clock_label(lv_obj_t* parent, clock_data_t* data) {
+
+  data->clock_label = lv_label_create(parent);
+  //lv_style_set_text_decor(&style, LV_TEXT_DECOR_UNDERLINE); // set underline style
+  //lv_obj_add_style(data->clock_label, &style, 0); // add style
+  lv_obj_align(data->clock_label, LV_ALIGN_TOP_MID, 0, -5); // x=20 perfect if left aligned
+
+  // text update timer
+  lv_timer_create(clock_updater, 1000, data);
+}
+
+void clock_updater(lv_timer_t* timer) {
+  clock_data_t *data = (clock_data_t *)timer->user_data;
+
+  uint8_t h = 0;
+  uint8_t m = 0;
+  char t[12];
+  char c[4];
+
+  // Discharge
+  if (combinedData.canData.avgI > 0) {
+    h = combinedData.canData.soc / (combinedData.canData.avgI/10.0);
+    m = (combinedData.canData.soc / (combinedData.canData.avgI/10.0) - h) * 60;
+  }
+  // Charge
+  else {
+    h = (200 - combinedData.canData.soc) / (abs(combinedData.canData.avgI)/10.0);
+    m = ((200 - combinedData.canData.soc) / (abs(combinedData.canData.avgI)/10.0) - h) * 60;
+  }
+  if ( h > 1 ) {
+    strcpy(c, "hrs");
+  }
+  else {
+    strcpy(c, "hr");
+  }
+  sprintf(t, "%02d:%02d %s", h, m, c);
+  lv_label_set_text(data->clock_label, t);
+}
 
 
 
@@ -984,16 +1031,16 @@ void create_status_label(const char* label_text, bms_status_data_t* data, bool f
 
   static uint8_t i = 0; // static variable to preserve value between function calls
 
-  // if finised argument is true zero index to be ready for next round of calls
+  // if finised argument is true allign button and reset index to be ready for next round of calls
   if ( finished ) {
-    i = 0;
-    
     // Align button if it is visible
     if ( ! lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_align_to(data->button, data->status_label[i-1], LV_ALIGN_OUT_BOTTOM_MID, 0, 20); // Align button below last label with index controlled gap
+      lv_obj_align_to(data->button, data->status_label[i-1], LV_ALIGN_OUT_BOTTOM_MID, 0, 20); // Align button below last label with index controlled gap (compensated for ++)
     }
+    i = 0; // reset index for next cycle
   }
-  // create label if it doesn't exist
+
+  // create label if it doesn't exist and add passed text to label object
   else {
     if ( ! data->status_label[i] ) {
       data->status_label[i] = lv_label_create(data->parent);
@@ -1188,6 +1235,9 @@ void setup() {
   lv_obj_set_grid_cell(cont, LV_GRID_ALIGN_STRETCH, 0, 1,
                         LV_GRID_ALIGN_STRETCH, 0, 1);
 
+  // Create charge/discharge clock
+  create_clock_label(cont, &clockData);
+
   // Create labels for CAN data
   create_can_label(cont, "SOC", "%", &(combinedData.canData.soc), CAN_DATA_TYPE_BYTE, 20, 20, &canLabel[0]);
   create_can_label(cont, "Current", "A", &(combinedData.canData.instI), CAN_DATA_TYPE_FLOAT, 180, 20, &canLabel[1]);
@@ -1283,24 +1333,27 @@ void loop() {
     dim_display();
   }
 
-  // Time around the loop checker - display on screen or serial does not seem to matter time wise ( remember the lvgl delay )
-  /*static uint8_t _i = 0;
-  static uint32_t _start_time = millis();
-  static bool _finished = false;
+  if (Serial) {
+    // Time around the loop checker - display on screen or serial does not seem to matter time wise ( remember the lvgl delay )
+    static uint8_t _i = 0;
+    static uint32_t _start_time = millis();
+    static bool _finished = false;
 
-  if ( _i <  254 && ! _finished ) {
-    _i++;
+    if ( _i <  254 && ! _finished ) {
+      _i++;
+    }
+    else if ( ! _finished ) {
+      static uint32_t _duration = 0;
+      _duration = (millis() - _start_time) / 255;
+      //lv_obj_t * _loop_timer_label = lv_label_create(lv_obj_get_parent(userData[0].button));
+      char _buf[30];
+      snprintf(_buf, sizeof(_buf), "%d ms average loop lap", _duration);
+      //lv_label_set_text(_loop_timer_label, _buf);
+      //lv_obj_align(_loop_timer_label, LV_ALIGN_TOP_RIGHT, 0, 0);
+      Serial.println(_buf);
+      _finished = true;
+    }
   }
-  else if ( ! _finished ) {
-    static uint32_t _duration = 0;
-    _duration = (millis() - _start_time) / 255;
-    lv_obj_t * _loop_timer_label = lv_label_create(lv_obj_get_parent(userData[0].button));
-    char _buf[20];
-    snprintf(_buf, sizeof(_buf), "%d ms loop", _duration);
-    lv_label_set_text(_loop_timer_label, _buf);
-    lv_obj_align(_loop_timer_label, LV_ALIGN_TOP_RIGHT, 0, 0);
-    _finished = true;
-  }*/
 
   delay(4); // lvgl recommends 5ms delay for display and I have measured average performance of 1ms with or without serial
 }
