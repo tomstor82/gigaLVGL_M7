@@ -848,28 +848,36 @@ void create_clock_label(lv_obj_t* parent, clock_data_t* data) {
 void clock_updater(lv_timer_t* timer) {
   clock_data_t *data = (clock_data_t *)timer->user_data;
 
-  uint8_t h = 0;
+  uint16_t h = 0;
   uint8_t m = 0;
-  char t[12];
-  char c[4];
+  char t[11];
+  char c[4] = {"hrs"};
 
   // Discharge
   if (combinedData.canData.avgI > 0) {
     h = combinedData.canData.soc / (combinedData.canData.avgI/10.0);
     m = (combinedData.canData.soc / (combinedData.canData.avgI/10.0) - h) * 60;
   }
+
   // Charge
   else {
     h = (200 - combinedData.canData.soc) / (abs(combinedData.canData.avgI)/10.0);
     m = ((200 - combinedData.canData.soc) / (abs(combinedData.canData.avgI)/10.0) - h) * 60;
   }
-  if ( h > 1 ) {
-    strcpy(c, "hrs");
+
+  // Over-run prevention by showing days
+  if (h > 120) {
+    uint8_t d = h / 24;
+    sprintf(t, "+%d days", d);
   }
   else {
-    strcpy(c, "hr");
+    // Plural adjustment
+    if (h == 1) strcpy(c, "hr");
+
+    sprintf(t, "%02d:%02d %s", h, m, c);
   }
-  sprintf(t, "%02d:%02d %s", h, m, c);
+
+  // Print
   lv_label_set_text(data->clock_label, t);
 }
 
