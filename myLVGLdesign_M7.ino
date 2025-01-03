@@ -171,7 +171,7 @@ static String buffer = "";
 
 //**************************************************************************************
 //  BUG#1 bms clear fault button wandering down each second
-//  BUG#2 occasional crash when pressing msg_box (inverter is on?) - increased buf size
+//  BUG#2 occasional crash when pressing msg_box (inverter is on?) - removed button var
 //  BUG#3 inverter doesn't always start in low PV mode - removed 4s delay
 //**************************************************************************************
 
@@ -203,7 +203,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   lv_obj_set_width(data->dcl_label, 140);
   lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
   lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
-  lv_timer_create(dcl_check, 1000, data); // check every second to allow prompt off if dch relay open
+  lv_timer_create(dcl_check, 100, data); // check every 100ms to allow prompt off if dch relay open
 
   // create temperature dropdown and dynamic temperature labels for thermostat buttons
   if ( ! timeout_ms ) {
@@ -249,6 +249,11 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     lv_timer_create(sunrise_start_inverter, 1000, data);
   }
 }
+
+
+
+
+
 
 
 // SUNRISE CHECK TIMER ////////////////////////////////////////////////////////////////////////
@@ -302,6 +307,16 @@ void sunrise_start_inverter(lv_timer_t* timer) {
 }
 
 
+
+
+
+
+
+
+
+
+
+
 // DCL CHECK TIMER ////////////////////////////////////////////////////////////////////////////
 void dcl_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
@@ -345,19 +360,24 @@ void dcl_check(lv_timer_t * timer) {
 
 
 
+
+
+
 // MESSAGE BOX FOR SENSOR-DATA EVENT HANDLERS AND UPDATE TIMER /////////////////////////////////
 const char* set_msgbox_text() {
-  static char mbox_text[400]; // Static buffer to retain the value
+  static char mbox_text[300]; // Static buffer to retain the value
+
   snprintf(mbox_text, sizeof(mbox_text),
-           "Temperature 1:            %.1f°C\nHumidity 1:                   %.1f%%\n\n"
-           "Temperature 2:            %.1f°C\nHumidity 2:                   %.1f%%\n\n"
-           "Temperature 3:            %.1f°C\nHumidity 3:                   %.1f%%\n\n"
-           "Temperature 4:            %.1f°C\nHumidity 4:                   %.1f%%",
-           combinedData.sensorData.temp1, combinedData.sensorData.humi1,
-           combinedData.sensorData.temp2, combinedData.sensorData.humi2,
-           combinedData.sensorData.temp3, combinedData.sensorData.humi3,
-           combinedData.sensorData.temp4, combinedData.sensorData.humi4);
-  return mbox_text; // Return the text in the message box
+                 "Temperature 1:            %.1f°C\nHumidity 1:                   %.1f%%\n\n"
+                 "Temperature 2:            %.1f°C\nHumidity 2:                   %.1f%%\n\n"
+                 "Temperature 3:            %.1f°C\nHumidity 3:                   %.1f%%\n\n"
+                 "Temperature 4:            %.1f°C\nHumidity 4:                   %.1f%%",
+                 combinedData.sensorData.temp1, combinedData.sensorData.humi1,
+                 combinedData.sensorData.temp2, combinedData.sensorData.humi2,
+                 combinedData.sensorData.temp3, combinedData.sensorData.humi3,
+                 combinedData.sensorData.temp4, combinedData.sensorData.humi4);
+
+  return mbox_text;
 }
 
 void close_message_box_event_handler(lv_event_t* e) {
@@ -366,7 +386,7 @@ void close_message_box_event_handler(lv_event_t* e) {
 
     if (code == LV_EVENT_CLICKED) {
         lv_timer_del(data->mbox_update_timer); // Delete the timer
-        lv_obj_del(data->mbox);           // Delete the message box
+        lv_msgbox_close(data->mbox);           // Delete the message box
 
         // Remove the screen overlay object
         lv_obj_del(lv_event_get_current_target(e));
@@ -375,22 +395,24 @@ void close_message_box_event_handler(lv_event_t* e) {
 
 void sensorData_msgBox_update_timer(lv_timer_t* timer) {
     user_data_t* data = (user_data_t*)timer->user_data;
-    lv_obj_t* label = lv_msgbox_get_text(data->mbox);
-    lv_label_set_text(label, set_msgbox_text()); // Update the text in the message box
+    lv_obj_t* label = lv_msgbox_get_text(data->mbox); // get msgBox text string object excluding title
+    lv_label_set_text(label, set_msgbox_text()); // Update the text object in the msgBox
 }
 
 void sensorData_msgBox(lv_event_t* e) {
     user_data_t* data = (user_data_t*)lv_event_get_user_data(e);
     lv_event_code_t code = lv_event_get_code(e);
-    lv_obj_t* obj = lv_event_get_target(e);
+    //lv_obj_t* obj = lv_event_get_target(e);
     //Serial.println("DEBUG: Touch detected for msgBox event handler");
 
     if (code == LV_EVENT_CLICKED) {
-        LV_UNUSED(obj);
-        static const char* btn_txts[] = {}; // No buttons
-        data->mbox = lv_msgbox_create(lv_obj_get_parent(data->label_obj), "Sensor Data", set_msgbox_text(), btn_txts, false);
+        //LV_UNUSED(obj);
+        //static const char* btn_txts[] = {}; // No buttons ******* this may remove funky symbols
+        data->mbox = lv_msgbox_create(lv_obj_get_parent(data->label_obj), "Sensor Data", set_msgbox_text(), NULL, false); //data->mbox = lv_msgbox_create(lv_obj_get_parent(data->label_obj), "Sensor Data", set_msgbox_text(), btn_txts, false);
         lv_obj_set_width(data->mbox, LV_PCT(80)); // Set width to 80% of the screen
         lv_obj_align(data->mbox, LV_ALIGN_CENTER, 0, 0); // Center the message box on the screen
+
+// perhaps create event handler on msg box instead of creating overlay
 
         // Create a full-screen overlay to detect clicks for closing the message box
         lv_obj_t* overlay = lv_obj_create(lv_scr_act());
@@ -412,9 +434,9 @@ void sensorData_msgBox(lv_event_t* e) {
 void hot_water_inverter_event_handler(lv_event_t* e) {
   user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
   lv_event_code_t code = lv_event_get_code(e);
-  lv_obj_t * obj = lv_event_get_target(e);
+  //lv_obj_t * obj = lv_event_get_target(e);
   if(code == LV_EVENT_CLICKED) {
-    LV_UNUSED(obj);
+    //LV_UNUSED(obj);
     lv_timer_t* timeout_timer = NULL; // declare timer to be able to delete if button off prematurely
 
     // Button ON
@@ -602,12 +624,12 @@ void thermostat_timer(lv_timer_t * timer) {
 void thermostat_event_handler(lv_event_t * e) {
   user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
   lv_event_code_t code = lv_event_get_code(e);
-  lv_obj_t * obj = lv_event_get_target(e);
+  //lv_obj_t * obj = lv_event_get_target(e);
 
   static lv_timer_t* thermostat = NULL;
   
   if(code == LV_EVENT_CLICKED) {
-    LV_UNUSED(obj);
+    //LV_UNUSED(obj);
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       // check if inverter is on
       if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
@@ -820,9 +842,9 @@ void update_temp(lv_timer_t *timer) {
 // CLEAR BMS FLAG EVENT HANDLER ////////////////////////////////////////////////////////////////////
 void clear_bms_flag(lv_event_t * e) {
   lv_event_code_t code = lv_event_get_code(e);
-  lv_obj_t * obj = lv_event_get_target(e);
+  //lv_obj_t * obj = lv_event_get_target(e);
   if(code == LV_EVENT_CLICKED) {
-    LV_UNUSED(obj);
+    //LV_UNUSED(obj);
     canMsgData.msg_cnt = 1;
     //Serial.println("Sending CAN message");
   }
@@ -833,7 +855,7 @@ void clear_bms_flag(lv_event_t * e) {
 
 
 
-// Create Clock //////////////////////////////////////////////////////////////////////////////
+// CREATE CLOCK //////////////////////////////////////////////////////////////////////////////
 void create_clock_label(lv_obj_t* parent, clock_data_t* data) {
 
   data->clock_label = lv_label_create(parent);
@@ -868,7 +890,7 @@ void clock_updater(lv_timer_t* timer) {
   // Over-run prevention by showing days
   if (h > 120) {
     uint8_t d = h / 24;
-    sprintf(t, "+%d days", d);
+    sprintf(t, "%d days", d);
   }
   else {
     // Plural adjustment
@@ -1020,9 +1042,9 @@ void dim_display() {
 // SCREEN TOUCH HANDLER FOR DISPLAY DIMMING ///////////////////////////////////////////
 void screen_touch(lv_event_t* e) {
   lv_event_code_t code = lv_event_get_code(e);
-  lv_obj_t * obj = lv_event_get_target(e);
+  //lv_obj_t * obj = lv_event_get_target(e);
   if(code == LV_EVENT_CLICKED) {
-    LV_UNUSED(obj);
+    //LV_UNUSED(obj);
     previous_touch_ms = millis();
     brightness = 70;
     backlight.set(brightness);
