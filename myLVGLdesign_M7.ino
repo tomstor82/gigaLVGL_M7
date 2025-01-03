@@ -171,7 +171,7 @@ static String buffer = "";
 
 //**************************************************************************************
 //  BUG#1 bms clear fault button wandering down each second
-//  BUG#2 occasional crash when pressing msg_box (inverter is on?) - removed button var
+//  BUG#2 occasional crash when pressing msg_box - NULL instead of empty button array
 //  BUG#3 inverter doesn't always start in low PV mode - removed 4s delay
 //**************************************************************************************
 
@@ -211,7 +211,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
 
     // Set temp label width
-    lv_obj_set_width(data->label_obj, 60);
+    lv_obj_set_width(data->label_obj, 80);
     lv_obj_set_pos(data->label_obj, 170, data->y_offset + 13);
 
     // Align the text in the center
@@ -257,7 +257,6 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 
 
 // SUNRISE CHECK TIMER ////////////////////////////////////////////////////////////////////////
-
 void sunrise_start_inverter(lv_timer_t* timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
 
@@ -283,7 +282,7 @@ void sunrise_start_inverter(lv_timer_t* timer) {
       start_inverter = true; // global var for inverter timer
       digitalWrite(data->relay_pin, HIGH);
       if ( ! lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
-        lv_label_set_text(data->label_obj, "ON\nMPPT boost mode");
+        lv_label_set_text(data->label_obj, "ON - MPPT startup");
       }
       //Serial.println("DEBUG: sunrise timer - inverter ON");
     }
@@ -365,7 +364,7 @@ void dcl_check(lv_timer_t * timer) {
 
 // MESSAGE BOX FOR SENSOR-DATA EVENT HANDLERS AND UPDATE TIMER /////////////////////////////////
 const char* set_msgbox_text() {
-  static char mbox_text[300]; // Static buffer to retain the value
+  static char mbox_text[291]; // Static buffer to retain the value
 
   snprintf(mbox_text, sizeof(mbox_text),
                  "Temperature 1:            %.1f°C\nHumidity 1:                   %.1f%%\n\n"
@@ -402,17 +401,11 @@ void sensorData_msgBox_update_timer(lv_timer_t* timer) {
 void sensorData_msgBox(lv_event_t* e) {
     user_data_t* data = (user_data_t*)lv_event_get_user_data(e);
     lv_event_code_t code = lv_event_get_code(e);
-    //lv_obj_t* obj = lv_event_get_target(e);
-    //Serial.println("DEBUG: Touch detected for msgBox event handler");
 
     if (code == LV_EVENT_CLICKED) {
-        //LV_UNUSED(obj);
-        //static const char* btn_txts[] = {}; // No buttons ******* this may remove funky symbols
-        data->mbox = lv_msgbox_create(lv_obj_get_parent(data->label_obj), "Sensor Data", set_msgbox_text(), NULL, false); //data->mbox = lv_msgbox_create(lv_obj_get_parent(data->label_obj), "Sensor Data", set_msgbox_text(), btn_txts, false);
+        data->mbox = lv_msgbox_create(lv_obj_get_parent(data->label_obj), "Sensor Data", set_msgbox_text(), NULL, false);
         lv_obj_set_width(data->mbox, LV_PCT(80)); // Set width to 80% of the screen
         lv_obj_align(data->mbox, LV_ALIGN_CENTER, 0, 0); // Center the message box on the screen
-
-// perhaps create event handler on msg box instead of creating overlay
 
         // Create a full-screen overlay to detect clicks for closing the message box
         lv_obj_t* overlay = lv_obj_create(lv_scr_act());
@@ -420,8 +413,8 @@ void sensorData_msgBox(lv_event_t* e) {
         lv_obj_set_style_opa(overlay, LV_OPA_TRANSP, 0); // Transparent overlay
         lv_obj_add_event_cb(overlay, close_message_box_event_handler, LV_EVENT_CLICKED, data);
 
-        // Create timer to update data every 10s
-        data->mbox_update_timer = lv_timer_create(sensorData_msgBox_update_timer, 10000, data);
+        // Create timer to update data every second
+        data->mbox_update_timer = lv_timer_create(sensorData_msgBox_update_timer, 1000, data);
     }
 }
 
@@ -444,13 +437,12 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
 
       if ( data->relay_pin == RELAY1 ) { // only for inverter for sweeping
         inverter_prestart_p = combinedData.canData.p;
-        //inverter_startup_ms = millis(); // used in loop for determining peak inverter starting power
         lv_label_set_text(data->label_obj, "Inverter ON");
       }
 
       // if inverter off don't allow hot water button to be marked as clicked
       else if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
-        lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL); // send click event to start inverter ** NOT WORKING ** pressed works, clicked does not
+        lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL); // Have to include all 3 of these to make it work
         lv_event_send(userData[3].button, LV_EVENT_RELEASED, NULL);
         lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL);
         // DEBUG if inverter is still off disable change flag
@@ -533,13 +525,6 @@ void power_check(lv_timer_t * timer) {
 
   if (on) {
     // we start this timer again
-    /*Serial.println("DEBUG: Resetting inverter timer");
-    Serial.print("DEBUG: Inverter standby p: ");
-    Serial.println(inverter_standby_p);
-    Serial.print("DEBUG: current power: ");
-    Serial.println(combinedData.canData.p);
-    Serial.print("DEBUG: inverter startup power level: ");
-    Serial.println(inverter_standby_p + inverter_prestart_p);*/
     lv_timer_reset(timer);
   }
   // turn off relay
@@ -547,11 +532,6 @@ void power_check(lv_timer_t * timer) {
     digitalWrite(data->relay_pin, LOW);
     // delete timer if relay is turned off as timer is created by click event handler
     lv_timer_del(timer);
-    /*Serial.println("DEBUG: Turning off");
-    Serial.print("DEBUG: current power: ");
-    Serial.println(combinedData.canData.p);
-    Serial.print("DEBUG: inverter startup power level: ");
-    Serial.println(inverter_standby_p + inverter_prestart_p);*/
 
     // Inverter sweep timer starting after turning off relay
     if ( data->relay_pin == RELAY1 && lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
@@ -624,12 +604,10 @@ void thermostat_timer(lv_timer_t * timer) {
 void thermostat_event_handler(lv_event_t * e) {
   user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
   lv_event_code_t code = lv_event_get_code(e);
-  //lv_obj_t * obj = lv_event_get_target(e);
 
   static lv_timer_t* thermostat = NULL;
   
   if(code == LV_EVENT_CLICKED) {
-    //LV_UNUSED(obj);
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       // check if inverter is on
       if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
@@ -675,8 +653,10 @@ void dropdown_event_handler(lv_event_t *e) {
       return;
     }
     lv_obj_t * dd = lv_event_get_target(e);
+
     // get index of selected dropdown item
     uint8_t id_selected = lv_dropdown_get_selected(dd);
+
     // link index to selection
     switch (id_selected) {
       case 0:
@@ -842,11 +822,9 @@ void update_temp(lv_timer_t *timer) {
 // CLEAR BMS FLAG EVENT HANDLER ////////////////////////////////////////////////////////////////////
 void clear_bms_flag(lv_event_t * e) {
   lv_event_code_t code = lv_event_get_code(e);
-  //lv_obj_t * obj = lv_event_get_target(e);
+
   if(code == LV_EVENT_CLICKED) {
-    //LV_UNUSED(obj);
     canMsgData.msg_cnt = 1;
-    //Serial.println("Sending CAN message");
   }
 }
 
@@ -859,8 +837,6 @@ void clear_bms_flag(lv_event_t * e) {
 void create_clock_label(lv_obj_t* parent, clock_data_t* data) {
 
   data->clock_label = lv_label_create(parent);
-  //lv_style_set_text_decor(&style, LV_TEXT_DECOR_UNDERLINE); // set underline style
-  //lv_obj_add_style(data->clock_label, &style, 0); // add style
   lv_obj_align(data->clock_label, LV_ALIGN_TOP_MID, 0, -5); // x=20 perfect if left aligned
 
   // text update timer
@@ -1042,9 +1018,7 @@ void dim_display() {
 // SCREEN TOUCH HANDLER FOR DISPLAY DIMMING ///////////////////////////////////////////
 void screen_touch(lv_event_t* e) {
   lv_event_code_t code = lv_event_get_code(e);
-  //lv_obj_t * obj = lv_event_get_target(e);
   if(code == LV_EVENT_CLICKED) {
-    //LV_UNUSED(obj);
     previous_touch_ms = millis();
     brightness = 70;
     backlight.set(brightness);
@@ -1364,26 +1338,29 @@ void loop() {
   }
 
   if (Serial) {
-    // Time around the loop checker - display on screen or serial does not seem to matter time wise ( remember the lvgl delay )
-    static uint8_t _i = 0;
-    static uint32_t _start_time = millis();
-    static bool _finished = false;
+    // Average loop lap time of 256 iterations - reflects the lvgl delay at end of loop
+    static uint8_t i = 0;
+    static uint32_t start_time = millis();
+    static bool finished = false;
 
-    if ( _i <  254 && ! _finished ) {
-      _i++;
+    // start iterations
+    if ( i <  254 && ! finished ) {
+      i++;
     }
-    else if ( ! _finished ) {
-      static uint32_t _duration = 0;
-      _duration = (millis() - _start_time) / 255;
-      //lv_obj_t * _loop_timer_label = lv_label_create(lv_obj_get_parent(userData[0].button));
-      char _buf[30];
-      snprintf(_buf, sizeof(_buf), "%d ms average loop lap", _duration);
-      //lv_label_set_text(_loop_timer_label, _buf);
-      //lv_obj_align(_loop_timer_label, LV_ALIGN_TOP_RIGHT, 0, 0);
-      Serial.println(_buf);
-      _finished = true;
+    // calculate and write result
+    else if ( ! finished ) {
+      uint8_t avg_lap = (millis() - start_time) / i;
+      char buf[30];
+      snprintf(buf, sizeof(buf), "%d ms average loop lap", avg_lap);
+      Serial.println(buf);
+      finished = true;
+    }
+    // start again at 30s intervals
+    else if ( finished && (start_time + 30000) < millis() ) {
+      i = 0;
+      start_time = millis();
+      finished = false;
     }
   }
-
   delay(4); // lvgl recommends 5ms delay for display and I have measured average performance of 1ms with or without serial
 }
