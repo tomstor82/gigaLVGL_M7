@@ -272,7 +272,7 @@ void sunrise_start_inverter(lv_timer_t* timer) {
 
 
   // update label with timer if inverter is not manually on and if timer is indeed running
-  if ( chg_pwr_on_time && ! lv_obj_has_state(data->button, LV_STATE_CHECKED)) {
+  if ( start_inverter && chg_pwr_on_time && ! lv_obj_has_state(data->button, LV_STATE_CHECKED)) {
     char buf[30];
     uint8_t remaining_minutes = interval - ( millis() - chg_pwr_on_time ) / 60 / 1000;
     static uint8_t previous_minutes = 0;
@@ -512,6 +512,7 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
     // Button OFF
     else {
       digitalWrite(data->relay_pin, LOW);
+      start_inverter = false; // global variable accessible for sunrise timer
       if (timeout_timer) {
         lv_timer_del(timeout_timer);
       }
