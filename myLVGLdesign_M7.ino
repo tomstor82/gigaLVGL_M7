@@ -212,7 +212,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 
     // Set temp label width
     lv_obj_set_width(data->label_obj, 80);
-    lv_obj_set_pos(data->label_obj, 170, data->y_offset + 13);
+    lv_obj_set_pos(data->label_obj, 160, data->y_offset + 13);
 
     // Align the text in the center
     lv_obj_set_style_text_align(data->label_obj, LV_TEXT_ALIGN_CENTER, 0);
@@ -260,18 +260,66 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 void sunrise_start_inverter(lv_timer_t* timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
 
-  static uint32_t time_ms = 0; // common time variable
-
-  static bool relay_closed = false;
+  static uint32_t chg_pwr_on_time = 0;
   static bool charge_power = false;
+  static bool previous = true; // to check if this function has run it's course within time interval
+  uint8_t interval = 30; // minutes
 
+  // NEW CODE FOR STARTING INVERTER AS SOON AS CHARGE POWER IS ENABLED AS I INCREASED RESISTOR IN DIVIDER CIRCUIT
+
+  // This avoids reboot turning on inverter if chg pwr is present at that time
+  // Also if inverter is in MPPT warmup and CHG_PWR is lost timer will turn off inverter
+
+
+  // update label with timer if inverter is not manually on and if timer is indeed running
+  if ( chg_pwr_on_time && ! lv_obj_has_state(data->button, LV_STATE_CHECKED)) {
+    char buf[30];
+    uint8_t remaining_minutes = interval - ( millis() - chg_pwr_on_time ) / 60 / 1000;
+    static uint8_t previous_minutes = 0;
+    // update remaning minutes if different from current time
+    if ( previous_minutes != remaining_minutes ) {
+      previous_minutes = remaining_minutes;
+      snprintf(buf, sizeof(buf), "ON - %d min\nMPPT warmup", remaining_minutes);
+      lv_label_set_text(data->label_obj, buf);
+    }
+  }
+
+  // Check if charge pwr is off and timer not running
+  if ( (combinedData.canData.cu & 0x01) != 0x01 && ! chg_pwr_on_time ) { // chg pwr off and no timer
+    previous = false;
+    return; // return as we need to wait for chg pwr on signal
+  }
+
+  // Charge power and no previous check for charge power and if inverter was started previously
+  else if ( (combinedData.canData.cu & 0x01) == 0x01 && ! previous ) {
+    previous = true;
+    chg_pwr_on_time = millis();
+    start_inverter = true; // global var for inverter timer
+    if ( ! lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
+      digitalWrite(data->relay_pin, HIGH);
+    }
+    return; // no reason to continue as next test is determined by time interval
+  }
+
+  // Once predetermined time has passed, turn off inverter regardless of chg_pwr signal or not
+  else if ( chg_pwr_on_time && previous && (millis() > chg_pwr_on_time + ( interval * 60 * 1000 )) ) {
+    if ( ! lv_obj_has_state(data->button, LV_STATE_CHECKED) && start_inverter ) {
+      digitalWrite(data->relay_pin, LOW);
+      lv_label_set_text(data->label_obj, "OFF");
+    }
+    chg_pwr_on_time = 0;
+    start_inverter = false; // global var for inverter timer
+  }
+
+
+// FIRST CODE TO HAVE INVERTER COME ON AFTER ONE FLAP OF CHARGE POWER
+
+/*
   // if charge power present save this knowledge and leave function
   if ( (combinedData.canData.cu & 0x01) == 0x01 && ! time_ms && ! charge_power ) { //start_time && ! charge_power ) {
     charge_power = true;
     time_ms = millis(); // record charge power start time
-    /*if (Serial) delay(50);
-    Serial.println("DEBUG: sunrise timer - charge power present and set to true");
-    */
+
     return; // no point in continuing as timer will not be met on next conditions
   }
   // if charge power flapping off within 30s          //, turn on inverter after 4s delay to ensuring MPPT is OFF ******* CAN REDUCE TO 0 ONCE CHG RELAY IS CONTROLLED BY PV INPUT
@@ -302,7 +350,7 @@ void sunrise_start_inverter(lv_timer_t* timer) {
     time_ms = 0;
     start_inverter = false; // global var for inverter timer
     //Serial.println("DEBUG: sunrise timer - timer expired inverter OFF");
-  }
+  }*/
 }
 
 
@@ -413,8 +461,8 @@ void sensorData_msgBox(lv_event_t* e) {
         lv_obj_set_style_opa(overlay, LV_OPA_TRANSP, 0); // Transparent overlay
         lv_obj_add_event_cb(overlay, close_message_box_event_handler, LV_EVENT_CLICKED, data);
 
-        // Create timer to update data every second
-        data->mbox_update_timer = lv_timer_create(sensorData_msgBox_update_timer, 1000, data);
+        // Create timer to update data every 10 seconds
+        data->mbox_update_timer = lv_timer_create(sensorData_msgBox_update_timer, 10000, data);
     }
 }
 
@@ -1344,12 +1392,12 @@ void loop() {
     static bool finished = false;
 
     // start iterations
-    if ( i <  254 && ! finished ) {
+    if ( i <  255 && ! finished ) {
       i++;
     }
     // calculate and write result
     else if ( ! finished ) {
-      uint8_t avg_lap = (millis() - start_time) / i;
+      uint8_t avg_lap = (millis() - start_time) / 256;
       char buf[30];
       snprintf(buf, sizeof(buf), "%d ms average loop lap", avg_lap);
       Serial.println(buf);
