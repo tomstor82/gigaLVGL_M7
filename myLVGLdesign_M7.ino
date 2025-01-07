@@ -157,6 +157,7 @@ int16_t inverter_prestart_p = 0; // must be signed
 uint8_t inverter_standby_p = 70; // takes around 4 minutes to settle down after start
 uint32_t inverter_startup_ms = 0;
 bool start_inverter = false;
+uint8_t pwr_demand = 0;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
 const uint16_t inverter_startup_delay_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
 const uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 85Wh to around 12,5Wh -84%
@@ -483,12 +484,13 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
     // Button ON
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
 
+      // Inverter
       if ( data->relay_pin == RELAY1 ) { // only for inverter for sweeping
         inverter_prestart_p = combinedData.canData.p;
         lv_label_set_text(data->label_obj, "Inverter ON");
       }
 
-      // if inverter off don't allow hot water button to be marked as clicked
+      // Start Inverter if OFF
       else if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
         lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL); // Have to include all 3 of these to make it work
         lv_event_send(userData[3].button, LV_EVENT_RELEASED, NULL);
@@ -501,8 +503,8 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         }
       }
 
-      // hot water if inverter is on
-      //else pwr_demand++; // only for hot water
+      // Hot water demand if ON
+      else pwr_demand++; // only for hot water
 
       digitalWrite(data->relay_pin, HIGH);
       // Create delay timer for inverter sweep and for hot water timout
@@ -513,6 +515,7 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
     else {
       digitalWrite(data->relay_pin, LOW);
       start_inverter = false; // global variable accessible for sunrise timer
+      pwr_demand ? pwr_demand-- : NULL;
       if (timeout_timer) {
         lv_timer_del(timeout_timer);
       }
@@ -547,27 +550,31 @@ void power_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
   bool on = false;
   
-  // inverter conditions
+  // Inverter
   if ( data->relay_pin == RELAY1 ) {
 
+    // Remain ON if global variable controlled by sunrise function is set
     if ( start_inverter ) {
       on = true;
-      //Serial.println("DEBUG: inverter on due to charge enable signal");
     }
 
-    // CHARGING AND ABOVE 50% SOC
+    // Remain ON if charging when SOC above 50%
     else if ( combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) {
       on = true;
-      //Serial.println("DEBUG: inverter on due to battery charging");
     }
 
-    // POWER DEMAND *************** HOW TO CHECK THIS WHEN SOLAR CHARGING VARIES A LOT ? *********************
-    else if ( (inverter_standby_p + inverter_prestart_p) < combinedData.canData.p ) {
+    // Remain ON if demand variable set
+    else if ( pwr_demand ) {
       on = true;
-      //Serial.println("DEBUG: inverter on due to power usage");
+    }
+
+    // Remain ON if charge is more than 20W or discharging exceeds inverter standby
+    else if ( (inverter_standby_p + inverter_prestart_p) > (combinedData.canData.p + 20)|| (inverter_standby_p + inverter_prestart_p) < combinedData.canData.p ) {
+      on = true;
     }
   }
-  // hot water tank - reset timer if charging
+  
+  // Hot water - reset timer if charging
   else if ( combinedData.canData.ccl < 10 && combinedData.canData.avgI < 0 ) {
     on = true;
   }
@@ -673,6 +680,7 @@ void thermostat_event_handler(lv_event_t * e) {
       if ( ! thermostat ) {
         thermostat = lv_timer_create(thermostat_timer, 10000, data); // check temp diff every 10s
       }
+      pwr_demand++;
     }
     else {
       digitalWrite(data->relay_pin, LOW);
@@ -681,6 +689,7 @@ void thermostat_event_handler(lv_event_t * e) {
         lv_timer_del(thermostat);
         thermostat = NULL;
       }
+      pwr_demand ? pwr_demand-- : NULL;
     }
   }
 }
