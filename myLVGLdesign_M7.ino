@@ -119,7 +119,7 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   lv_obj_t* dcl_label;
   lv_obj_t* label_obj;
   lv_obj_t* mbox;
-  lv_timer_t* mbox_update_timer;
+  lv_timer_t* timer;
   uint8_t relay_pin;
   uint8_t y_offset;
   unsigned long timeout_ms;
@@ -172,7 +172,7 @@ static String buffer = "";
 
 //**************************************************************************************
 //  BUG#1 bms clear fault button wandering down each second
-//  BUG#2 occasional crash when pressing msg_box - NULL instead of empty button array
+//  BUG#2 stop hot water timer when inverter is off
 //  BUG#3 inverter doesn't always start in low PV mode - removed 4s delay
 //**************************************************************************************
 
@@ -247,7 +247,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     // initialise label text
     lv_label_set_text(data->label_obj, "OFF");
     // check for sunrise by reading BMS charge enable signal from CANbus
-    lv_timer_create(sunrise_start_inverter, 1000, data);
+    //lv_timer_create(sunrise_start_inverter, 1000, data); //***************************** DISABLED SUNRISE TIMER
   }
 }
 
@@ -433,7 +433,7 @@ void close_message_box_event_handler(lv_event_t* e) {
     lv_event_code_t code = lv_event_get_code(e);
 
     if (code == LV_EVENT_CLICKED) {
-        lv_timer_del(data->mbox_update_timer); // Delete the timer
+        lv_timer_del(data->timer); // Delete the timer
         lv_msgbox_close(data->mbox);           // Delete the message box
 
         // Remove the screen overlay object
@@ -463,7 +463,7 @@ void sensorData_msgBox(lv_event_t* e) {
         lv_obj_add_event_cb(overlay, close_message_box_event_handler, LV_EVENT_CLICKED, data);
 
         // Create timer to update data every 10 seconds
-        data->mbox_update_timer = lv_timer_create(sensorData_msgBox_update_timer, 10000, data);
+        data->timer = lv_timer_create(sensorData_msgBox_update_timer, 10000, data);
     }
 }
 
@@ -479,7 +479,7 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
   //lv_obj_t * obj = lv_event_get_target(e);
   if(code == LV_EVENT_CLICKED) {
     //LV_UNUSED(obj);
-    lv_timer_t* timeout_timer = NULL; // declare timer to be able to delete if button off prematurely
+    //lv_timer_t* timeout_timer = NULL; // declare timer to be able to delete if button off prematurely
 
     // Button ON
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
@@ -508,7 +508,7 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
 
       digitalWrite(data->relay_pin, HIGH);
       // Create delay timer for inverter sweep and for hot water timout
-      timeout_timer = lv_timer_create(power_check, data->timeout_ms, data); // want to reset timer once excess solar to hot water is activated
+      data->timer = lv_timer_create(power_check, data->timeout_ms, data); // want to reset timer once excess solar to hot water is activated
     }
 
     // Button OFF
@@ -516,8 +516,8 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
       digitalWrite(data->relay_pin, LOW);
       start_inverter = false; // global variable accessible for sunrise timer
       pwr_demand ? pwr_demand-- : NULL;
-      if (timeout_timer) {
-        lv_timer_del(timeout_timer);
+      if (data->timer) {
+        lv_timer_del(data->timer);
       }
       if ( data->relay_pin == RELAY1 ) {
         lv_label_set_text(data->label_obj, "OFF"); // inverter only
@@ -661,8 +661,8 @@ void thermostat_event_handler(lv_event_t * e) {
   user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
   lv_event_code_t code = lv_event_get_code(e);
 
-  static lv_timer_t* thermostat = NULL;
-  
+  //static lv_timer_t* thermostat = NULL;
+
   if(code == LV_EVENT_CLICKED) {
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       // check if inverter is on
@@ -677,17 +677,17 @@ void thermostat_event_handler(lv_event_t * e) {
           return; // exit function if inverter is off
         }
       }
-      if ( ! thermostat ) {
-        thermostat = lv_timer_create(thermostat_timer, 10000, data); // check temp diff every 10s
+      if ( ! data->timer ) {
+        data->timer = lv_timer_create(thermostat_timer, 10000, data); // check temp diff every 10s
       }
       pwr_demand++;
     }
     else {
       digitalWrite(data->relay_pin, LOW);
       // delete timer if it exists
-      if ( thermostat ) {
-        lv_timer_del(thermostat);
-        thermostat = NULL;
+      if ( data->timer ) {
+        lv_timer_del(data->timer);
+        data->timer = NULL;
       }
       pwr_demand ? pwr_demand-- : NULL;
     }
