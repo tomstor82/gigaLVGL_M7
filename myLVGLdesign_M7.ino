@@ -635,51 +635,50 @@ void power_check(lv_timer_t * timer) {
 void thermostat_timer(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
 
-  // variable to check if heaters have been on already as I don't want off interval timer on initial ON
-  static bool previous_function_calls = false;
-
   static uint32_t thermostat_off_ms = 0;
+  bool on = false;
 
-  // confirm heater has been on already before timing the off cycle ( prevents flapping every 10s )
-  if ( previous_function_calls && thermostat_off_ms + 120000 > millis() ) { // heater OFF for minimum 2 minutes
-    // return if off time interval not yet met
+  // Off cycle time checker (2 min set)
+  if ( thermostat_off_ms && thermostat_off_ms + 120000 > millis() ) {
     return;
   }
 
-  // ceiling heater thermostat ( uses 3 or 1 sensors )
-  if ( data->relay_pin == RELAY2 ) {
+  // Ceiling heater thermostat ( uses 3 or 1 sensors )
+  else if ( data->relay_pin == RELAY2 ) {
     // need to check which sensor is working ( if none is the temp updater will disable button )
     if ( combinedData.sensorData.avg_temp != 999.0f && combinedData.sensorData.avg_temp < data->set_temp ) {
-      digitalWrite(data->relay_pin, HIGH);
+      on = true;
     }
     else if ( combinedData.sensorData.temp1 != 999.0f && combinedData.sensorData.temp1 < data->set_temp ) {
-      digitalWrite(data->relay_pin, HIGH);
+      on = true;
     }
     else if ( combinedData.sensorData.temp2 != 999.0f && combinedData.sensorData.temp2 < data->set_temp ) {
-      digitalWrite(data->relay_pin, HIGH);
+      on = true;
     }
     else if ( combinedData.sensorData.temp3 != 999.0f && combinedData.sensorData.temp4 < data->set_temp ) {
-      digitalWrite(data->relay_pin, HIGH);
+      on = true;
     }
+  }
 
-    // Open relay when temperature is higher or equal to selected
-    else {
-      digitalWrite(data->relay_pin, LOW);
-      thermostat_off_ms = millis();
-    }
+  // Shower heater thermostat
+  else if ( combinedData.sensorData.temp3 < data->set_temp && lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
+    on = true;
   }
-  // shower heater thermostat
+
+  // Open relays when temperature is higher or equal to selected
   else {
-    // Close relay if temperature is below selected and button has been pressed
-    if ( combinedData.sensorData.temp3 < data->set_temp && lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
-      digitalWrite(data->relay_pin, HIGH);
-    }
-    // Open relay when temperature is higher or equal to selected
-    else {
-      digitalWrite(data->relay_pin, LOW);
-    }
+    on = false;
   }
-  previous_function_calls = true;
+
+  // Toggle relay and set timer
+  if ( on ) {
+    digitalWrite(data->relay_pin, HIGH);
+    thermostat_off_ms = 0;
+  }
+  else {
+    digitalWrite(data->relay_pin, LOW);
+    thermostat_off_ms = millis();
+  }
 }
 
 // THERMOSTAT EVENT HANDLER /////////////////////////////////////////////////////////
@@ -687,13 +686,13 @@ void thermostat_event_handler(lv_event_t * e) {
   user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
   lv_event_code_t code = lv_event_get_code(e);
 
-  //static lv_timer_t* thermostat = NULL;
-
   if(code == LV_EVENT_CLICKED) {
+
+    // Button ON
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       // check if inverter is on
       if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
-        lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL); // ********************** not working yet **** pressed works not clicked
+        lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL);
         lv_event_send(userData[3].button, LV_EVENT_RELEASED, NULL);
         lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL);
         // DEBUG if inverter is still off disable change flag
@@ -703,17 +702,18 @@ void thermostat_event_handler(lv_event_t * e) {
           return; // exit function if inverter is off
         }
       }
-      if ( ! data->timer ) {
+      else if ( ! data->timer ) {
         data->timer = lv_timer_create(thermostat_timer, 10000, data); // check temp diff every 10s
       }
       pwr_demand++;
     }
+
+    // Button OFF
     else {
       digitalWrite(data->relay_pin, LOW);
       // delete timer if it exists
       if ( data->timer ) {
         lv_timer_del(data->timer);
-        data->timer = NULL;
       }
       pwr_demand ? pwr_demand-- : NULL;
     }
