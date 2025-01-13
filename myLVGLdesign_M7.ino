@@ -371,22 +371,24 @@ const char* set_can_msgbox_text() {
   snprintf(msgbox_text, sizeof(msgbox_text),
                  "High Cell          %.2fV           #%d\n"
                  "Low Cell           %.2fV           #%d\n\n"
-                 "Charge Current Limit       %d A\n"
-                 "Discharge Current Limit %d A\n\n"
-                 "Charge Enabled                %s\n"
-                 "Discharge Enabled           %s\n\n"
-                 "Battery Pack Cycles          %d\n"
+                 "Charge Limit                      %d A\n"
+                 "Discharge Limit                %d A\n\n"
+                 "Charge Enabled                 %s\n"
+                 "Discharge Enabled            %s\n\n"
+                 "Battery Pack Cycles             %d\n"
                  "Battery Pack Health         %d%%",
                  combinedData.canData.hC, combinedData.canData.hCid,
                  combinedData.canData.lC, combinedData.canData.lCid,
                  combinedData.canData.ccl,
                  combinedData.canData.dcl,
-                 (combinedData.canData.cu & 0x0002) == 0x0002 ? "NO" : "YES", // check if BMS MPO#1 signal is received
+                 (combinedData.canData.cu & 0x0002) == 0x0002 ? "NO" : "YES", // check if BMS MPO#1 signal is received over CAN from Arduino
                  combinedData.canData.dcl ? "YES" : "NO", // if DCL = 0 discharge is not enabled
                  combinedData.canData.cc,
                  combinedData.canData.h);
   //Serial.print("Size of msgbox: ");Serial.println(charArr); // set snprintf as "int charArr ="
   //Serial.println(msgbox_text);
+  Serial.print("DEBUG# BMS Custom flag: ");Serial.println(combinedData.canData.cu);
+  Serial.print("DEBUG# MPO CAN message: ");Serial.println(canMsgData.send_mpo1);
   return msgbox_text;
 }
 
@@ -517,7 +519,6 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         // If inverter doesn't start clear clicked state
         if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
-          Serial.println("DEBUG: hot_water_inverter_event_handler - Unable to send start inverter event");
           return; // exit function if inverter is off
         }
         // If started successfully increment pwr demand
@@ -658,16 +659,23 @@ void thermostat_timer(lv_timer_t * timer) {
     else if ( combinedData.sensorData.temp3 != 999.0f && combinedData.sensorData.temp4 < data->set_temp ) {
       on = true;
     }
+
+    // Open relays when temperature is higher or equal to selected
+    else {
+      on = false;
+    }
   }
 
   // Shower heater thermostat
-  else if ( combinedData.sensorData.temp3 < data->set_temp && lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
-    on = true;
-  }
-
-  // Open relays when temperature is higher or equal to selected
   else {
-    on = false;
+    if ( combinedData.sensorData.temp3 < data->set_temp ) {
+      on = true;
+    }
+
+    // Open relays when temperature is higher or equal to selected
+    else {
+      on = false;
+    }
   }
 
   // Toggle relay and set timer
@@ -686,7 +694,7 @@ void thermostat_event_handler(lv_event_t * e) {
   user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
   lv_event_code_t code = lv_event_get_code(e);
 
-  if(code == LV_EVENT_CLICKED) {
+  if (code == LV_EVENT_CLICKED) {
 
     // Button ON
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
@@ -698,13 +706,10 @@ void thermostat_event_handler(lv_event_t * e) {
         // DEBUG if inverter is still off disable change flag
         if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
-          Serial.println("DEBUG thermostat_event_handler - Unable to send start inverter event");
           return; // exit function if inverter is off
         }
       }
-      else if ( ! data->timer ) {
-        data->timer = lv_timer_create(thermostat_timer, 10000, data); // check temp diff every 10s
-      }
+      data->timer = lv_timer_create(thermostat_timer, 10000, data); // check temp diff every 10s
       pwr_demand++;
     }
 
@@ -1199,7 +1204,7 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     if ((combinedData.canData.st & 0x8000) == 0x8000) { create_status_label("Charge Mode Activated over CANBUS", data); flag_index++; }
 
     // Custom status messages
-    if ((combinedData.canData.cu & 0x0002) == 0x0002) { create_status_label("Charge Disabled due Low PV input", data); flag_index++;}
+    if ((combinedData.canData.cu & 0x0002) == 0x0002) { create_status_label("Charge Disabled by Arduino CAN msg", data); flag_index++;}
 
     // Cell balancing check at end ensures higher importance messages appear above
     if ((combinedData.canData.st & 0x0008) == 0x0008) {
@@ -1207,7 +1212,7 @@ void refresh_bms_status_data(lv_timer_t * timer) {
         create_status_label("", data); // create blank label
         balancing_label_showing = false;
       }
-      else {
+      else if ( ! canMsgBoxData.msgbox ) { // BMS message box closed before showing to not appear over it ************ IS THIS BECAUSE OF PARENT OBJECT AS IT DOES NOT HAPPEN TO SENSOR BOX?
         create_status_label("Cell Balancing Active", data);
         balancing_label_showing = true;
       }
@@ -1240,8 +1245,6 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     if ( ! lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
        lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
     }
-    // refresh screen to remove scroll bar
-    //lv_event_send(lv_obj_get_parent(data->parent), LV_EVENT_REFRESH, NULL); // does nothing for either scr or cont obj
   }
 
   // run the function with true argument to tell it we are finished checking bms for messages to reset function index
