@@ -166,7 +166,7 @@ static CombinedData combinedData;
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size) int/float = 4 bytes
 int16_t inverter_prestart_p = 0; // must be signed
-uint8_t inverter_standby_p = 70; // takes around 4 minutes to settle down after start
+const uint8_t inverter_standby_p = 70; // takes around 4 minutes to settle down after start
 uint32_t inverter_startup_ms = 0;
 uint8_t pwr_demand = 0;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
@@ -215,7 +215,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   lv_obj_set_width(data->dcl_label, 140);
   lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
   lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
-  lv_timer_create(dcl_check, 100, data); // check every 100ms to allow prompt off if dch relay open
+  lv_timer_create(dcl_check, 100, data); // check every 100ms to allow prompt off if dcl is 0
 
   // create temperature dropdown and dynamic temperature labels for thermostat buttons
   if ( ! timeout_ms ) {
@@ -346,6 +346,10 @@ void dcl_check(lv_timer_t * timer) {
     // if button is on turn it off
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
+    }
+    // if inverter we need to change label text
+    if ( data->relay_pin == RELAY1 ) {
+      lv_label_set_text(data->label_obj, "OFF");
     }
     // disable button
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
@@ -1212,7 +1216,7 @@ void refresh_bms_status_data(lv_timer_t * timer) {
         create_status_label("", data); // create blank label
         balancing_label_showing = false;
       }
-      else if ( ! canMsgBoxData.msgbox ) { // BMS message box closed before showing to not appear over it ************ IS THIS BECAUSE OF PARENT OBJECT AS IT DOES NOT HAPPEN TO SENSOR BOX?
+      else {
         create_status_label("Cell Balancing Active", data);
         balancing_label_showing = true;
       }
@@ -1333,15 +1337,20 @@ void setup() {
 
   // create left column container instance
   cont = lv_obj_create(parent);
-  canMsgBoxData.parent = cont;
-  lv_obj_add_flag(cont, LV_OBJ_FLAG_CLICKABLE); // add event handling
-  lv_obj_add_event_cb(cont, can_msgbox, LV_EVENT_CLICKED, &canMsgBoxData); // add event handler function
   lv_obj_add_event_cb(cont, screen_touch, LV_EVENT_ALL, NULL);
   lv_obj_set_grid_cell(cont, LV_GRID_ALIGN_STRETCH, 0, 1,
                         LV_GRID_ALIGN_STRETCH, 0, 1);
 
   // Create charge/discharge clock
   create_clock_label(cont, &clockData);
+
+  // Display bms messages arg2: y_pos
+  create_bms_status_label(cont, 135, &bmsStatusData); // old y_pos 345
+
+  // Initialise click event for CANdata message box
+  canMsgBoxData.parent = cont;
+  lv_obj_add_flag(cont, LV_OBJ_FLAG_CLICKABLE); // add event handling
+  lv_obj_add_event_cb(cont, can_msgbox, LV_EVENT_CLICKED, &canMsgBoxData); // add event handler function
 
   // check for sunrise by reading BMS charge enable signal from CANbus and sending MPO#1 signal to trip relay if flapping detected
   lv_timer_create(mppt_delay, 1000, NULL);
@@ -1365,15 +1374,11 @@ void setup() {
   create_can_label(cont, "Capacity", "Ah", &(combinedData.canData.ah), CAN_DATA_TYPE_FLOAT, 20, 80, &canLabel[4]); //270, &canLabel[12]);
   create_can_label(cont, "Internal Heatsink Temperature", "\u00B0C", &(combinedData.canData.hs), CAN_DATA_TYPE_BYTE, 20, 110, &canLabel[5]); //300, &canLabel[13]);
   
-  // Display bms messages arg2: y_pos
-  create_bms_status_label(cont, 135, &bmsStatusData); // old y_pos 345
-  
   // create right column container instance
   cont = lv_obj_create(parent);
   lv_obj_add_event_cb(cont, screen_touch, LV_EVENT_ALL, NULL);
   lv_obj_set_grid_cell(cont, LV_GRID_ALIGN_STRETCH, 1, 1,
                             LV_GRID_ALIGN_STRETCH, 0, 1);
-
 
   // arguments 1:obj  2:label 3:relay_pin 4:y_offset 5:dcl_limit 6:timeout_ms 7:user_data struct
 
