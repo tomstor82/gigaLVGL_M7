@@ -275,13 +275,13 @@ void mppt_delay(lv_timer_t* timer) {
   //  If CHG ENABLED is lost then received and lost again within 30s disable solar panels for 30 mins
 
   // Initialisation - If pv power is present but no previous timer or can msg sendt
-  if ( (combinedData.canData.cu & 0x01) == 0x01 && ! time_ms && ! canMsgData.send_mpo1 ) { //start_time && ! charge_power ) {
+  if ( (combinedData.canData.cu & 0x0001) == 0x0001 && ! time_ms && ! canMsgData.send_mpo1 ) { //start_time && ! charge_power ) {
     time_ms = millis(); // record time to check for flapping
     return; // no point in continuing as timer will not be met on next conditions
   }
 
   // Flapp checker - Did charge signal drop?
-  else if ( ! (combinedData.canData.cu & 0x01) == 0x01 && time_ms && ! canMsgData.send_mpo1 ) {
+  else if ( ! (combinedData.canData.cu & 0x0001) == 0x0001 && time_ms && ! canMsgData.send_mpo1 ) {
 
     // Is signal drop within 30s it qualifies as flapping - start sending CAN MPO#1 signal to open CHG relay
     if ( time_ms + (30 * 1000) > millis() ) {
@@ -297,7 +297,7 @@ void mppt_delay(lv_timer_t* timer) {
   }
 
   // Finish timer - if 30 minutes has passed stop sending can mpo1 msg to enable solar charging
-  else if ( time_ms && (time_ms + (30 * 60 * 1000)) < millis() ) {
+  else if ( time_ms && (time_ms + (30 * 60 * 1000)) < millis() && canMsgData.send_mpo1 ) {
     time_ms = 0; // reset timer as we are finished
     canMsgData.send_mpo1 = false; // allow CHG relay to close and solar to start
     canMsgData.msg_data[1] = 0;
@@ -381,7 +381,7 @@ const char* set_can_msgbox_text() {
                  combinedData.canData.lC, combinedData.canData.lCid,
                  combinedData.canData.ccl,
                  combinedData.canData.dcl,
-                 (combinedData.canData.cu & 0x10) == 0x10 ? "NO" : "YES", // check if BMS MPO#1 signal is received
+                 (combinedData.canData.cu & 0x0002) == 0x0002 ? "NO" : "YES", // check if BMS MPO#1 signal is received
                  combinedData.canData.dcl ? "YES" : "NO", // if DCL = 0 discharge is not enabled
                  combinedData.canData.cc,
                  combinedData.canData.h);
@@ -509,44 +509,56 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         lv_label_set_text(data->label_obj, "Inverter ON");
       }
 
-      // Start Inverter if OFF
+      // If inverter is OFF attempt to start it
       else if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
         lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL); // Have to include all 3 of these to make it work
         lv_event_send(userData[3].button, LV_EVENT_RELEASED, NULL);
         lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL);
-        // DEBUG if inverter is still off disable change flag
+        // If inverter doesn't start clear clicked state
         if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
           Serial.println("DEBUG: hot_water_inverter_event_handler - Unable to send start inverter event");
           return; // exit function if inverter is off
         }
+        // If started successfully increment pwr demand
+        else pwr_demand++;
       }
 
-      // Hot water demand if ON
+      // If inverter is ON we only increment pwr demand
       else pwr_demand++; // only for hot water
 
+      // Send signal to relay
       digitalWrite(data->relay_pin, HIGH);
+
       // Create delay timer for inverter sweep and for hot water timout
-      data->timer = lv_timer_create(power_check, data->timeout_ms, data); // want to reset timer once excess solar to hot water is activated
+      data->timer = lv_timer_create(power_check, data->timeout_ms, data);
     }
 
     // Button OFF
     else {
+      // send relay signal
       digitalWrite(data->relay_pin, LOW);
-      pwr_demand ? pwr_demand-- : NULL;
-      if (data->timer) {
-        lv_timer_del(data->timer);
-      }
+
+      // inverter needs to stimulate the other buttons
       if ( data->relay_pin == RELAY1 ) {
         lv_label_set_text(data->label_obj, "OFF"); // inverter only
         // turn off the other buttons
         for ( uint8_t i = 0; i < 3; i++ ) {
           if ( lv_obj_has_state(userData[i].button, LV_STATE_CHECKED) ) {
-            lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL);
-            digitalWrite(userData[i].relay_pin, LOW); // required as timers keep running
+            lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL); // release button
+            digitalWrite(userData[i].relay_pin, LOW); // turn off associated relay
+            if ( userData[i].timer ) lv_timer_del(userData[i].timer); // delete associated timer
           }
         }
+        pwr_demand = 0;
         inverter_prestart_p = 0;
+      }
+      // hot water
+      else pwr_demand ? pwr_demand-- : NULL;
+
+      // delete timer
+      if (data->timer) {
+        lv_timer_del(data->timer);
       }
     }
   }
@@ -1185,6 +1197,9 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     if ((combinedData.canData.st & 0x1000) == 0x1000) { create_status_label("Polarization Model 1 Active", data); flag_index++; }
     if ((combinedData.canData.st & 0x2000) == 0x2000) { create_status_label("Polarization Model 2 Active", data); flag_index++; }
     if ((combinedData.canData.st & 0x8000) == 0x8000) { create_status_label("Charge Mode Activated over CANBUS", data); flag_index++; }
+
+    // Custom status messages
+    if ((combinedData.canData.cu & 0x0002) == 0x0002) { create_status_label("Charge Disabled due Low PV input", data); flag_index++;}
 
     // Cell balancing check at end ensures higher importance messages appear above
     if ((combinedData.canData.st & 0x0008) == 0x0008) {
