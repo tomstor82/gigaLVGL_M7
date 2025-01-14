@@ -89,7 +89,7 @@ struct CanMsgData {
 
   // send settings
   static const uint8_t CAN_ID = 0x002; // CAN id for the message (constant)
-  uint8_t msg_data[2]; // 2 bytes used in orion MPO#1 and #2
+  uint8_t msg_data[2]; // 2 bytes used in BMS for MPO#2 and MPO#1 respectively
   uint8_t msg_cnt;
 
   bool send_mpo1 = false;
@@ -136,7 +136,7 @@ typedef struct {
 } clock_data_t;
 
 typedef struct {
-  //lv_obj_t* parent;
+  lv_obj_t* parent;
   lv_obj_t* label_obj;
   lv_obj_t* msgbox;
   lv_timer_t* timer;
@@ -166,7 +166,7 @@ static CombinedData combinedData;
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size) int/float = 4 bytes
 int16_t inverter_prestart_p = 0; // must be signed
-const uint8_t inverter_standby_p = 70; // takes around 4 minutes to settle down after start
+const uint8_t inverter_standby_p = 75; // takes around 4 minutes to settle down after start
 uint32_t inverter_startup_ms = 0;
 uint8_t pwr_demand = 0;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
@@ -182,11 +182,11 @@ const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 static String buffer = "";
 
 //**************************************************************************************
-//  NOTE: IN CCL AND DCL CHECK FUNCTIONS MIN AND MAX CELL VOLTAGES ARE SET
+//  NOTE: IN CCL AND DCL CHECK FUNCTIONS MIN AND MAX CELL VOLTAGES ARE ALSO SET
 //**************************************************************************************
 
 //******************************************************************************************************
-//  BUGS:
+//  BUGS: #1 bms status messages displayed over can msgbox
 //******************************************************************************************************
 
 // CREATE BUTTON INSTANCE
@@ -271,38 +271,41 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 // SUNRISE CHECK TIMER ////////////////////////////////////////////////////////////////////////
 void mppt_delay(lv_timer_t* timer) {
 
+  static bool mppt_delay = false;
   static uint32_t time_ms = 0;
 
-  //  If CHG ENABLED is received over CAN and then lost within 30s disable solar panels for 30 mins by sending CAN MPO#1 msg
-  //  If CHG ENABLED is lost then received and lost again within 30s disable solar panels for 30 mins
-
-  // Initialisation - If pv power is present but no previous timer or can msg sendt
-  if ( (combinedData.canData.cu & 0x0001) == 0x0001 && ! time_ms && ! canMsgData.send_mpo1 ) { //start_time && ! charge_power ) {
-    time_ms = millis(); // record time to check for flapping
-    return; // no point in continuing as timer will not be met on next conditions
-  }
-
-  // Flapp checker - Did charge signal drop?
-  else if ( ! (combinedData.canData.cu & 0x0001) == 0x0001 && time_ms && ! canMsgData.send_mpo1 ) {
-
-    // Is signal drop within 30s it qualifies as flapping - start sending CAN MPO#1 signal to open CHG relay
-    if ( time_ms + (30 * 1000) > millis() ) {
-      time_ms = millis(); // record time to track when can send started
-      canMsgData.msg_data[1] = 0x01;
-      canMsgData.send_mpo1 = true; // this triggers send function in loop
-    }
-    // if no flapping detected as during sunset
-    else {
-      time_ms = 0; // reset timer to re-enable initialisation check
-    }
+  // determine if solar was previously available and if not start time
+  if ( (combinedData.canData.cu & 0x0001) == 0x0001 && ! time_ms ) {
+    time_ms = millis();
     return;
   }
 
-  // Finish timer - if 30 minutes has passed stop sending can mpo1 msg to enable solar charging
-  else if ( time_ms && (time_ms + (30 * 60 * 1000)) < millis() && canMsgData.send_mpo1 ) {
-    time_ms = 0; // reset timer as we are finished
-    canMsgData.send_mpo1 = false; // allow CHG relay to close and solar to start
-    canMsgData.msg_data[1] = 0;
+  // if solar on then off inside of 10 seconds lets trigger mppt delay continously - works for sunrise/sunset
+  if ( time_ms && ! (combinedData.canData.cu & 0x0001) == 0x0001 ) {
+    if ( time_ms + 10000 > millis() ) {
+      time_ms = millis();
+      mppt_delay = true;
+    }
+    else {
+      time_ms = 0; // enables restarting on timer
+    }
+  }
+
+  // when mppt delay timer has expired
+  if ( mppt_delay && time_ms + 10 * 60 * 1000 < millis() ) {
+    time_ms = 0;
+    mppt_delay = false;
+  }
+
+  switch ( mppt_delay ) {
+    case true:
+      // turn off solar input relay through CAN MPO#1 signal
+      canMsgData.msg_data[1] = 0x01;
+      canMsgData.send_mpo1 = true; // this triggers send function in loop
+      break;
+    default:
+      canMsgData.send_mpo1 = false; // allow CHG relay to close and solar to start
+      canMsgData.msg_data[1] = 0;
   }
 }
 
@@ -382,20 +385,17 @@ const char* set_can_msgbox_text() {
                  "Discharge Limit                %d A\n\n"
                  "Charge Enabled                 %s\n"
                  "Discharge Enabled            %s\n\n"
-                 "Battery Pack Cycles             %d\n"
-                 "Battery Pack Health         %d%%",
+                 "Battery Cycles                  %d\n"
+                 "Battery Health              %d%%",
                  combinedData.canData.hC, combinedData.canData.hCid,
                  combinedData.canData.lC, combinedData.canData.lCid,
                  combinedData.canData.ccl,
                  combinedData.canData.dcl,
-                 (combinedData.canData.cu & 0x0002) == 0x0002 ? "NO" : "YES", // check if BMS MPO#1 signal is received over CAN from Arduino
-                 combinedData.canData.dcl ? "YES" : "NO", // if DCL = 0 discharge is not enabled
+                 canMsgData.send_mpo1 ? "NO" : "YES", // Are we sending CAN msg to trip PV Contactor?
+                 lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ? "YES" : "NO", // if inverter DCL label is visible discharge is disabled
                  combinedData.canData.cc,
                  combinedData.canData.h);
-  //Serial.print("Size of msgbox: ");Serial.println(charArr); // set snprintf as "int charArr ="
-  //Serial.println(msgbox_text);
-  Serial.print("DEBUG# BMS MPO signal: ");Serial.println(combinedData.canData.cu);
-  Serial.print("DEBUG# MPO#1 Disable CHG CAN message sent from Arduino: ");Serial.println(canMsgData.send_mpo1);
+
   return msgbox_text;
 }
 
@@ -410,7 +410,7 @@ void can_msgbox(lv_event_t* e) {
     can_msgbox_data_t* data = (can_msgbox_data_t*)lv_event_get_user_data(e);
     
     if (code == LV_EVENT_CLICKED) {
-        data->msgbox = lv_msgbox_create(lv_obj_get_parent(bmsStatusData.title_label), "     Battery Monitoring Data", set_can_msgbox_text(), NULL, false);
+        data->msgbox = lv_msgbox_create(data->parent, "     Battery Monitoring Data", set_can_msgbox_text(), NULL, false);
         lv_obj_set_width(data->msgbox, LV_PCT(80)); // Set width to 80% of the screen
         lv_obj_align(data->msgbox, LV_ALIGN_CENTER, 0, 0); // Center the message box on the screen
 
@@ -555,7 +555,7 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
           if ( lv_obj_has_state(userData[i].button, LV_STATE_CHECKED) ) {
             lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL); // release button
             digitalWrite(userData[i].relay_pin, LOW); // turn off associated relay
-            if ( userData[i].timer ) lv_timer_del(userData[i].timer); // delete associated timer
+            lv_timer_del(userData[i].timer); // delete associated timer ** CRASH ISSUES ??????????
           }
         }
         pwr_demand = 0;
@@ -653,7 +653,7 @@ void thermostat_timer(lv_timer_t * timer) {
 
   // Ceiling heater thermostat ( uses 3 or 1 sensors )
   else if ( data->relay_pin == RELAY2 ) {
-    // need to check which sensor is working ( if none is the temp updater will disable button )
+    // need to check which sensor is working ( if none the temp updater will disable button )
     if ( combinedData.sensorData.avg_temp != 999.0f && combinedData.sensorData.avg_temp < data->set_temp ) {
       on = true;
     }
@@ -868,16 +868,20 @@ void update_temp(lv_timer_t *timer) {
     if (data->relay_pin == RELAY2) {
         if (combinedData.sensorData.avg_temp != 999.0f) {
             snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp);
-        } else if (combinedData.sensorData.temp1 != 999.0f) {
+        }
+        else if (combinedData.sensorData.temp1 != 999.0f) {
             snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp1);
             lv_timer_create(sensor_fault, 8000, data);
-        } else if (combinedData.sensorData.temp2 != 999.0f) {
+        }
+        else if (combinedData.sensorData.temp2 != 999.0f) {
             snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp2);
             lv_timer_create(sensor_fault, 8000, data);
-        } else if (combinedData.sensorData.temp4 != 999.0f) {
+        }
+        else if (combinedData.sensorData.temp4 != 999.0f) {
             snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp4);
             lv_timer_create(sensor_fault, 8000, data);
-        } else {
+        }
+        else {
             snprintf(buf, sizeof(buf), "----");
             lv_timer_create(sensor_fault, 5000, data);
 
@@ -885,7 +889,6 @@ void update_temp(lv_timer_t *timer) {
             if (lv_obj_has_state(data->button, LV_STATE_CHECKED)) {
                 lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
             }
-
             // Button DISABLED after being turned OFF (no need to test here as state disabled in beginning)
             lv_obj_add_state(data->button, LV_STATE_DISABLED);
         }
@@ -894,14 +897,15 @@ void update_temp(lv_timer_t *timer) {
     else {
         if (combinedData.sensorData.temp3 != 999.0f) {
             snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp3);
-        } else {
-            snprintf(buf, sizeof(buf), "#3 --");
-            // Button OFF if no sensor data
-            if (lv_obj_has_state(data->button, LV_STATE_CHECKED)) {
-                lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
-            }
-            // Button DISABLED after being turned OFF (no need to test here as state disabled in beginning)
-            lv_obj_add_state(data->button, LV_STATE_DISABLED);
+        }
+        else {
+          snprintf(buf, sizeof(buf), "#3 --");
+          // Button OFF if no sensor data
+          if (lv_obj_has_state(data->button, LV_STATE_CHECKED)) {
+            lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
+          }
+          // Button DISABLED after being turned OFF (no need to test here as state disabled in beginning)
+          lv_obj_add_state(data->button, LV_STATE_DISABLED);
         }
     }
 
@@ -1170,7 +1174,7 @@ void refresh_bms_status_data(lv_timer_t * timer) {
 
     bool charge_only = false;
 
-    int8_t flag_index = -1; // initialise as -1 as this in array index
+    int8_t flag_index = -1; // initialise as -1 as this is for indexing array
 
     // Clear all status labels initially
     for (uint8_t i = 0; i < (sizeof(data->status_label) / sizeof(data->status_label[0])); i++) {
@@ -1211,9 +1215,9 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     if ((combinedData.canData.st & 0x8000) == 0x8000) { create_status_label("Charge Mode Activated over CANBUS", data); flag_index++; }
 
     // Custom status messages
-    if ((combinedData.canData.cu & 0x0002) == 0x0002) { create_status_label("Charge Disabled by Arduino", data); flag_index++;} // BMS MPO#1 feedback
+    if ( canMsgData.send_mpo1 ) { create_status_label("Charge Disabled by Arduino", data); flag_index++;} // Are we sending CAN msg to trip PV Contactor
     if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Discharge Disabled by Arduino", data); flag_index++;} // If Inverter DCL CHECK triggered
-    if ( canMsgData.len == 0 ) { create_status_label("No CAN data from BMS", data); flag_index++; } // No CAN data from BMS suspect it is offline
+    if ( canMsgData.len == 0 ) { create_status_label("No CAN data from BMS", data); flag_index++; }
 
     // Cell balancing check at end ensures higher importance messages appear above
     if ((combinedData.canData.st & 0x0008) == 0x0008) {
@@ -1338,9 +1342,9 @@ void setup() {
   lv_obj_center(parent);
 
   // initialise container object
-  lv_obj_t * cont;
+  lv_obj_t* cont;
 
-  // create left column container instance
+  // create left column container object
   cont = lv_obj_create(parent);
   lv_obj_add_event_cb(cont, screen_touch, LV_EVENT_ALL, NULL);
   lv_obj_set_grid_cell(cont, LV_GRID_ALIGN_STRETCH, 0, 1,
@@ -1353,7 +1357,7 @@ void setup() {
   create_bms_status_label(cont, 175, &bmsStatusData);
 
   // Initialise click event for CANdata message box
-  //canMsgBoxData.parent = cont;
+  canMsgBoxData.parent = cont;
   lv_obj_add_flag(cont, LV_OBJ_FLAG_CLICKABLE); // add event handling
   lv_obj_add_event_cb(cont, can_msgbox, LV_EVENT_CLICKED, &canMsgBoxData); // add event handler function
 
@@ -1371,7 +1375,7 @@ void setup() {
   create_can_label(cont, "Capacity", "Ah", &(combinedData.canData.ah), CAN_DATA_TYPE_FLOAT, 20, 90, &canLabel[4]);
   create_can_label(cont, "Internal Heatsink Temperature", "\u00B0C", &(combinedData.canData.hs), CAN_DATA_TYPE_BYTE, 20, 130, &canLabel[5]);
   
-  // create right column container instance
+  // create right column container object
   cont = lv_obj_create(parent);
   lv_obj_add_event_cb(cont, screen_touch, LV_EVENT_ALL, NULL);
   lv_obj_set_grid_cell(cont, LV_GRID_ALIGN_STRETCH, 1, 1,
