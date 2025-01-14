@@ -43,33 +43,33 @@ struct SensorData {
 // CanData struct
 struct CanData {
 
-    int p;                  // watt calculated by script
+    int p = 0;                  // watt calculated by script
 
-    float instU;            // Voltage - multiplied by 10
-    float instI;            // Current - multiplied by 10 - negative value indicates charge
-    float avgI;             // Average current for clock and sun symbol calculations
+    float instU = 0;            // Voltage - multiplied by 10
+    float instI = 0;            // Current - multiplied by 10 - negative value indicates charge
+    float avgI = 0;             // Average current for clock and sun symbol calculations
     //float absI;             // Absolute Current NOT WORKING CORRECTLY
-    float ah;               // Amp hours
-    float hC;               // High Cell Voltage in 0,0001V
-    float lC;               // Low Cell Voltage in 0,0001V
+    float ah = 0;               // Amp hours
+    float hC = 0;               // High Cell Voltage in 0,0001V
+    float lC = 0;               // Low Cell Voltage in 0,0001V
 
-    byte soc;               // State of charge - multiplied by 2
-    byte hT;                // Highest cell temperature * was int
-    byte lT;                // Lowest cell temperature * was int
-    byte ry;                // Relay status
-    byte dcl;               // Discharge current limit * was unsigned int
-    byte ccl;               // Charge current limit * was unsigned int
-    byte ct;                // Counter to observe data received
-    byte h;                 // Health
-    byte hCid;              // High Cell ID
-    byte lCid;              // Low Cell ID
+    byte soc = 0;               // State of charge - multiplied by 2
+    byte hT = 0;                // Highest cell temperature
+    byte lT = 0;                // Lowest cell temperature
+    byte ry = 0;                // Relay status
+    byte dcl = 0;               // Discharge current limit
+    byte ccl = 0;               // Charge current limit
+    byte ct = 0;                // Counter to observe data received
+    byte h = 0;                 // Health
+    byte hCid = 0;              // High Cell ID
+    byte lCid = 0;              // Low Cell ID
 
-    uint16_t fu;            // BMS Faults
-    uint16_t st;            // BMS Status
-    int cc;                 // Total pack cycles (int to avoid overrun issues with uint16_t)
+    uint16_t fu = 0;            // BMS Faults
+    uint16_t st = 0;            // BMS Status
+    int cc = 0;                 // Total pack cycles (int to avoid overrun issues with uint16_t)
 
-    byte hs;                // Internal Heatsink
-    byte cu;                // BMS custom flag currently used for sending charge power enabled and MPO#1 state (used for tripping chg enabled relay)
+    byte hs = 0;                // Internal Heatsink
+    byte cu = 0;                // BMS custom flag currently used for sending charge power enabled and MPO#1 state (used for tripping chg enabled relay)
     
     MSGPACK_DEFINE_ARRAY(instU, instI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, ct, st, cc, avgI, hCid, lCid, p, hs, cu);
 };
@@ -105,7 +105,7 @@ typedef struct {
     lv_obj_t* parent;
     lv_obj_t* title_label;
     lv_obj_t* button;
-    lv_obj_t* status_label[28]; // can be expanded beyond the current 28 bms messages
+    lv_obj_t* status_label[30]; // can be expanded beyond the current 28 bms messages
     uint8_t y;
 } bms_status_data_t;
 
@@ -136,7 +136,7 @@ typedef struct {
 } clock_data_t;
 
 typedef struct {
-  lv_obj_t* parent;
+  //lv_obj_t* parent;
   lv_obj_t* label_obj;
   lv_obj_t* msgbox;
   lv_timer_t* timer;
@@ -182,10 +182,12 @@ const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 static String buffer = "";
 
 //**************************************************************************************
-//  BUG#1 bms clear fault button wandering down each second
-//  BUG#2 crash after a few minutes once inverter is turned OFF
-//  BUG#3 inverter doesn't start when mppt has low power. Turn off CHG relay when this is the case
+//  NOTE: IN CCL AND DCL CHECK FUNCTIONS MIN AND MAX CELL VOLTAGES ARE SET
 //**************************************************************************************
+
+//******************************************************************************************************
+//  BUGS:
+//******************************************************************************************************
 
 // CREATE BUTTON INSTANCE
 void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms, user_data_t* data) {
@@ -309,10 +311,10 @@ void mppt_delay(lv_timer_t* timer) {
 
 
 
-// CCL CHECK TIMER ////////////////////////////////////////////////////////////////////////////
+// CCL AND HIGH CELL VOLTAGE CHECK TIMER ////////////////////////////////////////////////////////////////////////////
 void ccl_check(lv_timer_t * timer) {
 
-  if ( combinedData.canData.ccl == 0 ) {
+  if ( combinedData.canData.ccl == 0 || combinedData.canData.hC >= 4.15 ) {
     canMsgData.send_mpo1 = true; // trip charge relay
   }
   else canMsgData.send_mpo1 = false;
@@ -322,11 +324,11 @@ void ccl_check(lv_timer_t * timer) {
 
 
 
-// DCL CHECK TIMER ////////////////////////////////////////////////////////////////////////////
+// DCL AND LOW CELL VOLTAGE CHECK TIMER ////////////////////////////////////////////////////////////////////////////
 void dcl_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
 
-  // disable inverter if discharge relay is tripped
+  // disable inverter if discharge relay is tripped * ONLY WORKS IF DISCHARGE RELAY ENABLED IN BMS
   /*if ( data->relay_pin == RELAY1 && (combinedData.canData.ry & 0x0001) != 0x0001 ) {
     lv_label_set_text(data->dcl_label, "Discharge Relay Tripped by BMS                                      "); // spaces to allow a pause
     lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
@@ -338,19 +340,20 @@ void dcl_check(lv_timer_t * timer) {
     // disable button
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }*/
-  // disable buttons if dcl limit below appliance minimum operating dcl
-  if ( combinedData.canData.dcl < data->dcl_limit ) {
-    lv_label_set_text(data->dcl_label, "Please Charge Battery                                            "); // spaces to allow a pause
+  // disable buttons if dcl limit below appliance minimum operating dcl or low cell voltage
+  if ( combinedData.canData.dcl < data->dcl_limit || combinedData.canData.lC < 2.9 ) {
+    lv_label_set_text(data->dcl_label, "Battery Voltage too Low                    Please Charge                     "); // spaces to allow a pause
     lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
 
     // if button is on turn it off
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
+      // Update Label for Inverter
+      if ( data->relay_pin == RELAY1 ) {
+        lv_label_set_text(data->label_obj, "OFF");
+      }
     }
-    // if inverter we need to change label text
-    if ( data->relay_pin == RELAY1 ) {
-      lv_label_set_text(data->label_obj, "OFF");
-    }
+
     // disable button
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }
@@ -391,8 +394,8 @@ const char* set_can_msgbox_text() {
                  combinedData.canData.h);
   //Serial.print("Size of msgbox: ");Serial.println(charArr); // set snprintf as "int charArr ="
   //Serial.println(msgbox_text);
-  Serial.print("DEBUG# BMS Custom flag: ");Serial.println(combinedData.canData.cu);
-  Serial.print("DEBUG# MPO CAN message: ");Serial.println(canMsgData.send_mpo1);
+  Serial.print("DEBUG# BMS MPO signal: ");Serial.println(combinedData.canData.cu);
+  Serial.print("DEBUG# MPO#1 Disable CHG CAN message sent from Arduino: ");Serial.println(canMsgData.send_mpo1);
   return msgbox_text;
 }
 
@@ -407,7 +410,7 @@ void can_msgbox(lv_event_t* e) {
     can_msgbox_data_t* data = (can_msgbox_data_t*)lv_event_get_user_data(e);
     
     if (code == LV_EVENT_CLICKED) {
-        data->msgbox = lv_msgbox_create(data->parent, "     Battery Monitoring Data", set_can_msgbox_text(), NULL, false);
+        data->msgbox = lv_msgbox_create(lv_obj_get_parent(bmsStatusData.title_label), "     Battery Monitoring Data", set_can_msgbox_text(), NULL, false);
         lv_obj_set_width(data->msgbox, LV_PCT(80)); // Set width to 80% of the screen
         lv_obj_align(data->msgbox, LV_ALIGN_CENTER, 0, 0); // Center the message box on the screen
 
@@ -1208,7 +1211,9 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     if ((combinedData.canData.st & 0x8000) == 0x8000) { create_status_label("Charge Mode Activated over CANBUS", data); flag_index++; }
 
     // Custom status messages
-    if ((combinedData.canData.cu & 0x0002) == 0x0002) { create_status_label("Charge Disabled by Arduino CAN msg", data); flag_index++;}
+    if ((combinedData.canData.cu & 0x0002) == 0x0002) { create_status_label("Charge Disabled by Arduino", data); flag_index++;} // BMS MPO#1 feedback
+    if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Discharge Disabled by Arduino", data); flag_index++;} // If Inverter DCL CHECK triggered
+    if ( canMsgData.len == 0 ) { create_status_label("No CAN data from BMS", data); flag_index++; } // No CAN data from BMS suspect it is offline
 
     // Cell balancing check at end ensures higher importance messages appear above
     if ((combinedData.canData.st & 0x0008) == 0x0008) {
@@ -1345,10 +1350,10 @@ void setup() {
   create_clock_label(cont, &clockData);
 
   // Display bms messages arg2: y_pos
-  create_bms_status_label(cont, 135, &bmsStatusData); // old y_pos 345
+  create_bms_status_label(cont, 175, &bmsStatusData);
 
   // Initialise click event for CANdata message box
-  canMsgBoxData.parent = cont;
+  //canMsgBoxData.parent = cont;
   lv_obj_add_flag(cont, LV_OBJ_FLAG_CLICKABLE); // add event handling
   lv_obj_add_event_cb(cont, can_msgbox, LV_EVENT_CLICKED, &canMsgBoxData); // add event handler function
 
@@ -1359,20 +1364,12 @@ void setup() {
   lv_timer_create(ccl_check, 1000, NULL);
 
   // Create labels for CAN data
-  create_can_label(cont, "SOC", "%", &(combinedData.canData.soc), CAN_DATA_TYPE_BYTE, 20, 20, &canLabel[0]);
-  create_can_label(cont, "Current", "A", &(combinedData.canData.instI), CAN_DATA_TYPE_FLOAT, 180, 20, &canLabel[1]);
-  create_can_label(cont, "Voltage", "V", &(combinedData.canData.instU), CAN_DATA_TYPE_FLOAT, 20, 50, &canLabel[2]);
-  create_can_label(cont, "Power", "W", &(combinedData.canData.p), CAN_DATA_TYPE_INT, 180, 50, &canLabel[3]);
-  /*create_can_label(cont, "High Cell ID", "", &(combinedData.canData.hCid), CAN_DATA_TYPE_BYTE, 20, 80, &canLabel[4]);
-  create_can_label(cont, "High Cell", "V", &(combinedData.canData.hC), CAN_DATA_TYPE_DOUBLE_FLOAT, 180, 80, &canLabel[5]);
-  create_can_label(cont, "Low Cell ID", "", &(combinedData.canData.lCid), CAN_DATA_TYPE_BYTE, 20, 110, &canLabel[6]);
-  create_can_label(cont, "Low Cell", "V", &(combinedData.canData.lC), CAN_DATA_TYPE_DOUBLE_FLOAT, 180, 110, &canLabel[7]);
-  create_can_label(cont, "Discharge Current Limit          ", "A", &(combinedData.canData.dcl), CAN_DATA_TYPE_BYTE, 20, 160, &canLabel[8]);
-  create_can_label(cont, "Charge Current Limit                ", "A", &(combinedData.canData.ccl), CAN_DATA_TYPE_BYTE, 20, 190, &canLabel[9]);
-  create_can_label(cont, "Cycles", "", &(combinedData.canData.cc), CAN_DATA_TYPE_INT, 20, 240, &canLabel[10]);
-  create_can_label(cont, "Health", "%", &(combinedData.canData.h), CAN_DATA_TYPE_BYTE, 180, 240, &canLabel[11]);*/
-  create_can_label(cont, "Capacity", "Ah", &(combinedData.canData.ah), CAN_DATA_TYPE_FLOAT, 20, 80, &canLabel[4]); //270, &canLabel[12]);
-  create_can_label(cont, "Internal Heatsink Temperature", "\u00B0C", &(combinedData.canData.hs), CAN_DATA_TYPE_BYTE, 20, 110, &canLabel[5]); //300, &canLabel[13]);
+  create_can_label(cont, "SOC", "%", &(combinedData.canData.soc), CAN_DATA_TYPE_BYTE, 20, 40, &canLabel[0]);
+  create_can_label(cont, "Current", "A", &(combinedData.canData.instI), CAN_DATA_TYPE_FLOAT, 180, 40, &canLabel[1]);
+  create_can_label(cont, "Voltage", "V", &(combinedData.canData.instU), CAN_DATA_TYPE_FLOAT, 20, 70, &canLabel[2]);
+  create_can_label(cont, "Power", "W", &(combinedData.canData.p), CAN_DATA_TYPE_INT, 180, 70, &canLabel[3]);
+  create_can_label(cont, "Capacity", "Ah", &(combinedData.canData.ah), CAN_DATA_TYPE_FLOAT, 20, 90, &canLabel[4]);
+  create_can_label(cont, "Internal Heatsink Temperature", "\u00B0C", &(combinedData.canData.hs), CAN_DATA_TYPE_BYTE, 20, 130, &canLabel[5]);
   
   // create right column container instance
   cont = lv_obj_create(parent);
@@ -1461,7 +1458,6 @@ void loop() {
 
     // start iterations
     if ( i <  255 && ! finished ) {
-      i++;
     }
     // calculate and write result
     else if ( ! finished ) {
@@ -1478,5 +1474,5 @@ void loop() {
       finished = false;
     }
   }
-  delay(4); // lvgl recommends 5ms delay for display and I have measured average performance of 1ms with or without serial
+  delay(3); // lvgl recommends 5ms delay for display (code takes up 2ms)
 }
