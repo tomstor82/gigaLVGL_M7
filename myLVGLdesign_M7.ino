@@ -187,7 +187,9 @@ static String buffer = "";
 //**************************************************************************************
 
 //******************************************************************************************************
-//  BUGS: #1 bms status messages displayed over can msgbox
+//  BUG#1: BMS status messages displayed over can msgbox
+//  BUG#2: Crash once inverter turned OFF shortly after being turned ON (ADD DELAY FOR OFF PERHAPS? BETTER FOR INVERTER HEALTH)
+//  BUG#3: Crash after thermostatic heaters OFF once Relay has closed
 //******************************************************************************************************
 
 // CREATE BUTTON INSTANCE
@@ -578,12 +580,15 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
     else {
       // send relay signal
       digitalWrite(data->relay_pin, LOW);
+      Serial.println("DEBUG#1");
 
       // inverter needs to stimulate the other buttons
       if ( data->relay_pin == RELAY1 ) {
+        Serial.println("DEBUG#2");
         lv_label_set_text(data->label_obj, "OFF"); // inverter only
         // turn off the other buttons
         for ( uint8_t i = 0; i < 3; i++ ) {
+          Serial.println("DEBUG#...");
           if ( userData[i].on == true ) {
             lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL); // release button
             button_off(&userData[i]);
@@ -594,12 +599,13 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         }
         pwr_demand = 0;
         inverter_prestart_p = 0;
+        Serial.println("DEBUG#3");
       }
       // hot water
       else pwr_demand ? pwr_demand-- : NULL;
-
+Serial.println("DEBUG#4");
       // delete timer
-      lv_timer_del(data->timer);
+      lv_timer_del(data->timer);Serial.println("DEBUG#5");
     }
   }
 }
@@ -1381,7 +1387,7 @@ void setup() {
 
   // Initialise click event for CANdata message box
   canMsgBoxData.parent = cont;
-  lv_obj_add_flag(cont, LV_OBJ_FLAG_CLICKABLE); // add event handling
+  //lv_obj_add_flag(cont, LV_OBJ_FLAG_CLICKABLE); // add event handling
   lv_obj_add_event_cb(cont, can_msgbox, LV_EVENT_CLICKED, &canMsgBoxData); // add event handler function
 
   // check for sunrise by reading BMS charge enable signal from CANbus and sending MPO#1 signal to trip relay if flapping detected
