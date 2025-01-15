@@ -124,11 +124,12 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   lv_obj_t* label_obj;
   lv_obj_t* msgbox;
   lv_timer_t* timer;
-  uint8_t relay_pin;
-  uint8_t y_offset;
-  unsigned long timeout_ms;
-  uint8_t dcl_limit;
+  uint8_t relay_pin = 0;
+  uint8_t y_offset = 0;
+  unsigned long timeout_ms = 0;
+  uint8_t dcl_limit = 0;
   uint8_t set_temp = 20; // should match value of dropdown default index
+  bool on = false;
 } user_data_t;
 
 typedef struct {
@@ -214,10 +215,11 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   // Disable all buttons by DCL limit
   data->dcl_label = lv_label_create(lv_obj_get_parent(data->button));
   lv_label_set_long_mode(data->dcl_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+  lv_label_set_text(data->dcl_label, "Battery Voltage too Low                    Please Charge                     "); // spaces to allow a pause
   lv_obj_set_width(data->dcl_label, 140);
   lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
   lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
-  lv_timer_create(dcl_check, 100, data); // check every 100ms to allow prompt off if dcl is 0
+  lv_timer_create(dcl_check, 1000, data); // check every second
 
   // create temperature dropdown and dynamic temperature labels for thermostat buttons
   if ( ! timeout_ms ) {
@@ -287,7 +289,9 @@ void mppt_delay(lv_timer_t* timer) {
       mppt_delay = true;
     }
     else {
-      time_ms = 0; // enables restarting on timer
+      // return to initialise again
+      time_ms = 0;
+      return;
     }
   }
 
@@ -327,36 +331,63 @@ void ccl_check(lv_timer_t * timer) {
 
 
 
+
+
+
+
+// TURN OFF BUTTON FUNCTION
+void button_off(user_data_t* data) {
+  Serial.println("DEBUG: button_off function ran");
+  digitalWrite(data->relay_pin, LOW);
+  lv_timer_del(data->timer);
+  data->on = false;
+}
+
+
+
+
+
+
+
+
+
 // DCL AND LOW CELL VOLTAGE CHECK TIMER ////////////////////////////////////////////////////////////////////////////
 void dcl_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
 
-  // disable inverter if discharge relay is tripped * ONLY WORKS IF DISCHARGE RELAY ENABLED IN BMS
-  /*if ( data->relay_pin == RELAY1 && (combinedData.canData.ry & 0x0001) != 0x0001 ) {
-    lv_label_set_text(data->dcl_label, "Discharge Relay Tripped by BMS                                      "); // spaces to allow a pause
-    lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
-
-    // if inverter is on turn it off
-    if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
-      lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
+  // IF DCL IS ZERO OR CELL VOLTAGE TOO LOW
+  if ( combinedData.canData.dcl == 0 || combinedData.canData.lC <= 2.9 ) { // ADD TEMPERATURE FROM BMS HERE LATER
+    for ( uint8_t i = 0; i < 4; i++ ) {
+      if ( userData[i].on ) {
+        lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL);
+        lv_obj_add_state(userData[i].button, LV_STATE_DISABLED);
+        // CHECK IF BUTTON IS STILL ON
+        if ( userData[i].on ) {
+          button_off(&userData[i]);
+        }
+      }
+      // SHOW INVERTER DISABLED LABEL
+      lv_obj_clear_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
+      lv_label_set_text(userData[3].label_obj, "OFF");
     }
-    // disable button
-    lv_obj_add_state(data->button, LV_STATE_DISABLED);
-  }*/
-  // disable buttons if dcl limit below appliance minimum operating dcl or low cell voltage
-  if ( combinedData.canData.dcl < data->dcl_limit || combinedData.canData.lC < 2.9 ) {
-    lv_label_set_text(data->dcl_label, "Battery Voltage too Low                    Please Charge                     "); // spaces to allow a pause
+    
+  }
+  // INDIVIDUAL BUTTON LIMITS
+  else if ( combinedData.canData.dcl < data->dcl_limit ) {
     lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
 
-    // if button is on turn it off
-    if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
+    // IF BUTTON IS ON
+    if ( data->on ) {
       lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
+      // CHECK IF BUTTON IS STILL ON
+      if ( data->on ) {
+        button_off(data);
+      }
       // Update Label for Inverter
       if ( data->relay_pin == RELAY1 ) {
         lv_label_set_text(data->label_obj, "OFF");
       }
     }
-
     // disable button
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }
@@ -519,14 +550,14 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
       }
 
       // If inverter is OFF attempt to start it
-      else if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
+      else if ( userData[3].on == false ) {
         lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL); // Have to include all 3 of these to make it work
         lv_event_send(userData[3].button, LV_EVENT_RELEASED, NULL);
         lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL);
         // If inverter doesn't start clear clicked state
-        if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
+        if ( userData[3].on == false ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
-          return; // exit function if inverter is off
+          return; // exit function if inverter doesn't start
         }
         // If started successfully increment pwr demand
         else pwr_demand++;
@@ -537,6 +568,7 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
 
       // Send signal to relay
       digitalWrite(data->relay_pin, HIGH);
+      data->on = true;
 
       // Create delay timer for inverter sweep and for hot water timout
       data->timer = lv_timer_create(power_check, data->timeout_ms, data);
@@ -552,10 +584,12 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         lv_label_set_text(data->label_obj, "OFF"); // inverter only
         // turn off the other buttons
         for ( uint8_t i = 0; i < 3; i++ ) {
-          if ( lv_obj_has_state(userData[i].button, LV_STATE_CHECKED) ) {
+          if ( userData[i].on == true ) {
             lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL); // release button
-            digitalWrite(userData[i].relay_pin, LOW); // turn off associated relay
-            lv_timer_del(userData[i].timer); // delete associated timer ** CRASH ISSUES ??????????
+            button_off(&userData[i]);
+            /*digitalWrite(userData[i].relay_pin, LOW); // turn off associated relay
+            userData[i].on = false;
+            lv_timer_del(userData[i].timer); // delete associated timer ** CRASH ISSUES ??????????*/
           }
         }
         pwr_demand = 0;
@@ -565,9 +599,7 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
       else pwr_demand ? pwr_demand-- : NULL;
 
       // delete timer
-      if (data->timer) {
-        lv_timer_del(data->timer);
-      }
+      lv_timer_del(data->timer);
     }
   }
 }
@@ -620,11 +652,12 @@ void power_check(lv_timer_t * timer) {
   // turn off relay
   else {
     digitalWrite(data->relay_pin, LOW);
+    data->on = false;
     // delete timer if relay is turned off as timer is created by click event handler
     lv_timer_del(timer);
 
     // Inverter sweep timer starting after turning off relay
-    if ( data->relay_pin == RELAY1 && lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
+    if ( data->relay_pin == RELAY1 && data->on == true ) {
       lv_label_set_text(data->label_obj, "Power Saving\n3 minutes OFF");
       lv_timer_create(sweep_timer, sweep_interval_ms, data);
     }
@@ -689,10 +722,12 @@ void thermostat_timer(lv_timer_t * timer) {
   if ( on ) {
     digitalWrite(data->relay_pin, HIGH);
     thermostat_off_ms = 0;
+    data->on = true;
   }
   else {
     digitalWrite(data->relay_pin, LOW);
     thermostat_off_ms = millis();
+    data->on = false;
   }
 }
 
@@ -706,12 +741,12 @@ void thermostat_event_handler(lv_event_t * e) {
     // Button ON
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       // check if inverter is on
-      if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
+      if ( userData[3].on == false ) {
         lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL);
         lv_event_send(userData[3].button, LV_EVENT_RELEASED, NULL);
         lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL);
         // DEBUG if inverter is still off disable change flag
-        if ( ! lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
+        if ( userData[3].on == false ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
           return; // exit function if inverter is off
         }
@@ -722,11 +757,10 @@ void thermostat_event_handler(lv_event_t * e) {
 
     // Button OFF
     else {
-      digitalWrite(data->relay_pin, LOW);
-      // delete timer if it exists
-      if ( data->timer ) {
-        lv_timer_del(data->timer);
-      }
+      button_off(data);
+      /*digitalWrite(data->relay_pin, LOW);
+      data->on = false;
+      lv_timer_del(data->timer);*/
       pwr_demand ? pwr_demand-- : NULL;
     }
   }
@@ -744,10 +778,6 @@ void thermostat_event_handler(lv_event_t * e) {
 // TEMPERATURE DROP DOWN EVENT HANDLER ////////////////////////////////////////////////
 void dropdown_event_handler(lv_event_t *e) {
     user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
-    if ( !data ) {
-      Serial.println("dropdown_event_handler: no user data");
-      return;
-    }
     lv_obj_t * dd = lv_event_get_target(e);
 
     // get index of selected dropdown item
@@ -1049,9 +1079,6 @@ void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* la
         // create refresh can data timer
         lv_timer_create(refresh_can_data, 200, data);
     }
-    else {
-      Serial.println("Error: Unable to allocate memory for CAN label data.");
-    }
 }
 
 // Function to sign value
@@ -1288,10 +1315,6 @@ void create_bms_status_label(lv_obj_t* parent, lv_coord_t y, bms_status_data_t* 
         // Refresh status labels every second
         lv_timer_create(refresh_bms_status_data, 1000, data);
 
-    }
-    else {
-        // Handle memory allocation failure
-        Serial.println("Error: Unable to allocate memory for BMS flag data.");
     }
 }
 
