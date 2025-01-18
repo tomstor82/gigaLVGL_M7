@@ -278,7 +278,7 @@ void mppt_delay(lv_timer_t* timer) {
   static bool mppt_delay = false;
   static uint32_t time_ms = 0;
 
-  // determine if solar was previously available and if not start time
+  // determine if solar was previously available and if not start time - checking custom flags for charge enable signal
   if ( (combinedData.canData.cu & 0x0001) == 0x0001 && ! time_ms ) {
     time_ms = millis();
     return;
@@ -303,15 +303,14 @@ void mppt_delay(lv_timer_t* timer) {
     mppt_delay = false;
   }
 
-  switch ( mppt_delay ) {
-    case true:
-      // turn off solar input relay through CAN MPO#1 signal
-      canMsgData.msg_data[1] = 0x01;
-      canMsgData.send_mpo1 = true; // this triggers send function in loop
-      break;
-    default:
-      canMsgData.send_mpo1 = false; // allow CHG relay to close and solar to start
-      canMsgData.msg_data[1] = 0;
+  // Initiate CAN msg to manipulater PV contactor via BMS MPO#1 signal
+  if ( mppt_delay ) {
+    canMsgData.msg_data[1] = 0x01;
+    canMsgData.send_mpo1 = true; // this triggers send function in loop
+  }
+  else {
+    canMsgData.send_mpo1 = false; // allow PV contactor to close enabling solar
+    canMsgData.msg_data[1] = 0;
   }
 }
 
@@ -357,7 +356,7 @@ void button_off(user_data_t* data) {
 void dcl_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
 
-  // IF DCL IS ZERO OR CELL VOLTAGE TOO LOW
+  // IF DCL IS ZERO OR CELL VOLTAGE TOO LOW ONLY LABEL INVERTER
   if ( combinedData.canData.dcl == 0 || combinedData.canData.lC <= 2.9 ) { // ADD TEMPERATURE FROM BMS HERE LATER
     for ( uint8_t i = 0; i < 4; i++ ) {
       if ( userData[i].on ) {
@@ -370,7 +369,9 @@ void dcl_check(lv_timer_t * timer) {
       }
       // SHOW INVERTER DISABLED LABEL
       lv_obj_clear_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
-      lv_label_set_text(userData[3].label_obj, "OFF");
+      if ( lv_label_get_text(userData[3].label_obj) != "OFF" ) {
+        lv_label_set_text(userData[3].label_obj, "OFF");
+      }
     }
     
   }
@@ -387,14 +388,16 @@ void dcl_check(lv_timer_t * timer) {
       }
       // Update Label for Inverter
       if ( data->relay_pin == RELAY1 ) {
-        lv_label_set_text(data->label_obj, "OFF");
+        if ( lv_label_get_text(data->label_obj) != "OFF" ) {
+          lv_label_set_text(data->label_obj, "OFF");
+        }
       }
     }
     // disable button
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }
 
-  // add hidden flag to label if all ok and enable button if previously disabled
+  // IF NO DCL LIMIT HIDE FLAG AND ENABLE BUTTONS
   else {
     lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
     if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
@@ -424,7 +427,7 @@ const char* set_can_msgbox_text() {
                  combinedData.canData.lC, combinedData.canData.lCid,
                  combinedData.canData.ccl,
                  combinedData.canData.dcl,
-                 canMsgData.send_mpo1 ? "NO" : "YES", // Are we sending CAN msg to trip PV Contactor?
+                 (combinedData.canData.cu & 0x0002) == 0x0002 ? "NO" : "YES", // using feedback from BMS to confirm MPO#1 signal was received // canMsgData.send_mpo1 ? "NO" : "YES", // Are we sending CAN msg to trip PV Contactor?
                  lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ? "YES" : "NO", // if inverter DCL label is visible discharge is disabled
                  combinedData.canData.cc,
                  combinedData.canData.h);
@@ -599,13 +602,18 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         }
         pwr_demand = 0;
         inverter_prestart_p = 0;
+        data->on = false;
         Serial.println("DEBUG#3");
       }
       // hot water
-      else pwr_demand ? pwr_demand-- : NULL;
-Serial.println("DEBUG#4");
+      else {
+        pwr_demand ? pwr_demand-- : NULL;
+        data->on = false;
+      }
+      Serial.println("DEBUG#4");
       // delete timer
-      lv_timer_del(data->timer);Serial.println("DEBUG#5");
+      lv_timer_del(data->timer);
+      Serial.println("DEBUG#5");
     }
   }
 }
@@ -658,7 +666,6 @@ void power_check(lv_timer_t * timer) {
   // turn off relay
   else {
     digitalWrite(data->relay_pin, LOW);
-    data->on = false;
     // delete timer if relay is turned off as timer is created by click event handler
     lv_timer_del(timer);
 
@@ -669,6 +676,7 @@ void power_check(lv_timer_t * timer) {
     }
     else { // clear button flag for hot water
       lv_obj_clear_state(data->button, LV_STATE_CHECKED);
+      data->on = false;
     }
   }
 }
