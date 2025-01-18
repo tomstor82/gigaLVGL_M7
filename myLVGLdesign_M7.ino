@@ -554,12 +554,12 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         lv_label_set_text(data->label_obj, "Inverter ON");
       }
 
-      // If inverter is OFF attempt to start it
-      else if ( userData[3].on == false ) {
+      // Hot water - try to start inverter if it's off
+      else if ( userData[3].on == false ) { // ( lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) == false ) {
         lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL); // Have to include all 3 of these to make it work
         lv_event_send(userData[3].button, LV_EVENT_RELEASED, NULL);
         lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL);
-        // If inverter doesn't start clear clicked state
+        // If inverter doesn't start clear hot water button clicked state
         if ( userData[3].on == false ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
           return; // exit function if inverter doesn't start
@@ -568,12 +568,12 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         else pwr_demand++;
       }
 
-      // If inverter is ON we only increment pwr demand
+      // If inverter is ON already, only increment pwr demand
       else pwr_demand++; // only for hot water
 
       // Send signal to relay
       digitalWrite(data->relay_pin, HIGH);
-      data->on = true;
+      data->on = true; // store state
 
       // Create delay timer for inverter sweep and for hot water timout
       data->timer = lv_timer_create(power_check, data->timeout_ms, data);
@@ -581,17 +581,23 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
 
     // Button OFF
     else {
+      button_off(data);
       // send relay signal
-      digitalWrite(data->relay_pin, LOW);
-      Serial.println("DEBUG#1");
+      //digitalWrite(data->relay_pin, LOW);
+      // delete timer
+      //lv_timer_del(data->timer);
+      // store state
+      //data->on = false;
+      //Serial.println("DEBUG#1");
 
-      // inverter needs to stimulate the other buttons
+      // inverter needs to manipulate the other buttons
       if ( data->relay_pin == RELAY1 ) {
-        Serial.println("DEBUG#2");
+        Serial.println("DEBUG#0");
         lv_label_set_text(data->label_obj, "OFF"); // inverter only
         // turn off the other buttons
         for ( uint8_t i = 0; i < 3; i++ ) {
-          Serial.println("DEBUG#...");
+          Serial.print("DEBUG#1.");
+          Serial.println(i);
           if ( userData[i].on == true ) {
             lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL); // release button
             button_off(&userData[i]);
@@ -602,17 +608,14 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         }
         pwr_demand = 0;
         inverter_prestart_p = 0;
-        data->on = false;
-        Serial.println("DEBUG#3");
+        Serial.println("DEBUG#2");
       }
       // hot water
       else {
         pwr_demand ? pwr_demand-- : NULL;
-        data->on = false;
       }
       Serial.println("DEBUG#4");
-      // delete timer
-      lv_timer_del(data->timer);
+
       Serial.println("DEBUG#5");
     }
   }
