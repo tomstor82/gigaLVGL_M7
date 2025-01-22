@@ -191,7 +191,6 @@ static String buffer = "";
 //  BUG#1: Heater buttons not disabled if sensors are faulty
 //  BUG#2: Crash once inverter turned OFF shortly after being turned ON (ADD DELAY FOR OFF PERHAPS? BETTER FOR INVERTER HEALTH)
 //  BUG#3: Crash after thermostatic heaters OFF once Relay has closed
-//  BUG#4: Perhaps not a bug but MPO feedback was not working but I had forgotten to set in BMS, however the same signal is 0x8000 on ry 2 byte can data
 //******************************************************************************************************
 
 // CREATE BUTTON INSTANCE
@@ -359,7 +358,7 @@ void dcl_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
 
   // IF DCL IS ZERO OR CELL VOLTAGE TOO LOW ONLY LABEL INVERTER
-  if ( combinedData.canData.dcl == 0 || (combinedData.canData.ry & 0x0001 ) != 0x0001 || combinedData.canData.lC <= 2.9 ) { // ADD TEMPERATURE FROM BMS HERE LATER
+  if ( combinedData.canData.dcl == 0 || (combinedData.canData.ry & 0x0001 ) != 0x0001 || combinedData.canData.lC <= 2.9 ) {
     for ( uint8_t i = 0; i < 4; i++ ) {
       if ( userData[i].on ) {
         lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL);
@@ -936,7 +935,7 @@ void update_temp(lv_timer_t *timer) {
             lv_timer_create(sensor_fault, 5000, data);
 
             // Button OFF if no sensor data
-            if (lv_obj_has_state(data->button, LV_STATE_CHECKED)) {
+            if (data->on == true) {
                 lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
             }
             // Button DISABLED after being turned OFF (no need to test here as state disabled in beginning)
@@ -951,7 +950,7 @@ void update_temp(lv_timer_t *timer) {
         else {
           snprintf(buf, sizeof(buf), "#3 --");
           // Button OFF if no sensor data
-          if (lv_obj_has_state(data->button, LV_STATE_CHECKED)) {
+          if (data->on == true) {
             lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
           }
           // Button DISABLED after being turned OFF (no need to test here as state disabled in beginning)
@@ -1333,7 +1332,7 @@ void create_bms_status_label(lv_obj_t* parent, lv_coord_t y, bms_status_data_t* 
         lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
 
         // Refresh status labels every second
-        data->timer = lv_timer_create(refresh_bms_status_data, 1000, data);
+        data->timer = lv_timer_create(refresh_bms_status_data, 1000, data); // stored in struct to allow msgbox to pause timer inhibiting labels from showing on msgbox
 
     }
 }
