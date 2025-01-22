@@ -106,6 +106,7 @@ typedef struct {
     lv_obj_t* title_label;
     lv_obj_t* button;
     lv_obj_t* status_label[30]; // can be expanded beyond the current 28 bms messages
+    lv_timer_t* timer;
     uint8_t y;
 } bms_status_data_t;
 
@@ -187,9 +188,10 @@ static String buffer = "";
 //**************************************************************************************
 
 //******************************************************************************************************
-//  BUG#1: BMS status messages displayed over can msgbox
+//  BUG#1: Heater buttons not disabled if sensors are faulty
 //  BUG#2: Crash once inverter turned OFF shortly after being turned ON (ADD DELAY FOR OFF PERHAPS? BETTER FOR INVERTER HEALTH)
 //  BUG#3: Crash after thermostatic heaters OFF once Relay has closed
+//  BUG#4: Perhaps not a bug but MPO feedback was not working but I had forgotten to set in BMS, however the same signal is 0x8000 on ry 2 byte can data
 //******************************************************************************************************
 
 // CREATE BUTTON INSTANCE
@@ -357,11 +359,10 @@ void dcl_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
 
   // IF DCL IS ZERO OR CELL VOLTAGE TOO LOW ONLY LABEL INVERTER
-  if ( combinedData.canData.dcl == 0 || combinedData.canData.lC <= 2.9 ) { // ADD TEMPERATURE FROM BMS HERE LATER
+  if ( combinedData.canData.dcl == 0 || (combinedData.canData.ry & 0x0001 ) != 0x0001 || combinedData.canData.lC <= 2.9 ) { // ADD TEMPERATURE FROM BMS HERE LATER
     for ( uint8_t i = 0; i < 4; i++ ) {
       if ( userData[i].on ) {
         lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL);
-        lv_obj_add_state(userData[i].button, LV_STATE_DISABLED);
         // CHECK IF BUTTON IS STILL ON
         if ( userData[i].on ) {
           button_off(&userData[i]);
@@ -369,6 +370,7 @@ void dcl_check(lv_timer_t * timer) {
       }
       // SHOW INVERTER DISABLED LABEL
       lv_obj_clear_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
+      lv_obj_add_state(userData[i].button, LV_STATE_DISABLED);
       if ( lv_label_get_text(userData[3].label_obj) != "OFF" ) {
         lv_label_set_text(userData[3].label_obj, "OFF");
       }
@@ -412,22 +414,22 @@ void dcl_check(lv_timer_t * timer) {
 
 // MESSAGE BOX FOR CAN-DATA EVENT HANDLERS AND UPDATE TIMER ////////////////////////////////////
 const char* set_can_msgbox_text() {
-  static char msgbox_text[300]; // Static buffer to retain the value
+  static char msgbox_text[310]; // Static buffer to retain the value
 
   snprintf(msgbox_text, sizeof(msgbox_text),
-                 "High Cell          %.2fV           #%d\n"
-                 "Low Cell           %.2fV           #%d\n\n"
+                 "High Cell          %.2fV            #%d\n"
+                 "Low Cell           %.2fV            #%d\n\n"
                  "Charge Limit                      %d A\n"
                  "Discharge Limit                %d A\n\n"
                  "Charge Enabled                 %s\n"
                  "Discharge Enabled            %s\n\n"
-                 "Battery Cycles                  %d\n"
-                 "Battery Health              %d%%",
+                 "Battery Cycles                     %d\n"
+                 "Battery Health                  %d%%",
                  combinedData.canData.hC, combinedData.canData.hCid,
                  combinedData.canData.lC, combinedData.canData.lCid,
                  combinedData.canData.ccl,
                  combinedData.canData.dcl,
-                 (combinedData.canData.cu & 0x0002) == 0x0002 ? "NO" : "YES", // using feedback from BMS to confirm MPO#1 signal was received // canMsgData.send_mpo1 ? "NO" : "YES", // Are we sending CAN msg to trip PV Contactor?
+                 (combinedData.canData.cu & 0x0002) == 0x0002 ? "YES" : "NO", // using feedback from BMS to confirm MPO#1 signal was received // canMsgData.send_mpo1 ? "NO" : "YES", // Are we sending CAN msg to trip PV Contactor? ** ry 0x8000 can also be used
                  lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ? "YES" : "NO", // if inverter DCL label is visible discharge is disabled
                  combinedData.canData.cc,
                  combinedData.canData.h);
@@ -458,6 +460,9 @@ void can_msgbox(lv_event_t* e) {
 
         // Create timer to update data every 10 seconds
         data->timer = lv_timer_create(can_msgbox_update_timer, 10000, data);
+
+        // Pause BMS status data label timer as they show through msgbox
+        lv_timer_pause(bmsStatusData.timer);
     }
 }
 
@@ -471,6 +476,9 @@ void close_can_msgbox_event_handler(lv_event_t* e) {
 
     // Remove the screen overlay object
     lv_obj_del(lv_event_get_current_target(e));
+
+    // Resume BMS status data label timer
+    lv_timer_resume(bmsStatusData.timer);
   }
 }
 
@@ -480,13 +488,13 @@ void close_can_msgbox_event_handler(lv_event_t* e) {
 
 // MESSAGE BOX FOR SENSOR-DATA EVENT HANDLERS AND UPDATE TIMER /////////////////////////////////
 const char* set_sensor_msgbox_text() {
-  static char msgbox_text[291]; // Static buffer to retain the value
+  static char msgbox_text[327]; // Static buffer to retain the value
 
   snprintf(msgbox_text, sizeof(msgbox_text),
-                 "Temperature 1:            %.1f°C\nHumidity 1:                   %.1f%%\n\n"
-                 "Temperature 2:            %.1f°C\nHumidity 2:                   %.1f%%\n\n"
-                 "Temperature 3:            %.1f°C\nHumidity 3:                   %.1f%%\n\n"
-                 "Temperature 4:            %.1f°C\nHumidity 4:                   %.1f%%",
+                 "Temperature 1:            %.1f°C\nRelative Humidity 1:   %.1f%%\n\n"
+                 "Temperature 2:            %.1f°C\nRelative Humidity 2:   %.1f%%\n\n"
+                 "Temperature 3:            %.1f°C\nRelative Humidity 3:   %.1f%%\n\n"
+                 "Temperature 4:            %.1f°C\nRelative Humidity 4:   %.1f%%",
                  combinedData.sensorData.temp1, combinedData.sensorData.humi1,
                  combinedData.sensorData.temp2, combinedData.sensorData.humi2,
                  combinedData.sensorData.temp3, combinedData.sensorData.humi3,
@@ -593,7 +601,7 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
       // inverter needs to manipulate the other buttons
       if ( data->relay_pin == RELAY1 ) {
         Serial.println("DEBUG#0");
-        lv_label_set_text(data->label_obj, "OFF"); // inverter only
+        lv_label_set_text(data->label_obj, "OFF");
         // turn off the other buttons
         for ( uint8_t i = 0; i < 3; i++ ) {
           Serial.print("DEBUG#1.");
@@ -615,8 +623,6 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         pwr_demand ? pwr_demand-- : NULL;
       }
       Serial.println("DEBUG#4");
-
-      Serial.println("DEBUG#5");
     }
   }
 }
@@ -666,21 +672,18 @@ void power_check(lv_timer_t * timer) {
     // we start this timer again
     lv_timer_reset(timer);
   }
-  // turn off relay
-  else {
-    digitalWrite(data->relay_pin, LOW);
-    // delete timer if relay is turned off as timer is created by click event handler
-    lv_timer_del(timer);
 
-    // Inverter sweep timer starting after turning off relay
-    if ( data->relay_pin == RELAY1 && data->on == true ) {
-      lv_label_set_text(data->label_obj, "Power Saving\n3 minutes OFF");
-      lv_timer_create(sweep_timer, sweep_interval_ms, data);
-    }
-    else { // clear button flag for hot water
-      lv_obj_clear_state(data->button, LV_STATE_CHECKED);
-      data->on = false;
-    }
+  // Inverter sweep time start
+  else if ( data->relay_pin == RELAY1 && data->on == true ) {
+    lv_label_set_text(data->label_obj, "Power Saving\n3 minutes OFF");
+    lv_timer_create(sweep_timer, sweep_interval_ms, data);
+    button_off(data);
+    data->on = true; // set as on as button_off sets to off
+  }
+  // Hot water off
+  else {
+    lv_obj_clear_state(data->button, LV_STATE_CHECKED);
+    button_off(data); //data->on = false;
   }
 }
 
@@ -1259,7 +1262,7 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     if ((combinedData.canData.st & 0x8000) == 0x8000) { create_status_label("Charge Mode Activated over CANBUS", data); flag_index++; }
 
     // Custom status messages
-    if ( canMsgData.send_mpo1 ) { create_status_label("Charge Disabled by Arduino", data); flag_index++;} // Are we sending CAN msg to trip PV Contactor
+    if ( (combinedData.canData.cu & 0x0002) != 0x0002 ) { create_status_label("Charge Disabled by Arduino", data); flag_index++;} // using feedback from BMS to confirm MPO#1 signal was received
     if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Discharge Disabled by Arduino", data); flag_index++;} // If Inverter DCL CHECK triggered
     if ( canMsgData.len == 0 ) { create_status_label("No CAN data from BMS", data); flag_index++; }
 
@@ -1330,7 +1333,7 @@ void create_bms_status_label(lv_obj_t* parent, lv_coord_t y, bms_status_data_t* 
         lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
 
         // Refresh status labels every second
-        lv_timer_create(refresh_bms_status_data, 1000, data);
+        data->timer = lv_timer_create(refresh_bms_status_data, 1000, data);
 
     }
 }
@@ -1502,6 +1505,7 @@ void loop() {
 
     // start iterations
     if ( i <  255 && ! finished ) {
+      i++;
     }
     // calculate and write result
     else if ( ! finished ) {
@@ -1518,5 +1522,5 @@ void loop() {
       finished = false;
     }
   }
-  delay(3); // lvgl recommends 5ms delay for display (code takes up 2ms)
+  delay(4); // lvgl recommends 5ms delay for display (code takes up 1ms)
 }
