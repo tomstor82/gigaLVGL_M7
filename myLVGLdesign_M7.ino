@@ -131,6 +131,7 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   uint8_t dcl_limit = 0;
   uint8_t set_temp = 20; // should match value of dropdown default index
   bool on = false;
+  bool previous_mppt_delay = false;
 } user_data_t;
 
 typedef struct {
@@ -173,7 +174,7 @@ uint32_t inverter_startup_ms = 0;
 uint8_t pwr_demand = 0;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
 const uint16_t inverter_startup_delay_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
-const uint32_t sweep_interval_ms = 180000; // 3 minute sweep interval reduces standby consumption from 85Wh to around 12,5Wh -84%
+const uint32_t search_interval_ms = 180000; // 3 minute search interval reduces standby consumption from 85Wh to around 12,5Wh -84%
 static lv_style_t style; // cascading style for text labels
 
 static uint8_t brightness = 70;
@@ -191,6 +192,8 @@ static String buffer = "";
 //  BUG#1: Heater buttons not disabled if sensors are faulty
 //  BUG#2: Crash once inverter turned OFF shortly after being turned ON (ADD DELAY FOR OFF PERHAPS? BETTER FOR INVERTER HEALTH)
 //  BUG#3: Crash after thermostatic heaters OFF once Relay has closed
+//  BUG#4: Crash after inverter has been on for a while
+//  BUG#5: If low sun this inhibits inverter
 //******************************************************************************************************
 
 // CREATE BUTTON INSTANCE
@@ -239,7 +242,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     // Create timer for updating temperature labels
     lv_timer_create(update_temp, 10000, data);
 
-    // Set initial text
+    // Set initial refresh symbol
     lv_label_set_text(data->label_obj, LV_SYMBOL_REFRESH);
 
     // Make label clickable and add event handler for showing sensor message box
@@ -269,7 +272,32 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 
 
 
+// MPPT DELAYER /////// /////////////////////////////////////////////////////////////////////////
+void mppt_delayer(bool delay) {
+  // make sure relay trips for at least 20s
+  static uint32_t start_time_ms = 0;
+  if ( delay && ! start_time_ms ) {
+    start_time_ms = millis();
+  }
+  else if ( start_time_ms + 20 * 1000 > millis() && ! delay ) {
+    delay = true;
+  }
+  else {
+    start_time_ms = 0;
+  }
 
+  switch ( delay ) {
+    case true:
+      canMsgData.msg_data[1] = 0x01;
+      canMsgData.send_mpo1 = true; // this triggers send function in loop
+      //Serial.println("DEBUG: mppt delay sent");
+      break;
+    case false:
+      canMsgData.msg_data[1] = 0x00;
+      canMsgData.send_mpo1 = false;
+      //Serial.println("DEBUG: mppt delay cancelled");
+   }
+}
 
 
 
@@ -305,14 +333,15 @@ void mppt_delay(lv_timer_t* timer) {
   }
 
   // Initiate CAN msg to manipulater PV contactor via BMS MPO#1 signal
-  if ( mppt_delay ) {
+  mppt_delayer(mppt_delay);
+  /*if ( mppt_delay ) {
     canMsgData.msg_data[1] = 0x01;
     canMsgData.send_mpo1 = true; // this triggers send function in loop
   }
   else {
     canMsgData.send_mpo1 = false; // allow PV contactor to close enabling solar
     canMsgData.msg_data[1] = 0;
-  }
+  }*/
 }
 
 
@@ -337,12 +366,13 @@ void ccl_check(lv_timer_t * timer) {
 
 
 
-// TURN OFF BUTTON FUNCTION
+// TURN OFF BUTTON FUNCTION //////////////////////////////////////////////////////////////////////////////////////
 void button_off(user_data_t* data) {
-  Serial.println("DEBUG: button_off function ran");
   digitalWrite(data->relay_pin, LOW);
-  lv_timer_del(data->timer);
   data->on = false;
+  if ( data->timer ) {
+    lv_timer_del(data->timer);
+  }
 }
 
 
@@ -556,7 +586,7 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
 
       // Inverter
-      if ( data->relay_pin == RELAY1 ) { // only for inverter for sweeping
+      if ( data->relay_pin == RELAY1 ) { // only for inverter for searching
         inverter_prestart_p = combinedData.canData.p;
         lv_label_set_text(data->label_obj, "Inverter ON");
       }
@@ -582,59 +612,46 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
       digitalWrite(data->relay_pin, HIGH);
       data->on = true; // store state
 
-      // Create delay timer for inverter sweep and for hot water timout
+      // Create struct delay timer for inverter search and for hot water timeout to be deleted later
       data->timer = lv_timer_create(power_check, data->timeout_ms, data);
     }
 
     // Button OFF
     else {
-      button_off(data);
-      // send relay signal
-      //digitalWrite(data->relay_pin, LOW);
-      // delete timer
-      //lv_timer_del(data->timer);
-      // store state
-      //data->on = false;
-      //Serial.println("DEBUG#1");
+      button_off(data); // deletes timers, set digital pin LOW and sets on variable to false
 
       // inverter needs to manipulate the other buttons
       if ( data->relay_pin == RELAY1 ) {
-        Serial.println("DEBUG#0");
         lv_label_set_text(data->label_obj, "OFF");
         // turn off the other buttons
         for ( uint8_t i = 0; i < 3; i++ ) {
-          Serial.print("DEBUG#1.");
-          Serial.println(i);
           if ( userData[i].on == true ) {
             lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL); // release button
             button_off(&userData[i]);
-            /*digitalWrite(userData[i].relay_pin, LOW); // turn off associated relay
-            userData[i].on = false;
-            lv_timer_del(userData[i].timer); // delete associated timer ** CRASH ISSUES ??????????*/
           }
         }
         pwr_demand = 0;
         inverter_prestart_p = 0;
-        Serial.println("DEBUG#2");
+        data->previous_mppt_delay = false;
       }
+
       // hot water
       else {
         pwr_demand ? pwr_demand-- : NULL;
       }
-      Serial.println("DEBUG#4");
     }
   }
 }
 
-// INVERTER SWEEP TIMER ///////////////////////////////////////////////////////////////////
-void sweep_timer (lv_timer_t* timer) {
+// INVERTER SEARCH TIMER ///////////////////////////////////////////////////////////////////
+void search_mode(lv_timer_t* timer) {
   user_data_t* data = (user_data_t *)timer->user_data;
 
   // stimulate button with click to start inverter again
   lv_event_send(data->button, LV_EVENT_CLICKED, NULL);
 
-  // delete timer so it only runs once as this function is called continuosly by other timer
-  lv_timer_del(timer);
+  // reset previous delay to test again if inverter starts properly
+  data->previous_mppt_delay = false;
 }
 
 
@@ -642,23 +659,37 @@ void sweep_timer (lv_timer_t* timer) {
 void power_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
   bool on = false;
-  
+  static lv_timer_t* search_timer = NULL;
+
   // Inverter
   if ( data->relay_pin == RELAY1 ) {
 
-    // Remain ON if charging when SOC above 50%
-    if ( combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) {
+    // Did inverter start properly? If not turn off MPPT until next function call
+    if ( ! data->previous_mppt_delay && inverter_prestart_p >= 0 && (inverter_standby_p + inverter_prestart_p) > combinedData.canData.p ) {
+      Serial.println("DEBUG: Inverter didn't start properly\nTurning OFF MPPT\nRestarting Inverter");
+      digitalWrite(data->relay_pin, LOW);
+      mppt_delayer(data->previous_mppt_delay);
+      delay(1000);
+      digitalWrite(data->relay_pin, HIGH);
       on = true;
+    }
+
+    // Remain ON if charging when SOC above 50%
+    else if ( combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) {
+      on = true;
+      Serial.println("DEBUG charging when SOC above 50%");
     }
 
     // Remain ON if demand variable set
     else if ( pwr_demand ) {
       on = true;
+      Serial.println("DEBUG demand variable set");
     }
 
-    // Remain ON if charge is more than 20W or discharging exceeds inverter standby
-    else if ( (inverter_standby_p + inverter_prestart_p) > (combinedData.canData.p + 20)|| (inverter_standby_p + inverter_prestart_p) < combinedData.canData.p ) {
+    // Remain ON if discharge exceeds inverter standby - considering prestart_p and canData.p are signed it should cover most charge/discharge scenarios
+    else if ( (inverter_standby_p + inverter_prestart_p) < combinedData.canData.p ) {
       on = true;
+      Serial.println("DEBUG discharge exceeds inverter standby");
     }
   }
   
@@ -668,21 +699,45 @@ void power_check(lv_timer_t * timer) {
   }
 
   if (on) {
-    // we start this timer again
-    lv_timer_reset(timer);
+    data->previous_mppt_delay = true;
+    // leave function as it will be called again if buttons remains on
+    return;
   }
 
-  // Inverter sweep time start
+  // Inverter search time start
   else if ( data->relay_pin == RELAY1 && data->on == true ) {
-    lv_label_set_text(data->label_obj, "Power Saving\n3 minutes OFF");
-    lv_timer_create(sweep_timer, sweep_interval_ms, data);
-    button_off(data);
-    data->on = true; // set as on as button_off sets to off
+    static uint32_t time_ms = 0;
+    static uint8_t minute_count = 0;
+    char plural[2] = "s";
+    char label[30];
+
+    if ( ! time_ms ) {
+      time_ms = millis();
+    }
+    else if ( (time_ms + (1 + minute_count) * 60 * 1000) < millis() && minute_count < 3 ) {
+      minute_count++;
+      if ( minute_count == 2 ) {
+        strcpy(plural, "");
+      }
+    }
+    else if ( minute_count == 3 ) {
+      minute_count = 0;
+    }
+
+    if ( ! search_timer ) {
+      lv_timer_t* search_timer = lv_timer_create(search_mode, search_interval_ms, data); // global var search_interval_ms
+      lv_timer_set_repeat_count(search_timer, 1); // automatically delete timer after 1 run
+    }
+
+    snprintf(label, sizeof(label), "Search Mode\n%d minute%s OFF", (3 - minute_count), plural);
+    lv_label_set_text(data->label_obj, label); //"Search Mode\n3 minutes OFF");
+    digitalWrite(data->relay_pin, LOW);
   }
+
   // Hot water off
   else {
     lv_obj_clear_state(data->button, LV_STATE_CHECKED);
-    button_off(data); //data->on = false;
+    button_off(data);
   }
 }
 
@@ -898,20 +953,13 @@ void sensor_fault(lv_timer_t* timer) {
 
   // Update the label directly with the warning message
   lv_label_set_text(data->label_obj, faultMsg);
-
-  // Delete the timer as it is called from within another timer
-  lv_timer_del(timer);
 }
 
 // TEMPERATURE UPDATER //////////////////////////////////////////////////////
 void update_temp(lv_timer_t *timer) {
     user_data_t *data = (user_data_t *)timer->user_data;
     char buf[20];
-
-    // Clear previously set disabled state
-    if (lv_obj_has_state(data->button, LV_STATE_DISABLED)) {
-        lv_obj_clear_state(data->button, LV_STATE_DISABLED);
-    }
+    bool disabled = false;
 
     // check sensors for living room. If no avg_temp use single working sensor.
     if (data->relay_pin == RELAY2) {
@@ -932,14 +980,14 @@ void update_temp(lv_timer_t *timer) {
         }
         else {
             snprintf(buf, sizeof(buf), "----");
-            lv_timer_create(sensor_fault, 5000, data);
+            lv_timer_t* sensor_fault_timer = lv_timer_create(sensor_fault, 5000, data);
+            lv_timer_set_repeat_count(sensor_fault_timer, 1); // as this function is called by timer don't repeat this timer
 
             // Button OFF if no sensor data
             if (data->on == true) {
                 lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
             }
-            // Button DISABLED after being turned OFF (no need to test here as state disabled in beginning)
-            lv_obj_add_state(data->button, LV_STATE_DISABLED);
+            disabled = true;
         }
     }
     // check single sensor for shower room
@@ -953,9 +1001,17 @@ void update_temp(lv_timer_t *timer) {
           if (data->on == true) {
             lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
           }
-          // Button DISABLED after being turned OFF (no need to test here as state disabled in beginning)
-          lv_obj_add_state(data->button, LV_STATE_DISABLED);
+          disabled = true;
         }
+    }
+
+    // disable button
+    if ( disabled && ! lv_obj_has_state(data->button, LV_STATE_DISABLED)) {
+      lv_obj_add_state(data->button, LV_STATE_DISABLED);
+    }
+    // Clear disabled state if it isn't called for
+    else if ( lv_obj_has_state(data->button, LV_STATE_DISABLED)) {
+      lv_obj_clear_state(data->button, LV_STATE_DISABLED);
     }
 
     // Update the label text
