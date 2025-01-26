@@ -129,10 +129,10 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   uint8_t y_offset = 0;
   unsigned long timeout_ms = 0;
   uint8_t dcl_limit = 0;
-  bool disabled = false;
+  bool disabled = false; // used by update_temp to not override dcl_check if triggered
   uint8_t set_temp = 20; // should match value of dropdown default index
-  bool on = false;
-  bool previous_mppt_delay = false;
+  bool on = false; // simplifies code by substituting [lv_obj_has_state(data->button, LV_STATE_CHECKED)]
+  bool previous_mppt_delay = false; // used by power_check to determine if mppt delay had already run once
 } user_data_t;
 
 typedef struct {
@@ -427,7 +427,7 @@ void dcl_check(lv_timer_t * timer) {
     }
     // disable button
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
-    data->disabled = true; // used by temp fault check to not override this function
+    data->disabled = true;
   }
 
   // IF NO DCL LIMIT HIDE FLAG AND ENABLE BUTTONS
@@ -733,7 +733,7 @@ void power_check(lv_timer_t * timer) {
     }
 
     snprintf(label, sizeof(label), "Search Mode\n%d minute%s OFF", (3 - minute_count), plural);
-    lv_label_set_text(data->label_obj, label); //"Search Mode\n3 minutes OFF");
+    lv_label_set_text(data->label_obj, label);
     digitalWrite(data->relay_pin, LOW);
   }
 
@@ -1014,7 +1014,7 @@ void update_temp(lv_timer_t *timer) {
     if ( disabled && ! lv_obj_has_state(data->button, LV_STATE_DISABLED)) {
       lv_obj_add_state(data->button, LV_STATE_DISABLED);
     }
-    // Clear disabled state if it isn't called for and if button isn't dcl disabled already
+    // Clear disabled state if it isn't called for and if button isn't disabled by dcl_check already
     else if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) && ! data->disabled ) {
       lv_obj_clear_state(data->button, LV_STATE_DISABLED);
     }
@@ -1277,11 +1277,12 @@ void create_status_label(const char* label_text, bms_status_data_t* data, bool f
 void refresh_bms_status_data(lv_timer_t * timer) {
     bms_status_data_t *data = (bms_status_data_t *)timer->user_data;
 
-    static bool balancing_label_showing = false; // Static to remember between calls
+    static bool balancing_label_showing = false; // Controlling the flashing feature
 
-    bool charge_only = false;
+    bool hide_button = false;
 
     int8_t flag_index = -1; // initialise as -1 as this is for indexing array
+    int8_t control_index = -1; // controls button visibility for certain messages
 
     // Clear all status labels initially
     for (uint8_t i = 0; i < (sizeof(data->status_label) / sizeof(data->status_label[0])); i++) {
@@ -1322,9 +1323,9 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     if ((combinedData.canData.st & 0x8000) == 0x8000) { create_status_label("Charge Mode Activated over CANBUS", data); flag_index++; }
 
     // Custom status messages
-    if ( (combinedData.canData.cu & 0x0002) != 0x0002 ) { create_status_label("Charge Disabled by Arduino", data); flag_index++;} // using feedback from BMS to confirm MPO#1 signal was received
-    if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Discharge Disabled by Arduino", data); flag_index++;} // If Inverter DCL CHECK triggered
-    if ( canMsgData.len == 0 ) { create_status_label("No CAN data from BMS", data); flag_index++; }
+    if ( (combinedData.canData.cu & 0x0002) != 0x0002 ) { create_status_label("Charge Disabled by Arduino", data); flag_index++; control_index++;} // using feedback from BMS to confirm MPO#1 signal was received
+    if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Discharge Disabled by Arduino", data); flag_index++; control_index++;} // If Inverter DCL CHECK triggered
+    if ( canMsgData.len == 0 ) { create_status_label("No CAN data from BMS", data); flag_index++; control_index++; }
 
     // Cell balancing check at end ensures higher importance messages appear above
     if ((combinedData.canData.st & 0x0008) == 0x0008) {
@@ -1338,10 +1339,11 @@ void refresh_bms_status_data(lv_timer_t * timer) {
       }
 
       flag_index++;
-      
-      // If balancing only button should remain hidden
-      if ( flag_index == 0 ) {
-        charge_only = true;
+      control_index++;
+
+      // If balancing only or custom messages, button remains hidden
+      if ( flag_index == control_index ) {
+        hide_button = true;
       }
     }
 
@@ -1352,7 +1354,7 @@ void refresh_bms_status_data(lv_timer_t * timer) {
       lv_obj_clear_flag(data->title_label, LV_OBJ_FLAG_HIDDEN); // Remove hide flag
     }
     // Show button if more than just balancing flag is present
-    if ( lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) && ! charge_only ) {
+    if ( lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) && ! hide_button ) {
       lv_obj_clear_flag(data->button, LV_OBJ_FLAG_HIDDEN); // Remove hide flag
     }
   }
