@@ -686,8 +686,7 @@ void power_check(lv_timer_t * timer) {
 
   if (on) {
     data->previous_mppt_delay = true;
-    // leave function as it will be called again if buttons remains on
-    return;
+    lv_timer_reset(timer);
   }
 
   // Inverter search time start
