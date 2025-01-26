@@ -189,7 +189,7 @@ static String buffer = "";
 //**************************************************************************************
 
 //******************************************************************************************************
-//  BUG#1:
+//  BUG#1: CRASH WHEN INVERTER TURNED OFF AFTER SEARCH MODE OR IN SEARCH MODE
 //******************************************************************************************************
 
 // CREATE BUTTON INSTANCE
@@ -994,7 +994,7 @@ void update_temp(lv_timer_t *timer) {
     if ( disabled && ! lv_obj_has_state(data->button, LV_STATE_DISABLED)) {
       lv_obj_add_state(data->button, LV_STATE_DISABLED);
     }
-    // Clear disabled state
+    // Clear disabled state unless dcl check has already disabled
     else if ( ! disabled && lv_obj_has_state(data->button, LV_STATE_DISABLED) && ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_state(data->button, LV_STATE_DISABLED);
     }
@@ -1306,7 +1306,7 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     // Relay status
     if ((combinedData.canData.ry & 0x0001) != 0x0001) { create_status_label("Discharge Relay Opened", data); flag_index++; }
     if ((combinedData.canData.ry & 0x0002) != 0x0002) { create_status_label("Charge Relay Opened", data); flag_index++; }
-    if ((combinedData.canData.st & 0x0004) != 0x0004) { create_status_label("Charge Safety Relay Opened", data); flag_index++; }
+    if ((combinedData.canData.ry & 0x0004) == 0x0004) { create_status_label("Charger Safety Relay Opened", data); flag_index++; } // opening with active signal
 
     // Custom status messages
     if ( (combinedData.canData.cu & 0x0002) != 0x0002 ) { create_status_label("Charge Disabled by Arduino", data); flag_index++; control_index++;} // using feedback from BMS to confirm MPO#1 signal was received
