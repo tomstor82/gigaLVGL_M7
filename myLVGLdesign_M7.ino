@@ -129,6 +129,7 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   uint8_t y_offset = 0;
   unsigned long timeout_ms = 0;
   uint8_t dcl_limit = 0;
+  bool disabled = false;
   uint8_t set_temp = 20; // should match value of dropdown default index
   bool on = false;
   bool previous_mppt_delay = false;
@@ -426,11 +427,13 @@ void dcl_check(lv_timer_t * timer) {
     }
     // disable button
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
+    data->disabled = true; // used by temp fault check to not override this function
   }
 
   // IF NO DCL LIMIT HIDE FLAG AND ENABLE BUTTONS
   else {
     lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
+    data->disabled = false;
     if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
       lv_obj_clear_state(data->button, LV_STATE_DISABLED);
     }
@@ -1001,6 +1004,8 @@ void update_temp(lv_timer_t *timer) {
           if (data->on == true) {
             lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
           }
+          // Button DISABLED after being turned OFF (no need to test here as state disabled in beginning)
+          //lv_obj_add_state(data->button, LV_STATE_DISABLED);
           disabled = true;
         }
     }
@@ -1009,8 +1014,8 @@ void update_temp(lv_timer_t *timer) {
     if ( disabled && ! lv_obj_has_state(data->button, LV_STATE_DISABLED)) {
       lv_obj_add_state(data->button, LV_STATE_DISABLED);
     }
-    // Clear disabled state if it isn't called for
-    else if ( lv_obj_has_state(data->button, LV_STATE_DISABLED)) {
+    // Clear disabled state if it isn't called for and if button isn't dcl disabled already
+    else if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) && ! data->disabled ) {
       lv_obj_clear_state(data->button, LV_STATE_DISABLED);
     }
 
