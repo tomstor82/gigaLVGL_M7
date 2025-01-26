@@ -105,7 +105,7 @@ typedef struct {
     lv_obj_t* parent;
     lv_obj_t* title_label;
     lv_obj_t* button;
-    lv_obj_t* status_label[30]; // can be expanded beyond the current 28 bms messages
+    lv_obj_t* status_label[33];
     lv_timer_t* timer;
     uint8_t y;
 } bms_status_data_t;
@@ -129,7 +129,6 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   uint8_t y_offset = 0;
   unsigned long timeout_ms = 0;
   uint8_t dcl_limit = 0;
-  bool disabled = false; // used by update_temp to not override dcl_check if triggered
   uint8_t set_temp = 20; // should match value of dropdown default index
   bool on = false; // simplifies code by substituting [lv_obj_has_state(data->button, LV_STATE_CHECKED)]
   bool previous_mppt_delay = false; // used by power_check to determine if mppt delay had already run once
@@ -190,11 +189,7 @@ static String buffer = "";
 //**************************************************************************************
 
 //******************************************************************************************************
-//  BUG#1: Heater buttons not disabled if sensors are faulty
-//  BUG#2: Crash once inverter turned OFF shortly after being turned ON (ADD DELAY FOR OFF PERHAPS? BETTER FOR INVERTER HEALTH)
-//  BUG#3: Crash after thermostatic heaters OFF once Relay has closed
-//  BUG#4: Crash after inverter has been on for a while
-//  BUG#5: If low sun this inhibits inverter
+//  BUG#1:
 //******************************************************************************************************
 
 // CREATE BUTTON INSTANCE
@@ -291,12 +286,10 @@ void mppt_delayer(bool delay) {
     case true:
       canMsgData.msg_data[1] = 0x01;
       canMsgData.send_mpo1 = true; // this triggers send function in loop
-      //Serial.println("DEBUG: mppt delay sent");
       break;
     case false:
       canMsgData.msg_data[1] = 0x00;
       canMsgData.send_mpo1 = false;
-      //Serial.println("DEBUG: mppt delay cancelled");
    }
 }
 
@@ -335,14 +328,6 @@ void mppt_delay(lv_timer_t* timer) {
 
   // Initiate CAN msg to manipulater PV contactor via BMS MPO#1 signal
   mppt_delayer(mppt_delay);
-  /*if ( mppt_delay ) {
-    canMsgData.msg_data[1] = 0x01;
-    canMsgData.send_mpo1 = true; // this triggers send function in loop
-  }
-  else {
-    canMsgData.send_mpo1 = false; // allow PV contactor to close enabling solar
-    canMsgData.msg_data[1] = 0;
-  }*/
 }
 
 
@@ -427,13 +412,11 @@ void dcl_check(lv_timer_t * timer) {
     }
     // disable button
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
-    data->disabled = true;
   }
 
   // IF NO DCL LIMIT HIDE FLAG AND ENABLE BUTTONS
   else {
     lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
-    data->disabled = false;
     if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
       lv_obj_clear_state(data->button, LV_STATE_DISABLED);
     }
@@ -835,9 +818,6 @@ void thermostat_event_handler(lv_event_t * e) {
     // Button OFF
     else {
       button_off(data);
-      /*digitalWrite(data->relay_pin, LOW);
-      data->on = false;
-      lv_timer_del(data->timer);*/
       pwr_demand ? pwr_demand-- : NULL;
     }
   }
@@ -1010,12 +990,12 @@ void update_temp(lv_timer_t *timer) {
         }
     }
 
-    // disable button
+    // Add disabled button state
     if ( disabled && ! lv_obj_has_state(data->button, LV_STATE_DISABLED)) {
       lv_obj_add_state(data->button, LV_STATE_DISABLED);
     }
-    // Clear disabled state if it isn't called for and if button isn't disabled by dcl_check already
-    else if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) && ! data->disabled ) {
+    // Clear disabled state
+    else if ( ! disabled && lv_obj_has_state(data->button, LV_STATE_DISABLED) && ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_state(data->button, LV_STATE_DISABLED);
     }
 
@@ -1038,6 +1018,7 @@ void clear_bms_flag(lv_event_t * e) {
     canMsgData.msg_data[0] = 0x01;
     canMsgData.msg_cnt = 0; // reset the retry count
   }
+  Serial.println("Sending CAN msg to clear BMS flags");
 }
 
 
@@ -1321,6 +1302,11 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     if ((combinedData.canData.st & 0x1000) == 0x1000) { create_status_label("Polarization Model 1 Active", data); flag_index++; }
     if ((combinedData.canData.st & 0x2000) == 0x2000) { create_status_label("Polarization Model 2 Active", data); flag_index++; }
     if ((combinedData.canData.st & 0x8000) == 0x8000) { create_status_label("Charge Mode Activated over CANBUS", data); flag_index++; }
+
+    // Relay status
+    if ((combinedData.canData.ry & 0x0001) != 0x0001) { create_status_label("Discharge Relay Opened", data); flag_index++; }
+    if ((combinedData.canData.ry & 0x0002) != 0x0002) { create_status_label("Charge Relay Opened", data); flag_index++; }
+    if ((combinedData.canData.st & 0x0004) != 0x0004) { create_status_label("Charge Safety Relay Opened", data); flag_index++; }
 
     // Custom status messages
     if ( (combinedData.canData.cu & 0x0002) != 0x0002 ) { create_status_label("Charge Disabled by Arduino", data); flag_index++; control_index++;} // using feedback from BMS to confirm MPO#1 signal was received
