@@ -607,7 +607,10 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
       //data->on = true; // store state
 
       // Store delay timer for inverter search and for hot water timeout in struct to allow for deletion elsewhere
-      data->timer = lv_timer_create(power_check, data->timeout_ms, data);
+      if ( ! data->timer ) {
+        data->timer = lv_timer_create(power_check, data->timeout_ms, data);
+        Serial.println("DEBUG creating power_check timer as it didn't exist");
+      }
     }
 
     // Button OFF
@@ -653,7 +656,6 @@ void power_check(lv_timer_t * timer) {
       mppt_delayer(true); // as sunrise_detector calls mppt_delayer every 1s there's no need to call with false
       delay(1000);
       digitalWrite(data->relay_pin, HIGH);
-      data->on = true;
       on = true;
     }
 
@@ -681,6 +683,8 @@ void power_check(lv_timer_t * timer) {
     on = true;
   }
 
+  data->on = true;
+
   if (on) {
     lv_timer_reset(timer);
   }
@@ -703,12 +707,14 @@ void power_check(lv_timer_t * timer) {
         strcpy(plural, "");
       }
     }
-    else if ( minute_count == off_interval_min ) {
+    else if ( (minute_count + 1) == off_interval_min ) {
       minute_count = 0;
-      digitalWrite(data->relay_pin, HIGH);
+      time_ms = 0;
+      data->on = false; // to enable inverter startup check
+      lv_event_send(data->button, LV_EVENT_CLICKED, NULL);
     }
 
-    snprintf(label, sizeof(label), "OFF - No load\nON in %d minute%s", (off_interval_min - minute_count), plural);
+    snprintf(label, sizeof(label), "OFF - NO LOAD\nON in %d minute%s", (off_interval_min - minute_count), plural);
     lv_label_set_text(data->label_obj, label);
   }
 
@@ -732,7 +738,7 @@ void thermostat_timer(lv_timer_t * timer) {
   bool on = false;
 
   // Off cycle time checker (2 min set)
-  if ( thermostat_off_ms && thermostat_off_ms + 120000 > millis() ) {
+  if ( thermostat_off_ms && (thermostat_off_ms + 120000) > millis() ) {
     return;
   }
 
@@ -884,9 +890,9 @@ void create_temperature_dropdown(lv_obj_t * parent, user_data_t *data) {
 
 
 
-// TEMP SENSOR FAULT DETECTOR /////////////////////////////////////////////////////////////////
-void fault_label_maker(user_data_t* data) {//lv_timer_t* timer) {
-  //user_data_t* data = (user_data_t*)timer->user_data;
+// TEMP SENSOR FAULT LABEL MAKER /////////////////////////////////////////////////////////////////
+void fault_label_maker(lv_timer_t* timer) {
+  user_data_t* data = (user_data_t*)timer->user_data;
 
   uint8_t faultArr[3];
   uint8_t index = 0;
@@ -933,11 +939,11 @@ void fault_label_maker(user_data_t* data) {//lv_timer_t* timer) {
 // TEMPERATURE UPDATER //////////////////////////////////////////////////////
 void update_temp(lv_timer_t *timer) {
   user_data_t *data = (user_data_t *)timer->user_data;
+  static lv_timer_t* sensor_fault_timer = NULL;
   char buf[20];
   bool disabled = false;
   bool sensor_fault = false;
   bool all_sensors_faulty = false;
-  static uint32_t timer_ms = millis();
 
   // LIVING ROOM CHECKING EACH SENSOR AND USING SINGLE WORKING SENSOR IF NO AVERAGE TEMPERATURE
   if (data->relay_pin == RELAY2) {
@@ -946,15 +952,15 @@ void update_temp(lv_timer_t *timer) {
     }
     else if (combinedData.sensorData.temp1 != 999.0f) {
       snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp1);
-      sensor_fault = true;//lv_timer_create(sensor_fault, 8000, data);
+      sensor_fault = true;
     }
     else if (combinedData.sensorData.temp2 != 999.0f) {
       snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp2);
-      sensor_fault = true;//lv_timer_create(sensor_fault, 8000, data);
+      sensor_fault = true;
     }
     else if (combinedData.sensorData.temp4 != 999.0f) {
       snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp4);
-      sensor_fault = true;//lv_timer_create(sensor_fault, 8000, data);
+      sensor_fault = true;
     }
     // ALL SENSORS FAULTY
     else {
@@ -963,13 +969,16 @@ void update_temp(lv_timer_t *timer) {
       disabled = true;
     }
     // CALL FAULT LABEL MAKER FUNCTION AT INTERVALS 8 OR 5 SEC
-    if ( sensor_fault && timer_ms + 8000 < millis() ) {
-      fault_label_maker(data);
-      timer_ms = millis();
+    if ( sensor_fault ) {
+      sensor_fault_timer = lv_timer_create(fault_label_maker, 8000, data);
+      lv_timer_set_repeat_count(sensor_fault_timer, 4); // 8s * 4 = 40s which matching 4 function call intervals
     }
-    else if ( all_sensors_faulty && timer_ms + 5000 < millis() ) {
-      fault_label_maker(data);
-      timer_ms = millis();
+    else if ( all_sensors_faulty ) {
+      sensor_fault_timer = lv_timer_create(fault_label_maker, 5000, data);
+      lv_timer_set_repeat_count(sensor_fault_timer, 2); // 5s * 2 = 10s which matches 1 function call interval
+    }
+    else {
+      lv_timer_del(sensor_fault_timer);
     }
   }
 
@@ -1301,8 +1310,8 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     if ((combinedData.canData.st & 0x8000) == 0x8000) { create_status_label("Charge Mode Activated over CANBUS", data); flag_index++; }
 
     // Relay status
-    if ((combinedData.canData.ry & 0x0001) != 0x0001) { create_status_label("Discharge Relay Opened", data); flag_index++; }
-    if ((combinedData.canData.ry & 0x0002) != 0x0002) { create_status_label("Charge Relay Opened", data); flag_index++; }
+    if ((combinedData.canData.ry & 0x0001) == 0x0001) { create_status_label("Discharge Relay Opened", data); flag_index++; }
+    if ((combinedData.canData.ry & 0x0002) == 0x0002) { create_status_label("Charge Relay Opened", data); flag_index++; }
     if ((combinedData.canData.ry & 0x0004) == 0x0004) { create_status_label("Charger Safety Relay Opened", data); flag_index++; } // opening with active signal
 
     // Custom status messages
