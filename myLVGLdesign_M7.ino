@@ -1310,12 +1310,12 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     if ((combinedData.canData.st & 0x8000) == 0x8000) { create_status_label("Charge Mode Activated over CANBUS", data); flag_index++; }
 
     // Relay status
-    if ((combinedData.canData.ry & 0x0001) == 0x0001) { create_status_label("Discharge Relay Opened", data); flag_index++; }
-    if ((combinedData.canData.ry & 0x0002) == 0x0002) { create_status_label("Charge Relay Opened", data); flag_index++; }
-    if ((combinedData.canData.ry & 0x0004) == 0x0004) { create_status_label("Charger Safety Relay Opened", data); flag_index++; } // opening with active signal
+    if ((combinedData.canData.ry & 0x0001) == 0x0000) { create_status_label("Discharge Relay Opened", data); flag_index++; }
+    if ((combinedData.canData.ry & 0x0002) == 0x0000) { create_status_label("Charge Relay Opened", data); flag_index++; }
+    if ((combinedData.canData.ry & 0x0004) == 0x0000) { create_status_label("Charger Safety Relay Opened", data); flag_index++; } // opening with active signal
 
     // Custom status messages
-    if ( (combinedData.canData.cu & 0x0002) != 0x0002 ) { create_status_label("Charge Disabled by Arduino", data); flag_index++; control_index++;} // using feedback from BMS to confirm MPO#1 signal was received
+    if ( canMsgData.send_mpo1 = true ) { create_status_label("Charge Disabled by Arduino", data); flag_index++; control_index++;}
     if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Discharge Disabled by Arduino", data); flag_index++; control_index++;} // If Inverter DCL CHECK triggered
     if ( canMsgData.len == 0 ) { create_status_label("No CAN data from BMS", data); flag_index++; control_index++; }
 
