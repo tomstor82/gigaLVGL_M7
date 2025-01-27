@@ -131,7 +131,6 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   uint8_t dcl_limit = 0;
   uint8_t set_temp = 20; // should match value of dropdown default index
   bool on = false; // simplifies code by substituting [lv_obj_has_state(data->button, LV_STATE_CHECKED)]
-  bool previous_mppt_delay = false; // used by power_check to determine if mppt delay had already run once
 } user_data_t;
 
 typedef struct {
@@ -174,7 +173,7 @@ uint32_t inverter_startup_ms = 0;
 uint8_t pwr_demand = 0;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
 const uint16_t inverter_startup_delay_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
-const uint32_t off_interval_ms = 180000; // 3 minute search interval reduces standby consumption from 85Wh to around 12,5Wh -84%
+const uint8_t off_interval_min = 3; // 3 minute off interval reduces standby consumption from 85Wh to around 12,5Wh -84%
 static lv_style_t style; // cascading style for text labels
 
 static uint8_t brightness = 70;
@@ -269,13 +268,14 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 
 
 
-// MPPT DELAYER /////// /////////////////////////////////////////////////////////////////////////
+// MPPT DELAYER ////////////////////////////////////////////////////////////////////////////////
 void mppt_delayer(bool delay) {
   // make sure relay trips for at least 20s to allow inverter to start
   static uint32_t start_time_ms = 0;
   if ( delay && ! start_time_ms ) {
     start_time_ms = millis();
   }
+  // KEEP DELAY ON FOR 20 SECONDS DESPITE SIGNAL SENT
   else if ( start_time_ms + 20 * 1000 > millis() && ! delay ) {
     delay = true;
   }
@@ -596,6 +596,7 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         }
         // If started successfully increment pwr demand
         else pwr_demand++;
+        data->on = true; // this is set for inverter in power_check and used by mppt delay also
       }
 
       // If inverter is ON already, only increment pwr demand
@@ -603,15 +604,15 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
 
       // Send signal to relay
       digitalWrite(data->relay_pin, HIGH);
-      data->on = true; // store state
+      //data->on = true; // store state
 
-      // Create struct delay timer for inverter search and for hot water timeout to be deleted later
+      // Store delay timer for inverter search and for hot water timeout in struct to allow for deletion elsewhere
       data->timer = lv_timer_create(power_check, data->timeout_ms, data);
     }
 
     // Button OFF
     else {
-      button_off(data); // deletes timers, set digital pin LOW and sets on variable to false
+      button_off(data); // deletes timer, set digital pin LOW and sets on variable to false
 
       // inverter needs to manipulate the other buttons
       if ( data->relay_pin == RELAY1 ) {
@@ -625,7 +626,7 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         }
         pwr_demand = 0;
         inverter_prestart_p = 0;
-        data->previous_mppt_delay = false;
+        //data->previous_mppt_delay = false;
       }
 
       // hot water
@@ -636,34 +637,23 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
   }
 }
 
-// INVERTER SEARCH TIMER ///////////////////////////////////////////////////////////////////
-void start_inverter(lv_timer_t* timer) {
-  user_data_t* data = (user_data_t *)timer->user_data;
-
-  // stimulate button with click to start inverter again
-  lv_event_send(data->button, LV_EVENT_CLICKED, NULL);
-
-  // reset previous delay to test again if inverter starts properly
-  data->previous_mppt_delay = false;
-}
-
 
 // POWER CHECK TIMER ///////////////////////////////////////////////////////////////////////
 void power_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
   bool on = false;
-  static lv_timer_t* off_timer = NULL;
 
   // Inverter
   if ( data->relay_pin == RELAY1 ) {
 
-    // Did inverter start properly? If not turn off MPPT until next function call
-    if ( ! data->previous_mppt_delay && inverter_prestart_p >= 0 && (inverter_standby_p + inverter_prestart_p) > combinedData.canData.p ) {
+    // Startup check if inverter started properly? If not call mppt_delayer function
+    if ( ! data->on && inverter_prestart_p >= 0 && (inverter_standby_p + inverter_prestart_p) > combinedData.canData.p ) {
       Serial.println("DEBUG: Inverter didn't start properly\nTurning OFF MPPT\nRestarting Inverter");
       digitalWrite(data->relay_pin, LOW);
-      mppt_delayer(data->previous_mppt_delay);
+      mppt_delayer(true); // as sunrise_detector calls mppt_delayer every 1s there's no need to call with false
       delay(1000);
       digitalWrite(data->relay_pin, HIGH);
+      data->on = true;
       on = true;
     }
 
@@ -692,38 +682,34 @@ void power_check(lv_timer_t * timer) {
   }
 
   if (on) {
-    data->previous_mppt_delay = true;
     lv_timer_reset(timer);
   }
 
-  // Inverter search time start
+  // INVERTER OFF INTERVAL START
   else if ( data->relay_pin == RELAY1 && data->on == true ) {
     static uint32_t time_ms = 0;
     static uint8_t minute_count = 0;
     char plural[2] = "s";
     char label[30];
 
+    // INVERTER OFF AND LABEL UPDATER ALGORITHM
     if ( ! time_ms ) {
       time_ms = millis();
+      digitalWrite(data->relay_pin, LOW);
     }
-    else if ( (time_ms + (1 + minute_count) * 60 * 1000) < millis() && minute_count < 3 ) {
+    else if ( (time_ms + (1 + minute_count) * 60 * 1000) < millis() && minute_count < off_interval_min ) {
       minute_count++;
       if ( minute_count == 2 ) {
         strcpy(plural, "");
       }
     }
-    else if ( minute_count == 3 ) {
+    else if ( minute_count == off_interval_min ) {
       minute_count = 0;
+      digitalWrite(data->relay_pin, HIGH);
     }
 
-    if ( ! off_timer ) {
-      lv_timer_t* off_timer = lv_timer_create(start_inverter, off_interval_ms, data); // global var off_interval_ms
-      lv_timer_set_repeat_count(off_timer, 1); // automatically delete timer after 1 run
-    }
-
-    snprintf(label, sizeof(label), "OFF - No load\nON in %d minute%s", (3 - minute_count), plural);
+    snprintf(label, sizeof(label), "OFF - No load\nON in %d minute%s", (off_interval_min - minute_count), plural);
     lv_label_set_text(data->label_obj, label);
-    digitalWrite(data->relay_pin, LOW);
   }
 
   // Hot water off
@@ -899,8 +885,8 @@ void create_temperature_dropdown(lv_obj_t * parent, user_data_t *data) {
 
 
 // TEMP SENSOR FAULT DETECTOR /////////////////////////////////////////////////////////////////
-void sensor_fault(lv_timer_t* timer) {
-  user_data_t* data = (user_data_t*)timer->user_data;
+void fault_label_maker(user_data_t* data) {//lv_timer_t* timer) {
+  //user_data_t* data = (user_data_t*)timer->user_data;
 
   uint8_t faultArr[3];
   uint8_t index = 0;
@@ -946,67 +932,72 @@ void sensor_fault(lv_timer_t* timer) {
 
 // TEMPERATURE UPDATER //////////////////////////////////////////////////////
 void update_temp(lv_timer_t *timer) {
-    user_data_t *data = (user_data_t *)timer->user_data;
-    char buf[20];
-    bool disabled = false;
+  user_data_t *data = (user_data_t *)timer->user_data;
+  char buf[20];
+  bool disabled = false;
+  bool sensor_fault = false;
+  bool all_sensors_faulty = false;
+  static uint32_t timer_ms = millis();
 
-    // check sensors for living room. If no avg_temp use single working sensor.
-    if (data->relay_pin == RELAY2) {
-        if (combinedData.sensorData.avg_temp != 999.0f) {
-            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp);
-        }
-        else if (combinedData.sensorData.temp1 != 999.0f) {
-            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp1);
-            lv_timer_create(sensor_fault, 8000, data);
-        }
-        else if (combinedData.sensorData.temp2 != 999.0f) {
-            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp2);
-            lv_timer_create(sensor_fault, 8000, data);
-        }
-        else if (combinedData.sensorData.temp4 != 999.0f) {
-            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp4);
-            lv_timer_create(sensor_fault, 8000, data);
-        }
-        else {
-            snprintf(buf, sizeof(buf), "----");
-            lv_timer_t* sensor_fault_timer = lv_timer_create(sensor_fault, 5000, data);
-            lv_timer_set_repeat_count(sensor_fault_timer, 1); // as this function is called by timer don't repeat this timer
-
-            // Button OFF if no sensor data
-            if (data->on == true) {
-                lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
-            }
-            disabled = true;
-        }
+  // LIVING ROOM CHECKING EACH SENSOR AND USING SINGLE WORKING SENSOR IF NO AVERAGE TEMPERATURE
+  if (data->relay_pin == RELAY2) {
+    if (combinedData.sensorData.avg_temp != 999.0f) {
+      snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp);
     }
-    // check single sensor for shower room
+    else if (combinedData.sensorData.temp1 != 999.0f) {
+      snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp1);
+      sensor_fault = true;//lv_timer_create(sensor_fault, 8000, data);
+    }
+    else if (combinedData.sensorData.temp2 != 999.0f) {
+      snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp2);
+      sensor_fault = true;//lv_timer_create(sensor_fault, 8000, data);
+    }
+    else if (combinedData.sensorData.temp4 != 999.0f) {
+      snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp4);
+      sensor_fault = true;//lv_timer_create(sensor_fault, 8000, data);
+    }
+    // ALL SENSORS FAULTY
     else {
-        if (combinedData.sensorData.temp3 != 999.0f) {
-            snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp3);
-        }
-        else {
-          snprintf(buf, sizeof(buf), "#3 --");
-          // Button OFF if no sensor data
-          if (data->on == true) {
-            lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
-          }
-          // Button DISABLED after being turned OFF (no need to test here as state disabled in beginning)
-          //lv_obj_add_state(data->button, LV_STATE_DISABLED);
-          disabled = true;
-        }
+      snprintf(buf, sizeof(buf), "----");
+      all_sensors_faulty = true;
+      disabled = true;
     }
+    // CALL FAULT LABEL MAKER FUNCTION AT INTERVALS 8 OR 5 SEC
+    if ( sensor_fault && timer_ms + 8000 < millis() ) {
+      fault_label_maker(data);
+      timer_ms = millis();
+    }
+    else if ( all_sensors_faulty && timer_ms + 5000 < millis() ) {
+      fault_label_maker(data);
+      timer_ms = millis();
+    }
+  }
 
-    // Add disabled button state
-    if ( disabled && ! lv_obj_has_state(data->button, LV_STATE_DISABLED)) {
-      lv_obj_add_state(data->button, LV_STATE_DISABLED);
+  // CHECK SINGLE SENSOR FOR SHOWER ROOM
+  else {
+    if (combinedData.sensorData.temp3 != 999.0f) {
+      snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp3);
     }
-    // Clear disabled state unless dcl check has already disabled
-    else if ( ! disabled && lv_obj_has_state(data->button, LV_STATE_DISABLED) && ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_clear_state(data->button, LV_STATE_DISABLED);
+    else {
+      snprintf(buf, sizeof(buf), "#3 --");
+      disabled = true;
     }
+  }
 
-    // Update the label text
-    lv_label_set_text(data->label_obj, buf);
+  // TURN OFF BUTTON AND ADD DISABLED STATE
+  if ( disabled && ! lv_obj_has_state(data->button, LV_STATE_DISABLED)) {
+    if (data->on == true) {
+      lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
+    }
+    lv_obj_add_state(data->button, LV_STATE_DISABLED);
+  }
+  // CLEAR DISABLED STATE IF NOT ENFORCED BY DCL_CHECK FUNCTION
+  else if ( ! disabled && lv_obj_has_state(data->button, LV_STATE_DISABLED) && ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+    lv_obj_clear_state(data->button, LV_STATE_DISABLED);
+  }
+
+  // Update the label text
+  lv_label_set_text(data->label_obj, buf);
 }
 
 
