@@ -174,7 +174,7 @@ uint32_t inverter_startup_ms = 0;
 uint8_t pwr_demand = 0;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
 const uint16_t inverter_startup_delay_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
-const uint32_t search_interval_ms = 180000; // 3 minute search interval reduces standby consumption from 85Wh to around 12,5Wh -84%
+const uint32_t off_interval_ms = 180000; // 3 minute search interval reduces standby consumption from 85Wh to around 12,5Wh -84%
 static lv_style_t style; // cascading style for text labels
 
 static uint8_t brightness = 70;
@@ -189,10 +189,11 @@ static String buffer = "";
 //**************************************************************************************
 
 //******************************************************************************************************
-//  BUG#1: CRASH WHEN INVERTER TURNED OFF AFTER SEARCH MODE OR IN SEARCH MODE
+//  BUG#1: IDLE CRASH
+//  BUG#2: CRASH WHEN INVERTER TURNED OFF AFTER SEARCH MODE OR IN SEARCH MODE
 //******************************************************************************************************
 
-// CREATE BUTTON INSTANCE
+// CREATE BUTTONS /// TWO TIMERS CREATED HERE: TEMP UPDATER AND DCL CHECK
 void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms, user_data_t* data) {
 
   // configure relay pins
@@ -270,7 +271,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 
 // MPPT DELAYER /////// /////////////////////////////////////////////////////////////////////////
 void mppt_delayer(bool delay) {
-  // make sure relay trips for at least 20s
+  // make sure relay trips for at least 20s to allow inverter to start
   static uint32_t start_time_ms = 0;
   if ( delay && ! start_time_ms ) {
     start_time_ms = millis();
@@ -295,32 +296,32 @@ void mppt_delayer(bool delay) {
 
 
 
-// SUNRISE CHECK TIMER ////////////////////////////////////////////////////////////////////////
-void mppt_delay(lv_timer_t* timer) {
+// SUNRISE DETECTOR ////////////////////////////////////////////////////////////////////////
+void sunrise_detector(lv_timer_t* timer) {
 
   static bool mppt_delay = false;
   static uint32_t time_ms = 0;
 
-  // determine if solar was previously available and if not start time - checking custom flags for charge enable signal
+  // determine if solar was previously available and if not start time - checking custom flags for sunrise indicated by charge power enable signal
   if ( (combinedData.canData.cu & 0x0001) == 0x0001 && ! time_ms ) {
     time_ms = millis();
     return;
   }
 
   // if solar on then off inside of 10 seconds lets trigger mppt delay continously - works for sunrise/sunset
-  if ( time_ms && ! (combinedData.canData.cu & 0x0001) == 0x0001 ) {
+  else if ( ! (combinedData.canData.cu & 0x0001) == 0x0001 && time_ms ) {
     if ( time_ms + 10000 > millis() ) {
       time_ms = millis();
       mppt_delay = true;
     }
     else {
-      // return to initialise again
+      // return to initialise again after sunset
       time_ms = 0;
       return;
     }
   }
 
-  // when mppt delay timer has expired
+  // when mppt delay timer has expired - currently after 10 minutes
   if ( mppt_delay && time_ms + 10 * 60 * 1000 < millis() ) {
     time_ms = 0;
     mppt_delay = false;
@@ -373,53 +374,59 @@ void button_off(user_data_t* data) {
 void dcl_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
 
-  // IF DCL IS ZERO OR CELL VOLTAGE TOO LOW ONLY LABEL INVERTER
-  if ( combinedData.canData.dcl == 0 || (combinedData.canData.ry & 0x0001 ) != 0x0001 || combinedData.canData.lC <= 2.9 ) {
+  // IF DCL IS ZERO OR CELL VOLTAGE TOO LOW AND NOT ALREADY DISABLED: LABEL INVERTER ONLY AND TURN OFF AND DISABLE ALL BUTTONS
+  if ( combinedData.canData.dcl == 0 || combinedData.canData.lC <= 2.9 && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
     for ( uint8_t i = 0; i < 4; i++ ) {
       if ( userData[i].on ) {
         lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL);
         // CHECK IF BUTTON IS STILL ON
         if ( userData[i].on ) {
+          Serial.println("DEBUG DCL_CHECK: LV_EVENT_SEND failed to turn off button");
           button_off(&userData[i]);
         }
       }
-      // SHOW INVERTER DISABLED LABEL
-      lv_obj_clear_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
-      lv_obj_add_state(userData[i].button, LV_STATE_DISABLED);
-      if ( lv_label_get_text(userData[3].label_obj) != "OFF" ) {
-        lv_label_set_text(userData[3].label_obj, "OFF");
+      // DISABLE ALL BUTTONS IF NOT ALREADY DONE
+      if ( ! lv_obj_has_state(userData[i].button, LV_STATE_DISABLED) ) {
+        lv_obj_add_state(userData[i].button, LV_STATE_DISABLED);
       }
     }
-    
+    // CLEAR HIDDEN FLAG ON INVERTER TO MAKE IT VISIBLE
+    if ( lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_clear_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN);
+    }
+    // SET INVERTER LABEL TEXT
+    if ( lv_label_get_text(userData[3].label_obj) != "OFF" ) {
+      lv_label_set_text(userData[3].label_obj, "OFF");
+    }
   }
-  // INDIVIDUAL BUTTON LIMITS
-  else if ( combinedData.canData.dcl < data->dcl_limit ) {
-    lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
-
-    // IF BUTTON IS ON
+  // INDIVIDUAL BUTTON LIMITS IF NOT ALREADY DISABLED
+  else if ( combinedData.canData.dcl < data->dcl_limit && ! lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
+    if ( lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
+    }
+    // TURN OFF BUTTON
     if ( data->on ) {
       lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
       // CHECK IF BUTTON IS STILL ON
       if ( data->on ) {
+        Serial.println("DEBUG DCL_CHECK: LV_EVENT_SEND failed to turn off button");
         button_off(data);
       }
-      // Update Label for Inverter
-      if ( data->relay_pin == RELAY1 ) {
-        if ( lv_label_get_text(data->label_obj) != "OFF" ) {
-          lv_label_set_text(data->label_obj, "OFF");
-        }
+      // UPDATE INVERTER LABEL
+      if ( data->relay_pin == RELAY1 && lv_label_get_text(data->label_obj) != "OFF" ) {
+        lv_label_set_text(data->label_obj, "OFF");
       }
     }
-    // disable button
-    lv_obj_add_state(data->button, LV_STATE_DISABLED);
+    // DISABLE BUTTON - TEST PERFORMED ALREADY
+     lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }
 
   // IF NO DCL LIMIT HIDE FLAG AND ENABLE BUTTONS
-  else {
-    lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
-    if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
-      lv_obj_clear_state(data->button, LV_STATE_DISABLED);
+  else if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
+    if ( ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
     }
+    lv_obj_clear_state(data->button, LV_STATE_DISABLED);
   }
 }
 
@@ -630,7 +637,7 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
 }
 
 // INVERTER SEARCH TIMER ///////////////////////////////////////////////////////////////////
-void search_mode(lv_timer_t* timer) {
+void start_inverter(lv_timer_t* timer) {
   user_data_t* data = (user_data_t *)timer->user_data;
 
   // stimulate button with click to start inverter again
@@ -645,7 +652,7 @@ void search_mode(lv_timer_t* timer) {
 void power_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
   bool on = false;
-  static lv_timer_t* search_timer = NULL;
+  static lv_timer_t* off_timer = NULL;
 
   // Inverter
   if ( data->relay_pin == RELAY1 ) {
@@ -709,12 +716,12 @@ void power_check(lv_timer_t * timer) {
       minute_count = 0;
     }
 
-    if ( ! search_timer ) {
-      lv_timer_t* search_timer = lv_timer_create(search_mode, search_interval_ms, data); // global var search_interval_ms
-      lv_timer_set_repeat_count(search_timer, 1); // automatically delete timer after 1 run
+    if ( ! off_timer ) {
+      lv_timer_t* off_timer = lv_timer_create(start_inverter, off_interval_ms, data); // global var off_interval_ms
+      lv_timer_set_repeat_count(off_timer, 1); // automatically delete timer after 1 run
     }
 
-    snprintf(label, sizeof(label), "Search Mode\n%d minute%s OFF", (3 - minute_count), plural);
+    snprintf(label, sizeof(label), "OFF - No load\nON in %d minute%s", (3 - minute_count), plural);
     lv_label_set_text(data->label_obj, label);
     digitalWrite(data->relay_pin, LOW);
   }
@@ -1452,7 +1459,7 @@ void setup() {
   lv_obj_add_event_cb(cont, can_msgbox, LV_EVENT_CLICKED, &canMsgBoxData); // add event handler function
 
   // check for sunrise by reading BMS charge enable signal from CANbus and sending MPO#1 signal to trip relay if flapping detected
-  lv_timer_create(mppt_delay, 1000, NULL);
+  lv_timer_create(sunrise_detector, 1000, NULL);
 
   // CCL limit checker for Solar Panel Relay control through CANbus
   lv_timer_create(ccl_check, 1000, NULL);
