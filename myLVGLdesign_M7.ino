@@ -113,12 +113,12 @@ typedef struct {
 } bms_status_data_t;
 
 // Define an enumeration for the different data types.
-typedef enum {
+/*typedef enum {
     CAN_DATA_TYPE_INT,
     CAN_DATA_TYPE_FLOAT,
     CAN_DATA_TYPE_DOUBLE_FLOAT, // 2 decimals
     CAN_DATA_TYPE_BYTE
-} can_data_type_t;
+} can_data_type_t;*/
 
 // define struct for function user-data
 typedef struct { // typedef used to not having to use the struct keyword for declaring struct variable
@@ -146,7 +146,7 @@ typedef struct {
   lv_timer_t* timer;
 } can_msgbox_data_t;
 
-typedef struct {
+/*typedef struct {
   lv_obj_t* label_obj;
   lv_obj_t* label_text;
   const char* label_prefix; // To store label text prefix e.g Voltage
@@ -157,7 +157,17 @@ typedef struct {
     byte* byteData;
   } canDataProperty;
   can_data_type_t canDataType;
-} can_label_t;
+} can_label_t;*/
+
+typedef struct {
+  lv_obj_t *arc = NULL;
+  lv_obj_t *soc_label = NULL;
+  lv_obj_t *volt_label = NULL;
+  lv_obj_t *amps_label = NULL;
+  lv_obj_t *watt_label = NULL;
+  lv_obj_t *ah_label = NULL;
+  lv_timer_t *timer = NULL; // needed ?
+} data_display_t;
 
 //Initialise structures
 static CanMsgData canMsgData;
@@ -165,7 +175,8 @@ static bms_status_data_t bmsStatusData;
 static user_data_t userData[4] = {}; // 4 buttons with user_data
 static clock_data_t clockData;
 static can_msgbox_data_t canMsgBoxData;
-static can_label_t canLabel[6] = {}; // 6 labels so far
+//static can_label_t canLabel[6] = {}; // 6 labels so far
+static data_display_t dataDisplay;
 static CombinedData combinedData;
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size) int/float = 4 bytes
@@ -1092,7 +1103,7 @@ void clock_updater(lv_timer_t* timer) {
 
 
 // REFRESH CAN LABEL DATA //////////////////////////////////////////////////////////////////////
-void refresh_can_data(lv_timer_t* timer) {
+/*void refresh_can_data(lv_timer_t* timer) {
   can_label_t *data = (can_label_t *)timer->user_data;
   char buf[50];
 
@@ -1114,10 +1125,10 @@ void refresh_can_data(lv_timer_t* timer) {
       break;
   }
   lv_label_set_text(data->label_obj, buf);
-}
+}*/
 
 // CREATE CAN LABELS ////////////////////////////////////////////////////////////////////////////////////////////////////
-void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* label_unit, void* canDataProperty, can_data_type_t canDataType, int x_pos, int y_pos, can_label_t* data) {
+/*void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* label_unit, void* canDataProperty, can_data_type_t canDataType, int x_pos, int y_pos, can_label_t* data) {
     if (data) {
         // Update instance with user data
         data->label_obj = lv_label_create(parent);
@@ -1147,7 +1158,7 @@ void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* la
         // create refresh can data timer
         lv_timer_create(refresh_can_data, 200, data);
     }
-}
+}*/
 
 // Function to sign value
 int16_t signValue(uint16_t canValue) {
@@ -1395,6 +1406,73 @@ void create_bms_status_label(lv_obj_t* parent, lv_coord_t y, bms_status_data_t* 
     }
 }
 
+// DATA SCREEN UPDATER ////////////////////////////////////////////////////////////////
+void data_display_updater(lv_timer_t* timer) {
+  data_display_t* data = (data_display_t*)timer->user_data;
+  char battery[4];
+  
+  // battery symbol updater
+  if ( combinedData.canData.soc >= 60 && combinedData.canData.soc < 80 ) {
+    strcpy(battery, LV_SYMBOL_BATTERY_3);
+  }
+  else if ( combinedData.canData.soc >= 40 && combinedData.canData.soc < 60 ) {
+    strcpy(battery, LV_SYMBOL_BATTERY_2);
+  }
+  else if ( combinedData.canData.soc >= 20 && combinedData.canData.soc < 40 ) {
+    strcpy(battery, LV_SYMBOL_BATTERY_1);
+  }
+  else if ( combinedData.canData.soc < 20 ) {
+    strcpy(battery, LV_SYMBOL_BATTERY_EMPTY);
+  }
+  else {
+    strcpy(battery, LV_SYMBOL_BATTERY_FULL);
+  }
+
+  lv_arc_set_value(data->arc, combinedData.canData.soc);
+  lv_label_set_text_fmt(data->soc_label, "%c %d%c", battery, combinedData.canData.soc, "%");
+  lv_label_set_text_fmt(data->volt_label, "%.2f%c", combinedData.canData.instU, "V");
+  lv_label_set_text_fmt(data->amps_label, "%.1f%c", combinedData.canData.instI, "A");
+  lv_label_set_text_fmt(data->watt_label, "%d %c", combinedData.canData.p, "W");
+  lv_label_set_text_fmt(data->ah_label, "%.1f %s", combinedData.canData.ah, "Ah");
+}
+
+// CREATE DATA DISPLAY //////////////////////////////////////////////////////////////////
+void create_data_display(lv_obj_t *parent, data_display_t* data) {
+  
+    data->arc = lv_arc_create(parent);
+    lv_arc_set_rotation(data->arc, 270);
+    lv_arc_set_bg_angles(data->arc, 0, 360);
+    lv_obj_remove_style(data->arc, NULL, LV_PART_KNOB); // remove arc knob
+    lv_obj_clear_flag(data->arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
+    lv_obj_center(data->arc);
+
+    data->soc_label = lv_label_create(parent);
+    //lv_style_set_text_font(&style, &lv_font_montserrat_28); // medium size font
+    lv_obj_add_style(data->soc_label, &style, 0); // add style
+    lv_obj_add_flag(data->soc_label, LV_OBJ_FLAG_CLICKABLE); // make if clickable
+    lv_obj_add_event_cb(data->soc_label, can_msgbox, LV_EVENT_CLICKED, &canMsgBoxData); // add event handler to clicks
+
+    data->volt_label = lv_label_create(parent);
+
+    data->amps_label = lv_label_create(parent);
+
+    data->watt_label = lv_label_create(parent);
+    lv_obj_add_style(data->watt_label, &style, 0); // apply same font for watt as for soc
+
+    data->ah_label = lv_label_create(parent);
+    lv_obj_add_style(data->ah_label, &style, 0); // apply same font for watt as for soc
+
+    lv_obj_align_to(data->soc_label,  data->arc, LV_ALIGN_CENTER,         0, 0);
+    lv_obj_align_to(data->volt_label, data->arc, LV_ALIGN_BOTTOM_LEFT,    0, 0);
+    lv_obj_align_to(data->amps_label, data->arc, LV_ALIGN_BOTTOM_RIGHT,   0, 0);
+    lv_obj_align_to(data->watt_label, data->arc, LV_ALIGN_OUT_LEFT_MID, -20, 0);
+    lv_obj_align_to(data->ah_label,   data->arc, LV_ALIGN_OUT_RIGHT_MID, 20, 0);
+    //lv_obj_set_pos(data->soc_label, 0, 0);
+    
+    // data update timer
+    lv_timer_create(data_display_updater, 200, data);
+
+}
 
 
 
@@ -1459,7 +1537,7 @@ void setup() {
   // Initialise click event for CANdata message box
   canMsgBoxData.parent = cont;
   //lv_obj_add_flag(cont, LV_OBJ_FLAG_CLICKABLE); // add event handling
-  lv_obj_add_event_cb(cont, can_msgbox, LV_EVENT_CLICKED, &canMsgBoxData); // add event handler function
+  //lv_obj_add_event_cb(cont, can_msgbox, LV_EVENT_CLICKED, &canMsgBoxData); // add event handler function
 
   // check for sunrise by reading BMS charge enable signal from CANbus and sending MPO#1 signal to trip relay if flapping detected
   lv_timer_create(sunrise_detector, 1000, NULL);
@@ -1468,13 +1546,16 @@ void setup() {
   lv_timer_create(ccl_check, 1000, NULL);
 
   // Create labels for CAN data
-  create_can_label(cont, "SOC", "%", &(combinedData.canData.soc), CAN_DATA_TYPE_BYTE, 20, 40, &canLabel[0]);
+ /* create_can_label(cont, "SOC", "%", &(combinedData.canData.soc), CAN_DATA_TYPE_BYTE, 20, 40, &canLabel[0]);
   create_can_label(cont, "Current", "A", &(combinedData.canData.instI), CAN_DATA_TYPE_FLOAT, 180, 40, &canLabel[1]);
   create_can_label(cont, "Voltage", "V", &(combinedData.canData.instU), CAN_DATA_TYPE_FLOAT, 20, 70, &canLabel[2]);
   create_can_label(cont, "Power", "W", &(combinedData.canData.p), CAN_DATA_TYPE_INT, 180, 70, &canLabel[3]);
   create_can_label(cont, "Capacity", "Ah", &(combinedData.canData.ah), CAN_DATA_TYPE_FLOAT, 20, 90, &canLabel[4]);
-  create_can_label(cont, "Internal Heatsink Temperature", "\u00B0C", &(combinedData.canData.hs), CAN_DATA_TYPE_BYTE, 20, 130, &canLabel[5]);
-  
+  create_can_label(cont, "Internal Heatsink Temperature", "\u00B0C", &(combinedData.canData.hs), CAN_DATA_TYPE_BYTE, 20, 130, &canLabel[5]);*/
+
+  // Create data display
+  create_data_display(cont, &dataDisplay);
+
   // create right column container object
   cont = lv_obj_create(parent);
   lv_obj_add_event_cb(cont, screen_touch, LV_EVENT_ALL, NULL);
