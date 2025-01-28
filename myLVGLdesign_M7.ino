@@ -191,7 +191,7 @@ static String buffer = "";
 //  BUG#1: IDLE CRASH - INFINITE TIMERS STARTED IN TEMP_UPDATER FIXED
 //  BUG#2: CRASH WHEN INVERTER TURNED OFF AFTER NO LOAD MODE MODE OR IN NO LOAD MODE FIXED
 //  BUG#3: FLASHING HEATER BUTTONS
-//  BUG#4: MPPT_DELAYER CALLED BY SOMETHING DURING STARTUP
+//  BUG#4: INVERTER OFF NO LOAD DOESN'T DO ANYTHING
 //******************************************************************************************************
 
 // CREATE BUTTONS /// TWO TIMERS CREATED HERE: TEMP UPDATER AND DCL CHECK
@@ -274,25 +274,26 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 void mppt_delayer(bool mppt_delay) {
   static uint32_t start_time_ms = 0;
 
-  // START TIMER TO ALLOW MPPT TO REMAIN OFF FOR AT LEAST 20s
+  // THIS FUNCTION IS CONTINIOUSLY CALLED BY SUNRISE_DETECTOR AND WILL SET ARG TO FALSE IF NEEDED
+
+  // IF TRUE ARGUMENT: START TIMER TO ALLOW MPPT TO REMAIN OFF FOR AT LEAST 20s
   if ( mppt_delay && ! start_time_ms ) {
     start_time_ms = millis();
   }
-  // SET DELAY EVEN THOUGH ARGUMENT PASSED IS TO START MPPT AGAIN IF TIMER RUNNING
-  else if ( start_time_ms && ! mppt_delay ) {
+  // IF FALSE AGRUMENT AND TIMER WITHIN PREDETERMINED PERIOD: SET TRUE
+  else if ( ! mppt_delay && start_time_ms && (start_time_ms + 20 * 1000) > millis() ) {
     mppt_delay = true;
   }
-  // AFTER 20 SECONDS OF SENDING DELAY SIGNAL RESET TIMER TO START MPPT AGAIN
-  else if ( (start_time_ms + 20 * 1000) < millis() && mppt_delay ) {
+  // IF TRUE BUT WITH TIMER OR IF FALSE WITH EXPIRED OR WITHOUT TIMER: RESET TIMER FOR NEXT FUNCTION CALL
+  else {
     start_time_ms = 0;
-    mppt_delay = false;
   }
 
   switch ( mppt_delay ) {
     case true:
       canMsgData.msg_data[1] = 0x01;
       canMsgData.send_mpo1 = true; // this triggers send function in loop
-      Serial.println("DEBUG mppt_delayer called");
+      Serial.println("DEBUG mppt_delayer called to disable pv charge");
       break;
     case false:
       canMsgData.msg_data[1] = 0x00;
@@ -349,6 +350,7 @@ void ccl_check(lv_timer_t * timer) {
 
   if ( combinedData.canData.ccl == 0 || combinedData.canData.hC >= 4.15 ) {
     canMsgData.send_mpo1 = true; // trip pv charge relay
+    Serial.println("DEBUG ccl_check sending mpo1 signal");
   }
   else canMsgData.send_mpo1 = false;
 }
@@ -445,23 +447,23 @@ void dcl_check(lv_timer_t * timer) {
 
 // MESSAGE BOX FOR CAN-DATA EVENT HANDLERS AND UPDATE TIMER ////////////////////////////////////
 const char* set_can_msgbox_text() {
-  static char msgbox_text[310]; // Static buffer to retain the value
+  static char msgbox_text[324]; // Static buffer to retain the value
 
   snprintf(msgbox_text, sizeof(msgbox_text),
                  "High Cell          %.2fV            #%d\n"
                  "Low Cell           %.2fV            #%d\n\n"
                  "Charge Limit                      %d A\n"
                  "Discharge Limit                %d A\n\n"
-                 "Solar Charge                       %s\n"
-                 "Discharge                            %s\n\n"
-                 "Battery Cycles                    %d\n"
+                 "Charge                                    %s\n"
+                 "Discharge                               %s\n\n"
+                 "Battery Cycles                     %d\n"
                  "Battery Health                  %d%%",
                  combinedData.canData.hC, combinedData.canData.hCid,
                  combinedData.canData.lC, combinedData.canData.lCid,
                  combinedData.canData.ccl,
                  combinedData.canData.dcl,
-                 (combinedData.canData.cu & 0x0002) == 0x0002 ? "ON" : "OFF", // using MPO#1 feedback from BMS which controls PV relay
-                 (combinedData.canData.ry & 0x0001) == 0x0001 ? "ON" : "OFF", // using BMS relay state
+                 (combinedData.canData.cu & 0x0002) == 0x0002 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using MPO#1 feedback from BMS which controls both charge FETs
+                 (combinedData.canData.ry & 0x0001) == 0x0001 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using BMS relay state
                  combinedData.canData.cc,
                  combinedData.canData.h);
 
@@ -594,7 +596,6 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         if ( inverter_prestart_p >= 0 && (inverter_standby_p + inverter_prestart_p) > combinedData.canData.p && (combinedData.canData.cu & 0x0002) == 0x0002 ) {
           mppt_delayer(true); // as sunrise_detector calls mppt_delayer every 1s there's no need to call with false
           delay(5); // allowing for mppt to loose power
-          Serial.println("DEBUG mppt_delayer called by inverter start");
         }
         lv_label_set_text(data->label_obj, "Inverter ON");
       }
@@ -713,6 +714,7 @@ void power_check(lv_timer_t * timer) {
       time_ms = 0;
       data->on = false; // to enable inverter startup check
       lv_event_send(data->button, LV_EVENT_CLICKED, NULL);
+      return;
     }
 
     snprintf(label, sizeof(label), "OFF - NO LOAD\nON in %d minute%s", (off_interval_min - minute_count), plural);
@@ -1312,11 +1314,11 @@ void refresh_bms_status_data(lv_timer_t * timer) {
 
     // Relay status
     if ((combinedData.canData.ry & 0x0001) == 0x0000) { create_status_label("Discharge Relay Opened", data); flag_index++; }
-    if ((combinedData.canData.ry & 0x0002) == 0x0000) { create_status_label("Charge Relay Opened", data); flag_index++; }
+    // CONTROLLED BY ARDUINO AND DISABLED IN BMS if ((combinedData.canData.ry & 0x0002) == 0x0000) { create_status_label("Charge Relay Opened", data); flag_index++; }
     if ((combinedData.canData.ry & 0x0004) == 0x0000) { create_status_label("Charger Safety Relay Opened", data); flag_index++; } // opening with active signal
 
     // Custom status messages
-    if ( canMsgData.send_mpo1 = true ) { create_status_label("Charge Disabled by Arduino", data); flag_index++; control_index++;}
+    if ( canMsgData.send_mpo1 ) { create_status_label("Charge Disabled by Arduino", data); flag_index++; control_index++;}
     if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Discharge Disabled by Arduino", data); flag_index++; control_index++;} // If Inverter DCL CHECK triggered
     if ( canMsgData.len == 0 ) { create_status_label("No CAN data from BMS", data); flag_index++; control_index++; }
 
