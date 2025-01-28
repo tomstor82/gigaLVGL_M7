@@ -52,6 +52,8 @@ struct CanData {
     float ah = 0;               // Amp hours
     float hC = 0;               // High Cell Voltage in 0,0001V
     float lC = 0;               // Low Cell Voltage in 0,0001V
+    float minC = 0;             // Minimum Allowed cell voltage
+    float maxC = 0;             // Maximum Allowed cell voltage
 
     byte soc = 0;               // State of charge - multiplied by 2
     byte hT = 0;                // Highest cell temperature
@@ -182,10 +184,6 @@ const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 
 // for M4 messages
 static String buffer = "";
-
-//**************************************************************************************
-//  NOTE: IN CCL AND DCL CHECK FUNCTIONS MIN AND MAX CELL VOLTAGES ARE ALSO SET
-//**************************************************************************************
 
 //******************************************************************************************************
 //  BUG#1: IDLE CRASH - INFINITE TIMERS STARTED IN TEMP_UPDATER FIXED
@@ -348,7 +346,7 @@ void sunrise_detector(lv_timer_t* timer) {
 // CCL AND HIGH CELL VOLTAGE CHECK TIMER ////////////////////////////////////////////////////////////////////////////
 void ccl_check(lv_timer_t * timer) {
 
-  if ( combinedData.canData.ccl == 0 || combinedData.canData.hC >= 4.15 ) {
+  if ( combinedData.canData.ccl == 0 || combinedData.canData.hC > (combinedData.canData.maxC - 0.1) ) {
     canMsgData.send_mpo1 = true; // trip pv charge relay
     Serial.println("DEBUG ccl_check sending mpo1 signal");
   }
@@ -386,7 +384,7 @@ void dcl_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
 
   // IF DCL IS ZERO OR CELL VOLTAGE TOO LOW AND NOT ALREADY DISABLED: LABEL INVERTER ONLY AND TURN OFF AND DISABLE ALL BUTTONS
-  if ( combinedData.canData.dcl == 0 || combinedData.canData.lC <= 2.9 && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
+  if ( combinedData.canData.dcl == 0 || combinedData.canData.lC < (combinedData.canData.minC + 0.3) && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
     for ( uint8_t i = 0; i < 4; i++ ) {
       if ( userData[i].on ) {
         lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL);
@@ -1191,6 +1189,8 @@ void sort_can() {
         combinedData.canData.lCid = canMsgData.rxBuf[1];
         combinedData.canData.hs = canMsgData.rxBuf[2];
         combinedData.canData.ct = canMsgData.rxBuf[3];
+        combinedData.canData.minC = canMsgData.rxBuf[4];
+        combinedData.canData.maxC = canMsgData.rxBuf[5];
     }
     combinedData.canData.p = combinedData.canData.avgI * combinedData.canData.instU;
 }
