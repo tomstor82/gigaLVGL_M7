@@ -188,8 +188,10 @@ static String buffer = "";
 //**************************************************************************************
 
 //******************************************************************************************************
-//  BUG#1: IDLE CRASH
-//  BUG#2: CRASH WHEN INVERTER TURNED OFF AFTER SEARCH MODE OR IN SEARCH MODE
+//  BUG#1: IDLE CRASH - INFINITE TIMERS STARTED IN TEMP_UPDATER FIXED
+//  BUG#2: CRASH WHEN INVERTER TURNED OFF AFTER NO LOAD MODE MODE OR IN NO LOAD MODE FIXED
+//  BUG#3: FLASHING HEATER BUTTONS
+//  BUG#4: MPPT_DELAYER CALLED BY SOMETHING DURING STARTUP
 //******************************************************************************************************
 
 // CREATE BUTTONS /// TWO TIMERS CREATED HERE: TEMP UPDATER AND DCL CHECK
@@ -217,7 +219,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   // Disable all buttons by DCL limit
   data->dcl_label = lv_label_create(lv_obj_get_parent(data->button));
   lv_label_set_long_mode(data->dcl_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
-  lv_label_set_text(data->dcl_label, "Battery Voltage too Low                    Please Charge                     "); // spaces to allow a pause
+  lv_label_set_text(data->dcl_label, "Battery Low Power                    Please Charge                     "); // spaces to allow a pause
   lv_obj_set_width(data->dcl_label, 140);
   lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
   lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
@@ -269,24 +271,28 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 
 
 // MPPT DELAYER ////////////////////////////////////////////////////////////////////////////////
-void mppt_delayer(bool delay) {
-  // make sure relay trips for at least 20s to allow inverter to start
+void mppt_delayer(bool mppt_delay) {
   static uint32_t start_time_ms = 0;
-  if ( delay && ! start_time_ms ) {
+
+  // START TIMER TO ALLOW MPPT TO REMAIN OFF FOR AT LEAST 20s
+  if ( mppt_delay && ! start_time_ms ) {
     start_time_ms = millis();
   }
-  // KEEP DELAY ON FOR 20 SECONDS DESPITE SIGNAL SENT
-  else if ( start_time_ms + 20 * 1000 > millis() && ! delay ) {
-    delay = true;
+  // SET DELAY EVEN THOUGH ARGUMENT PASSED IS TO START MPPT AGAIN IF TIMER RUNNING
+  else if ( start_time_ms && ! mppt_delay ) {
+    mppt_delay = true;
   }
-  else {
+  // AFTER 20 SECONDS OF SENDING DELAY SIGNAL RESET TIMER TO START MPPT AGAIN
+  else if ( (start_time_ms + 20 * 1000) < millis() && mppt_delay ) {
     start_time_ms = 0;
+    mppt_delay = false;
   }
 
-  switch ( delay ) {
+  switch ( mppt_delay ) {
     case true:
       canMsgData.msg_data[1] = 0x01;
       canMsgData.send_mpo1 = true; // this triggers send function in loop
+      Serial.println("DEBUG mppt_delayer called");
       break;
     case false:
       canMsgData.msg_data[1] = 0x00;
@@ -302,32 +308,34 @@ void sunrise_detector(lv_timer_t* timer) {
   static bool mppt_delay = false;
   static uint32_t time_ms = 0;
 
-  // determine if solar was previously available and if not start time - checking custom flags for sunrise indicated by charge power enable signal
+  // determine if solar is available by custom flag charge power enable signal and start timing if not started previously
   if ( (combinedData.canData.cu & 0x0001) == 0x0001 && ! time_ms ) {
     time_ms = millis();
     return;
   }
 
-  // if solar on then off inside of 10 seconds lets trigger mppt delay continously - works for sunrise/sunset
-  else if ( ! (combinedData.canData.cu & 0x0001) == 0x0001 && time_ms ) {
+  // if solar signal lost
+  else if ( ! (combinedData.canData.cu & 0x0001) == 0x0001 && time_ms && ! mppt_delay ) {
+
+    // within 10 seconds lets trigger mppt delay as relay flap detected
     if ( time_ms + 10000 > millis() ) {
-      time_ms = millis();
       mppt_delay = true;
     }
+
+    // more than 10s later e.g. sunset
     else {
-      // return to initialise again after sunset
       time_ms = 0;
       return;
     }
   }
 
   // when mppt delay timer has expired - currently after 10 minutes
-  if ( mppt_delay && time_ms + 10 * 60 * 1000 < millis() ) {
+  if ( mppt_delay && (time_ms + 10 * 60 * 1000) < millis() ) {
     time_ms = 0;
     mppt_delay = false;
   }
 
-  // Initiate CAN msg to manipulater PV contactor via BMS MPO#1 signal
+  // Send signal to mppt_delayer function
   mppt_delayer(mppt_delay);
 }
 
@@ -340,7 +348,7 @@ void sunrise_detector(lv_timer_t* timer) {
 void ccl_check(lv_timer_t * timer) {
 
   if ( combinedData.canData.ccl == 0 || combinedData.canData.hC >= 4.15 ) {
-    canMsgData.send_mpo1 = true; // trip charge relay
+    canMsgData.send_mpo1 = true; // trip pv charge relay
   }
   else canMsgData.send_mpo1 = false;
 }
@@ -360,6 +368,7 @@ void button_off(user_data_t* data) {
   if ( data->timer ) {
     lv_timer_del(data->timer);
   }
+  Serial.println("DEBUG button off function ran");
 }
 
 
@@ -443,16 +452,16 @@ const char* set_can_msgbox_text() {
                  "Low Cell           %.2fV            #%d\n\n"
                  "Charge Limit                      %d A\n"
                  "Discharge Limit                %d A\n\n"
-                 "Charge Enabled                 %s\n"
-                 "Discharge Enabled            %s\n\n"
-                 "Battery Cycles                     %d\n"
+                 "Solar Charge                       %s\n"
+                 "Discharge                            %s\n\n"
+                 "Battery Cycles                    %d\n"
                  "Battery Health                  %d%%",
                  combinedData.canData.hC, combinedData.canData.hCid,
                  combinedData.canData.lC, combinedData.canData.lCid,
                  combinedData.canData.ccl,
                  combinedData.canData.dcl,
-                 (combinedData.canData.cu & 0x0002) == 0x0002 ? "YES" : "NO", // using feedback from BMS to confirm MPO#1 signal was received // canMsgData.send_mpo1 ? "NO" : "YES", // Are we sending CAN msg to trip PV Contactor? ** ry 0x8000 can also be used
-                 lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ? "YES" : "NO", // if inverter DCL label is visible discharge is disabled
+                 (combinedData.canData.cu & 0x0002) == 0x0002 ? "ON" : "OFF", // using MPO#1 feedback from BMS which controls PV relay
+                 (combinedData.canData.ry & 0x0001) == 0x0001 ? "ON" : "OFF", // using BMS relay state
                  combinedData.canData.cc,
                  combinedData.canData.h);
 
@@ -579,8 +588,14 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
 
       // Inverter
-      if ( data->relay_pin == RELAY1 ) { // only for inverter for searching
+      if ( data->relay_pin == RELAY1 ) {
         inverter_prestart_p = combinedData.canData.p;
+        // Turn off mppt if pv relat closed but no charge detected to avoid startup issues
+        if ( inverter_prestart_p >= 0 && (inverter_standby_p + inverter_prestart_p) > combinedData.canData.p && (combinedData.canData.cu & 0x0002) == 0x0002 ) {
+          mppt_delayer(true); // as sunrise_detector calls mppt_delayer every 1s there's no need to call with false
+          delay(5); // allowing for mppt to loose power
+          Serial.println("DEBUG mppt_delayer called by inverter start");
+        }
         lv_label_set_text(data->label_obj, "Inverter ON");
       }
 
@@ -596,7 +611,6 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         }
         // If started successfully increment pwr demand
         else pwr_demand++;
-        data->on = true; // this is set for inverter in power_check and used by mppt delay also
       }
 
       // If inverter is ON already, only increment pwr demand
@@ -604,7 +618,7 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
 
       // Send signal to relay
       digitalWrite(data->relay_pin, HIGH);
-      //data->on = true; // store state
+      data->on = true; // store state
 
       // Store delay timer for inverter search and for hot water timeout in struct to allow for deletion elsewhere
       if ( ! data->timer ) {
@@ -629,7 +643,6 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         }
         pwr_demand = 0;
         inverter_prestart_p = 0;
-        //data->previous_mppt_delay = false;
       }
 
       // hot water
@@ -649,18 +662,8 @@ void power_check(lv_timer_t * timer) {
   // Inverter
   if ( data->relay_pin == RELAY1 ) {
 
-    // Startup check if inverter started properly? If not call mppt_delayer function
-    if ( ! data->on && inverter_prestart_p >= 0 && (inverter_standby_p + inverter_prestart_p) > combinedData.canData.p ) {
-      Serial.println("DEBUG: Inverter didn't start properly\nTurning OFF MPPT\nRestarting Inverter");
-      digitalWrite(data->relay_pin, LOW);
-      mppt_delayer(true); // as sunrise_detector calls mppt_delayer every 1s there's no need to call with false
-      delay(1000);
-      digitalWrite(data->relay_pin, HIGH);
-      on = true;
-    }
-
     // Remain ON if charging when SOC above 50%
-    else if ( combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) {
+    if ( combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) {
       on = true;
       Serial.println("DEBUG charging when SOC above 50%");
     }
@@ -682,8 +685,6 @@ void power_check(lv_timer_t * timer) {
   else if ( combinedData.canData.ccl < 10 && combinedData.canData.avgI < 0 ) {
     on = true;
   }
-
-  data->on = true;
 
   if (on) {
     lv_timer_reset(timer);
