@@ -818,7 +818,7 @@ void thermostat_event_handler(lv_event_t * e) {
     // Button ON
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       // check if inverter is on
-      //if ( userData[3].on == false ) {
+      if ( userData[3].on == false ) {
         lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL);
         lv_event_send(userData[3].button, LV_EVENT_RELEASED, NULL);
         lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL);
@@ -827,7 +827,7 @@ void thermostat_event_handler(lv_event_t * e) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
           return; // exit function if inverter is off
         }
-      //}
+      }
       data->on = true;
       data->timer = lv_timer_create(thermostat_timer, 10000, data); // check temp diff every 10s
       pwr_demand++;
@@ -1488,8 +1488,8 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_arc_set_rotation(data->soc_arc, 270);
     lv_arc_set_bg_angles(data->soc_arc, 0, 360);
     lv_obj_remove_style(data->soc_arc, NULL, LV_PART_KNOB); // remove arc knob
-    lv_obj_set_style_arc_width(data->soc_arc, 10, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(data->soc_arc, 20, LV_PART_INDICATOR);
+    //lv_obj_set_style_arc_width(data->soc_arc, 10, LV_PART_MAIN);
+    //lv_obj_set_style_arc_width(data->soc_arc, 20, LV_PART_INDICATOR);
     lv_obj_clear_flag(data->soc_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
     lv_obj_align_to(data->soc_arc, parent, LV_ALIGN_TOP_MID, 0, 30);
 
@@ -1502,7 +1502,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_arc_set_mode(data->watt_chg_arc, LV_ARC_MODE_REVERSE);
     lv_obj_remove_style(data->watt_chg_arc, NULL, LV_PART_KNOB); // remove arc knob
     lv_obj_set_style_arc_color(data->watt_chg_arc, lv_palette_main(LV_PALETTE_GREEN), LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(data->watt_chg_arc, 10, LV_PART_MAIN);
+    //lv_obj_set_style_arc_width(data->watt_chg_arc, 10, LV_PART_MAIN);
     //lv_obj_set_style_arc_width(data->watt_chg_arc, 15, LV_PART_INDICATOR); // CAUSING CRASH ISSUE *******************************************************
     lv_obj_clear_flag(data->watt_chg_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
     lv_obj_align_to(data->watt_chg_arc, parent, LV_ALIGN_CENTER, 8, -40);
@@ -1515,7 +1515,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_arc_set_range(data->watt_dch_arc, 0, 5000); // range set to 5000W to show small loads
     lv_obj_remove_style(data->watt_dch_arc, NULL, LV_PART_KNOB); // remove arc knob
     lv_obj_set_style_arc_color(data->watt_dch_arc, lv_palette_main(LV_PALETTE_RED), LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(data->watt_dch_arc, 10, LV_PART_MAIN);
+    //lv_obj_set_style_arc_width(data->watt_dch_arc, 10, LV_PART_MAIN);
     //lv_obj_set_style_arc_width(data->watt_dch_arc, 15, LV_PART_INDICATOR);
     lv_obj_clear_flag(data->watt_dch_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
     lv_obj_align_to(data->watt_dch_arc, parent, LV_ALIGN_CENTER, -8, -40);
