@@ -98,7 +98,6 @@ struct CanMsgData {
 
   // Constructor to initialize non const values
   CanMsgData() : rxId(0), len(0), msg_data{}, msg_cnt(0) {}
-  
 };
 
 // Type defined structure for bms status messages allowing it to be passed to function
@@ -110,14 +109,6 @@ typedef struct {
     lv_timer_t *timer = NULL;
     uint8_t y = NULL;
 } bms_status_data_t;
-
-// Define an enumeration for the different data types.
-/*typedef enum {
-    CAN_DATA_TYPE_INT,
-    CAN_DATA_TYPE_FLOAT,
-    CAN_DATA_TYPE_DOUBLE_FLOAT, // 2 decimals
-    CAN_DATA_TYPE_BYTE
-} can_data_type_t;*/
 
 // define struct for function user-data
 typedef struct { // typedef used to not having to use the struct keyword for declaring struct variable
@@ -145,19 +136,6 @@ typedef struct {
   lv_timer_t *timer;
 } can_msgbox_data_t;
 
-/*typedef struct {
-  lv_obj_t *label_obj;
-  lv_obj_t *label_text;
-  const char* label_prefix; // To store label text prefix e.g Voltage
-  const char* label_unit; // Label unit e.g V,A or W
-  union {
-    int* intData;
-    float* floatData;
-    byte* byteData;
-  } canDataProperty;
-  can_data_type_t canDataType;
-} can_label_t;*/
-
 typedef struct {
   lv_obj_t *soc_arc = NULL;
   lv_obj_t *watt_chg_arc = NULL;
@@ -178,14 +156,12 @@ static bms_status_data_t bmsStatusData;
 static user_data_t userData[4] = {}; // 4 buttons with user_data
 static clock_data_t clockData;
 static can_msgbox_data_t canMsgBoxData;
-//static can_label_t canLabel[6] = {}; // 6 labels so far
 static data_display_t dataDisplay;
 static CombinedData combinedData;
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size) int/float = 4 bytes
 int16_t inverter_prestart_p = 0; // must be signed
 const uint8_t inverter_standby_p = 75; // takes around 4 minutes to settle down after start
-uint32_t inverter_startup_ms = 0;
 uint8_t pwr_demand = 0;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
 const uint16_t inverter_startup_delay_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
@@ -1109,66 +1085,6 @@ void clock_updater(lv_timer_t *timer) {
 
 
 
-
-
-// REFRESH CAN LABEL DATA //////////////////////////////////////////////////////////////////////
-/*void refresh_can_data(lv_timer_t *timer) {
-  can_label_t *data = (can_label_t *)timer->user_data;
-  char buf[50];
-
-  switch (data->canDataType) {
-    case CAN_DATA_TYPE_INT:
-      snprintf(buf, sizeof(buf), "%s %d %s", data->label_prefix, *(data->canDataProperty.intData), data->label_unit);
-      break;
-    case CAN_DATA_TYPE_FLOAT:
-      snprintf(buf, sizeof(buf), "%s %.1f %s", data->label_prefix, *(data->canDataProperty.floatData), data->label_unit);
-      break;
-    case CAN_DATA_TYPE_DOUBLE_FLOAT:
-      snprintf(buf, sizeof(buf), "%s %.2f %s", data->label_prefix, *(data->canDataProperty.floatData), data->label_unit);
-      break;
-    case CAN_DATA_TYPE_BYTE:
-      snprintf(buf, sizeof(buf), "%s %d %s", data->label_prefix, *(data->canDataProperty.byteData), data->label_unit);
-      break;
-    default:
-      snprintf(buf, sizeof(buf), "%s %s %s", data->label_prefix, "Unknown", data->label_unit && strlen(data->label_unit) > 0 ? data->label_unit : "");
-      break;
-  }
-  lv_label_set_text(data->label_obj, buf);
-}*/
-
-// CREATE CAN LABELS ////////////////////////////////////////////////////////////////////////////////////////////////////
-/*void create_can_label(lv_obj_t *parent, const char* label_prefix, const char* label_unit, void* canDataProperty, can_data_type_t canDataType, int x_pos, int y_pos, can_label_t *data) {
-    if (data) {
-        // Update instance with user data
-        data->label_obj = lv_label_create(parent);
-        data->label_prefix = label_prefix;
-        data->label_unit = label_unit;
-        data->canDataType = canDataType; // Set the type
-
-        // Assign the appropriate pointer type based on canDataType
-        switch (canDataType) {
-            case CAN_DATA_TYPE_INT:
-                data->canDataProperty.intData = (int*)canDataProperty;
-                break;
-            case CAN_DATA_TYPE_FLOAT:
-                data->canDataProperty.floatData = (float*)canDataProperty;
-                break;
-            case CAN_DATA_TYPE_DOUBLE_FLOAT:
-                data->canDataProperty.floatData = (float*)canDataProperty;
-                break;
-            case CAN_DATA_TYPE_BYTE:
-                data->canDataProperty.byteData = (byte*)canDataProperty;
-                break;
-            default:
-                break;
-        }
-
-        lv_obj_set_pos(data->label_obj, x_pos, y_pos);
-        // create refresh can data timer
-        lv_timer_create(refresh_can_data, 200, data);
-    }
-}*/
-
 // Function to sign value
 int16_t signValue(uint16_t canValue) {
     int16_t signedValue = (canValue > 32767) ? canValue - 65536 : canValue;
@@ -1453,20 +1369,20 @@ void data_display_updater(lv_timer_t *timer) {
     strcpy(warning, "");
   }
 
+  // UPDATE CHG & DCH ARC RANGES DYNAMICALLY
+  lv_arc_set_range(data->watt_dch_arc, 0, combinedData.canData.dcl);
+  lv_arc_set_range(data->watt_chg_arc, 0, combinedData.canData.ccl);
+
   // UPDATE ARC VALUES
   lv_arc_set_value(data->soc_arc, combinedData.canData.soc);
 
-  if ( combinedData.canData.p > 0 ) {
-    lv_arc_set_value(data->watt_dch_arc, combinedData.canData.p);
-  }
-  else {
-    lv_arc_set_value(data->watt_dch_arc, 0);
-  }
-  if ( combinedData.canData.p < 0 ) {
-    lv_arc_set_value(data->watt_chg_arc, combinedData.canData.p);
-  }
-  else {
+  if ( combinedData.canData.avgI > 0 ) {
+    lv_arc_set_value(data->watt_dch_arc, combinedData.canData.avgI);
     lv_arc_set_value(data->watt_chg_arc, 0);
+  }
+  else if ( combinedData.canData.avgI < 0 ) {
+    lv_arc_set_value(data->watt_chg_arc, abs(combinedData.canData.avgI));
+    lv_arc_set_value(data->watt_dch_arc, 0);
   }
 
   // UPDATE LABEL TEXT
@@ -1488,8 +1404,8 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_arc_set_rotation(data->soc_arc, 270);
     lv_arc_set_bg_angles(data->soc_arc, 0, 360);
     lv_obj_remove_style(data->soc_arc, NULL, LV_PART_KNOB); // remove arc knob
-    //lv_obj_set_style_arc_width(data->soc_arc, 10, LV_PART_MAIN);
-    //lv_obj_set_style_arc_width(data->soc_arc, 20, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(data->soc_arc, 10, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(data->soc_arc, 20, LV_PART_INDICATOR);
     lv_obj_clear_flag(data->soc_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
     lv_obj_align_to(data->soc_arc, parent, LV_ALIGN_TOP_MID, 0, 30);
 
@@ -1498,12 +1414,11 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_obj_set_size(data->watt_chg_arc, 300, 300);
     lv_arc_set_rotation(data->watt_chg_arc, 45);
     lv_arc_set_bg_angles(data->watt_chg_arc, 0, 45);
-    lv_arc_set_range(data->watt_chg_arc, 0, -2000); // range set to 2000W to show small charges
     lv_arc_set_mode(data->watt_chg_arc, LV_ARC_MODE_REVERSE);
     lv_obj_remove_style(data->watt_chg_arc, NULL, LV_PART_KNOB); // remove arc knob
     lv_obj_set_style_arc_color(data->watt_chg_arc, lv_palette_main(LV_PALETTE_GREEN), LV_PART_INDICATOR);
-    //lv_obj_set_style_arc_width(data->watt_chg_arc, 10, LV_PART_MAIN);
-    //lv_obj_set_style_arc_width(data->watt_chg_arc, 15, LV_PART_INDICATOR); // CAUSING CRASH ISSUE *******************************************************
+    lv_obj_set_style_arc_width(data->watt_chg_arc, 10, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(data->watt_chg_arc, 15, LV_PART_INDICATOR);
     lv_obj_clear_flag(data->watt_chg_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
     lv_obj_align_to(data->watt_chg_arc, parent, LV_ALIGN_CENTER, 8, -40);
 
@@ -1512,11 +1427,10 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_obj_set_size(data->watt_dch_arc, 300, 300);
     lv_arc_set_rotation(data->watt_dch_arc, 90);
     lv_arc_set_bg_angles(data->watt_dch_arc, 0, 45);
-    lv_arc_set_range(data->watt_dch_arc, 0, 5000); // range set to 5000W to show small loads
     lv_obj_remove_style(data->watt_dch_arc, NULL, LV_PART_KNOB); // remove arc knob
     lv_obj_set_style_arc_color(data->watt_dch_arc, lv_palette_main(LV_PALETTE_RED), LV_PART_INDICATOR);
-    //lv_obj_set_style_arc_width(data->watt_dch_arc, 10, LV_PART_MAIN);
-    //lv_obj_set_style_arc_width(data->watt_dch_arc, 15, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(data->watt_dch_arc, 10, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(data->watt_dch_arc, 15, LV_PART_INDICATOR);
     lv_obj_clear_flag(data->watt_dch_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
     lv_obj_align_to(data->watt_dch_arc, parent, LV_ALIGN_CENTER, -8, -40);
 
@@ -1625,14 +1539,6 @@ void setup() {
 
   // CCL limit checker for Solar Panel Relay control through CANbus
   lv_timer_create(ccl_check, 1000, NULL);
-
-  // Create labels for CAN data
- /* create_can_label(cont, "SOC", "%", &(combinedData.canData.soc), CAN_DATA_TYPE_BYTE, 20, 40, &canLabel[0]);
-  create_can_label(cont, "Current", "A", &(combinedData.canData.instI), CAN_DATA_TYPE_FLOAT, 180, 40, &canLabel[1]);
-  create_can_label(cont, "Voltage", "V", &(combinedData.canData.instU), CAN_DATA_TYPE_FLOAT, 20, 70, &canLabel[2]);
-  create_can_label(cont, "Power", "W", &(combinedData.canData.p), CAN_DATA_TYPE_INT, 180, 70, &canLabel[3]);
-  create_can_label(cont, "Capacity", "Ah", &(combinedData.canData.ah), CAN_DATA_TYPE_FLOAT, 20, 90, &canLabel[4]);
-  create_can_label(cont, "Internal Heatsink Temperature", "\u00B0C", &(combinedData.canData.hs), CAN_DATA_TYPE_BYTE, 20, 130, &canLabel[5]);*/
 
   // Create data display
   create_data_display(cont, &dataDisplay);
