@@ -23,7 +23,7 @@ GigaDisplayBacklight backlight;
 //  ID 0x6B2 BYT0+1:LOW_CELL BYT2+3:HIGH_CELL BYT4:HEALTH BYT5+6:CYCLES
 //  ID 0x0A9 BYT0:RELAY_STATE BYT1:CCL BYT2:DCL BYT3+4:PACK_AH BYT5+6:AVG_AMP
 //  ID 0x0BD BYT0+1:CUSTOM_FLAGS BYT2:HI_TMP BYT3:LO_TMP BYT4:CUSTOM_FLAGS BYT5:BMS_STATUS
-//  ID 0x0BE BYT0:HI_CL_ID BYT1:LO_CL_ID BYT2:INT_HEATSINK BYT3:COUNTER
+//  ID 0x0BE BYT0:HI_CL_ID BYT1:LO_CL_ID BYT2:INT_HEATSINK BYT3+4:MIN_CELL BYT5+6:MAX_CELL
 
 // Temp and Humidity data struct from M4
 struct SensorData {
@@ -61,7 +61,6 @@ struct CanData {
     byte ry = 0;                // Relay status
     byte dcl = 0;               // Discharge current limit
     byte ccl = 0;               // Charge current limit
-    byte ct = 0;                // Counter to observe data received
     byte h = 0;                 // Health
     byte hCid = 0;              // High Cell ID
     byte lCid = 0;              // Low Cell ID
@@ -73,7 +72,7 @@ struct CanData {
     byte hs = 0;                // Internal Heatsink
     byte cu = 0;                // BMS custom flag currently used for sending charge power enabled and MPO#1 state (used for tripping chg enabled relay)
     
-    MSGPACK_DEFINE_ARRAY(instU, instI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, ct, st, cc, avgI, hCid, lCid, p, hs, cu);
+    MSGPACK_DEFINE_ARRAY(instU, instI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, st, cc, avgI, hCid, lCid, p, hs, cu);
 };
 
 // Create combined struct with sensor and can data
@@ -104,12 +103,12 @@ struct CanMsgData {
 
 // Type defined structure for bms status messages allowing it to be passed to function
 typedef struct {
-    lv_obj_t* parent;
-    lv_obj_t* title_label;
-    lv_obj_t* button;
-    lv_obj_t* status_label[33];
-    lv_timer_t* timer;
-    uint8_t y;
+    lv_obj_t *parent = NULL;
+    lv_obj_t *title_label = NULL;
+    lv_obj_t *button = NULL;
+    lv_obj_t *status_label[33];
+    lv_timer_t *timer = NULL;
+    uint8_t y = NULL;
 } bms_status_data_t;
 
 // Define an enumeration for the different data types.
@@ -122,11 +121,11 @@ typedef struct {
 
 // define struct for function user-data
 typedef struct { // typedef used to not having to use the struct keyword for declaring struct variable
-  lv_obj_t* button;
-  lv_obj_t* dcl_label;
-  lv_obj_t* label_obj;
-  lv_obj_t* msgbox;
-  lv_timer_t* timer;
+  lv_obj_t *button;
+  lv_obj_t *dcl_label;
+  lv_obj_t *label_obj;
+  lv_obj_t *msgbox;
+  lv_timer_t *timer;
   uint8_t relay_pin = 0;
   uint8_t y_offset = 0;
   unsigned long timeout_ms = 0;
@@ -136,19 +135,19 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
 } user_data_t;
 
 typedef struct {
-  lv_obj_t* clock_label;
+  lv_obj_t *clock_label;
 } clock_data_t;
 
 typedef struct {
-  lv_obj_t* parent;
-  lv_obj_t* label_obj;
-  lv_obj_t* msgbox;
-  lv_timer_t* timer;
+  lv_obj_t *parent;
+  lv_obj_t *label_obj;
+  lv_obj_t *msgbox;
+  lv_timer_t *timer;
 } can_msgbox_data_t;
 
 /*typedef struct {
-  lv_obj_t* label_obj;
-  lv_obj_t* label_text;
+  lv_obj_t *label_obj;
+  lv_obj_t *label_text;
   const char* label_prefix; // To store label text prefix e.g Voltage
   const char* label_unit; // Label unit e.g V,A or W
   union {
@@ -160,13 +159,17 @@ typedef struct {
 } can_label_t;*/
 
 typedef struct {
-  lv_obj_t *arc = NULL;
+  lv_obj_t *soc_arc = NULL;
+  lv_obj_t *watt_chg_arc = NULL;
+  lv_obj_t *watt_dch_arc = NULL;
+  lv_obj_t *battery_label = NULL;
   lv_obj_t *soc_label = NULL;
   lv_obj_t *volt_label = NULL;
   lv_obj_t *amps_label = NULL;
   lv_obj_t *watt_label = NULL;
   lv_obj_t *ah_label = NULL;
-  lv_timer_t *timer = NULL; // needed ?
+  lv_obj_t *charge_symbol = NULL;
+  lv_obj_t *warning_symbol = NULL;
 } data_display_t;
 
 //Initialise structures
@@ -187,7 +190,10 @@ uint8_t pwr_demand = 0;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
 const uint16_t inverter_startup_delay_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
 const uint8_t off_interval_min = 3; // 3 minute off interval reduces standby consumption from 85Wh to around 12,5Wh -84%
-static lv_style_t style; // cascading style for text labels
+
+static lv_style_t underline;
+static lv_style_t large_font;
+static lv_style_t medium_font;
 
 static uint8_t brightness = 70;
 uint32_t previous_touch_ms = 0;
@@ -197,14 +203,13 @@ const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 static String buffer = "";
 
 //******************************************************************************************************
-//  BUG#1: IDLE CRASH - INFINITE TIMERS STARTED IN TEMP_UPDATER FIXED
-//  BUG#2: CRASH WHEN INVERTER TURNED OFF AFTER NO LOAD MODE MODE OR IN NO LOAD MODE FIXED
-//  BUG#3: FLASHING HEATER BUTTONS
-//  BUG#4: INVERTER OFF NO LOAD DOESN'T DO ANYTHING
+//  BUG#1: CRASH WHEN INVERTER TURNED OFF AFTER NO LOAD MODE MODE OR IN NO LOAD MODE FIXED
+//  BUG#2: FLASHING HEATER BUTTONS
+//  BUG#3: WHEN IN OFF NO LOAD MODE AND TURNING ON OTHER BUTTONS, ALL BUTTONS GO OFF
 //******************************************************************************************************
 
 // CREATE BUTTONS /// TWO TIMERS CREATED HERE: TEMP UPDATER AND DCL CHECK
-void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms, user_data_t* data) {
+void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms, user_data_t *data) {
 
   // configure relay pins
   pinMode(relay_pin, OUTPUT);
@@ -313,7 +318,7 @@ void mppt_delayer(bool mppt_delay) {
 
 
 // SUNRISE DETECTOR ////////////////////////////////////////////////////////////////////////
-void sunrise_detector(lv_timer_t* timer) {
+void sunrise_detector(lv_timer_t *timer) {
 
   static bool mppt_delay = false;
   static uint32_t time_ms = 0;
@@ -373,7 +378,7 @@ void ccl_check(lv_timer_t * timer) {
 
 
 // TURN OFF BUTTON FUNCTION //////////////////////////////////////////////////////////////////////////////////////
-void button_off(user_data_t* data) {
+void button_off(user_data_t *data) {
   digitalWrite(data->relay_pin, LOW);
   data->on = false;
   if ( data->timer ) {
@@ -456,7 +461,7 @@ void dcl_check(lv_timer_t * timer) {
 
 // MESSAGE BOX FOR CAN-DATA EVENT HANDLERS AND UPDATE TIMER ////////////////////////////////////
 const char* set_can_msgbox_text() {
-  static char msgbox_text[324]; // Static buffer to retain the value
+  static char msgbox_text[360]; // Static buffer to retain the value
 
   snprintf(msgbox_text, sizeof(msgbox_text),
                  "High Cell          %.2fV            #%d\n"
@@ -466,7 +471,8 @@ const char* set_can_msgbox_text() {
                  "Charge                                    %s\n"
                  "Discharge                               %s\n\n"
                  "Battery Cycles                     %d\n"
-                 "Battery Health                  %d%%",
+                 "Battery Health                  %d%%\n"
+                 "Battery Capacity          %.1f Ah",
                  combinedData.canData.hC, combinedData.canData.hCid,
                  combinedData.canData.lC, combinedData.canData.lCid,
                  combinedData.canData.ccl,
@@ -474,20 +480,21 @@ const char* set_can_msgbox_text() {
                  (combinedData.canData.cu & 0x0002) == 0x0002 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using MPO#1 feedback from BMS which controls both charge FETs
                  (combinedData.canData.ry & 0x0001) == 0x0001 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using BMS relay state
                  combinedData.canData.cc,
-                 combinedData.canData.h);
+                 combinedData.canData.h,
+                 combinedData.canData.ah);
 
   return msgbox_text;
 }
 
-void can_msgbox_update_timer(lv_timer_t* timer) {
-  can_msgbox_data_t* data = (can_msgbox_data_t*)timer->user_data;
-  lv_obj_t* label = lv_msgbox_get_text(data->msgbox); // get msgbox text string object excluding title
+void can_msgbox_update_timer(lv_timer_t *timer) {
+  can_msgbox_data_t *data = (can_msgbox_data_t*)timer->user_data;
+  lv_obj_t *label = lv_msgbox_get_text(data->msgbox); // get msgbox text string object excluding title
   lv_label_set_text(label, set_can_msgbox_text()); // Update the text object in the msgBox
 }
 
-void can_msgbox(lv_event_t* e) {
+void can_msgbox(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
-    can_msgbox_data_t* data = (can_msgbox_data_t*)lv_event_get_user_data(e);
+    can_msgbox_data_t *data = (can_msgbox_data_t*)lv_event_get_user_data(e);
     
     if (code == LV_EVENT_CLICKED) {
         data->msgbox = lv_msgbox_create(data->parent, "     Battery Monitoring Data", set_can_msgbox_text(), NULL, false);
@@ -495,7 +502,7 @@ void can_msgbox(lv_event_t* e) {
         lv_obj_align(data->msgbox, LV_ALIGN_CENTER, 0, 0); // Center the message box on the screen
 
         // Create a full-screen overlay to detect clicks for closing the message box
-        lv_obj_t* overlay = lv_obj_create(lv_scr_act());
+        lv_obj_t *overlay = lv_obj_create(lv_scr_act());
         lv_obj_set_size(overlay, LV_HOR_RES, LV_VER_RES);
         lv_obj_set_style_opa(overlay, LV_OPA_TRANSP, 0); // Transparent overlay
         lv_obj_add_event_cb(overlay, close_can_msgbox_event_handler, LV_EVENT_CLICKED, data);
@@ -508,9 +515,9 @@ void can_msgbox(lv_event_t* e) {
     }
 }
 
-void close_can_msgbox_event_handler(lv_event_t* e) {
+void close_can_msgbox_event_handler(lv_event_t *e) {
   lv_event_code_t code = lv_event_get_code(e);
-  can_msgbox_data_t* data = (can_msgbox_data_t*)lv_event_get_user_data(e);
+  can_msgbox_data_t *data = (can_msgbox_data_t*)lv_event_get_user_data(e);
 
   if ( code == LV_EVENT_CLICKED) {
     lv_timer_del(data->timer); // Delete the timer
@@ -545,14 +552,14 @@ const char* set_sensor_msgbox_text() {
   return msgbox_text;
 }
 
-void sensor_msgbox_update_timer(lv_timer_t* timer) {
-    user_data_t* data = (user_data_t*)timer->user_data;
-    lv_obj_t* label = lv_msgbox_get_text(data->msgbox); // get msgBox text string object excluding title
+void sensor_msgbox_update_timer(lv_timer_t *timer) {
+    user_data_t *data = (user_data_t*)timer->user_data;
+    lv_obj_t *label = lv_msgbox_get_text(data->msgbox); // get msgBox text string object excluding title
     lv_label_set_text(label, set_sensor_msgbox_text()); // Update the text object in the msgBox
 }
 
-void sensor_msgbox(lv_event_t* e) {
-    user_data_t* data = (user_data_t*)lv_event_get_user_data(e);
+void sensor_msgbox(lv_event_t *e) {
+    user_data_t *data = (user_data_t*)lv_event_get_user_data(e);
     lv_event_code_t code = lv_event_get_code(e);
 
     if (code == LV_EVENT_CLICKED) {
@@ -561,7 +568,7 @@ void sensor_msgbox(lv_event_t* e) {
         lv_obj_align(data->msgbox, LV_ALIGN_CENTER, 0, 0); // Center the message box on the screen
 
         // Create a full-screen overlay to detect clicks for closing the message box
-        lv_obj_t* overlay = lv_obj_create(lv_scr_act());
+        lv_obj_t *overlay = lv_obj_create(lv_scr_act());
         lv_obj_set_size(overlay, LV_HOR_RES, LV_VER_RES);
         lv_obj_set_style_opa(overlay, LV_OPA_TRANSP, 0); // Transparent overlay
         lv_obj_add_event_cb(overlay, close_sensor_msgbox_event_handler, LV_EVENT_CLICKED, data);
@@ -571,9 +578,9 @@ void sensor_msgbox(lv_event_t* e) {
     }
 }
 
-void close_sensor_msgbox_event_handler(lv_event_t* e) {
+void close_sensor_msgbox_event_handler(lv_event_t *e) {
   lv_event_code_t code = lv_event_get_code(e);
-  user_data_t* data = (user_data_t*)lv_event_get_user_data(e);
+  user_data_t *data = (user_data_t*)lv_event_get_user_data(e);
 
   if ( code == LV_EVENT_CLICKED) {
     lv_timer_del(data->timer); // Delete the timer
@@ -590,7 +597,7 @@ void close_sensor_msgbox_event_handler(lv_event_t* e) {
 
 
 // HOT WATER AND INVERTER EVENT HANDLER ////////////////////////////////////////////////////
-void hot_water_inverter_event_handler(lv_event_t* e) {
+void hot_water_inverter_event_handler(lv_event_t *e) {
   user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
   lv_event_code_t code = lv_event_get_code(e);
   if(code == LV_EVENT_CLICKED) {
@@ -604,7 +611,7 @@ void hot_water_inverter_event_handler(lv_event_t* e) {
         // Turn off mppt if pv relat closed but no charge detected to avoid startup issues
         if ( inverter_prestart_p >= 0 && (inverter_standby_p + inverter_prestart_p) > combinedData.canData.p && (combinedData.canData.cu & 0x0002) == 0x0002 ) {
           mppt_delayer(true); // as sunrise_detector calls mppt_delayer every 1s there's no need to call with false
-          delay(5); // allowing for mppt to loose power
+          delay(500); // allowing for mppt to loose power
         }
         lv_label_set_text(data->label_obj, "Inverter ON");
       }
@@ -811,7 +818,7 @@ void thermostat_event_handler(lv_event_t * e) {
     // Button ON
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
       // check if inverter is on
-      if ( userData[3].on == false ) {
+      //if ( userData[3].on == false ) {
         lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL);
         lv_event_send(userData[3].button, LV_EVENT_RELEASED, NULL);
         lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL);
@@ -820,13 +827,15 @@ void thermostat_event_handler(lv_event_t * e) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
           return; // exit function if inverter is off
         }
-      }
+      //}
+      data->on = true;
       data->timer = lv_timer_create(thermostat_timer, 10000, data); // check temp diff every 10s
       pwr_demand++;
     }
 
     // Button OFF
     else {
+      data->on = false;
       button_off(data);
       pwr_demand ? pwr_demand-- : NULL;
     }
@@ -903,8 +912,8 @@ void create_temperature_dropdown(lv_obj_t * parent, user_data_t *data) {
 
 
 // TEMP SENSOR FAULT LABEL MAKER /////////////////////////////////////////////////////////////////
-void fault_label_maker(lv_timer_t* timer) {
-  user_data_t* data = (user_data_t*)timer->user_data;
+void fault_label_maker(lv_timer_t *timer) {
+  user_data_t *data = (user_data_t*)timer->user_data;
 
   uint8_t faultArr[3];
   uint8_t index = 0;
@@ -951,7 +960,7 @@ void fault_label_maker(lv_timer_t* timer) {
 // TEMPERATURE UPDATER //////////////////////////////////////////////////////
 void update_temp(lv_timer_t *timer) {
   user_data_t *data = (user_data_t *)timer->user_data;
-  static lv_timer_t* sensor_fault_timer = NULL;
+  static lv_timer_t *sensor_fault_timer = NULL;
   char buf[20];
   bool disabled = false;
   bool sensor_fault = false;
@@ -1043,7 +1052,7 @@ void clear_bms_flag(lv_event_t * e) {
 
 
 // CREATE CLOCK //////////////////////////////////////////////////////////////////////////////
-void create_clock_label(lv_obj_t* parent, clock_data_t* data) {
+void create_clock_label(lv_obj_t *parent, clock_data_t *data) {
 
   data->clock_label = lv_label_create(parent);
   lv_obj_align(data->clock_label, LV_ALIGN_TOP_MID, 0, -5); // x=20 perfect if left aligned
@@ -1052,7 +1061,7 @@ void create_clock_label(lv_obj_t* parent, clock_data_t* data) {
   lv_timer_create(clock_updater, 1000, data);
 }
 
-void clock_updater(lv_timer_t* timer) {
+void clock_updater(lv_timer_t *timer) {
   clock_data_t *data = (clock_data_t *)timer->user_data;
 
   uint16_t h = 0;
@@ -1103,7 +1112,7 @@ void clock_updater(lv_timer_t* timer) {
 
 
 // REFRESH CAN LABEL DATA //////////////////////////////////////////////////////////////////////
-/*void refresh_can_data(lv_timer_t* timer) {
+/*void refresh_can_data(lv_timer_t *timer) {
   can_label_t *data = (can_label_t *)timer->user_data;
   char buf[50];
 
@@ -1128,7 +1137,7 @@ void clock_updater(lv_timer_t* timer) {
 }*/
 
 // CREATE CAN LABELS ////////////////////////////////////////////////////////////////////////////////////////////////////
-/*void create_can_label(lv_obj_t* parent, const char* label_prefix, const char* label_unit, void* canDataProperty, can_data_type_t canDataType, int x_pos, int y_pos, can_label_t* data) {
+/*void create_can_label(lv_obj_t *parent, const char* label_prefix, const char* label_unit, void* canDataProperty, can_data_type_t canDataType, int x_pos, int y_pos, can_label_t *data) {
     if (data) {
         // Update instance with user data
         data->label_obj = lv_label_create(parent);
@@ -1199,9 +1208,8 @@ void sort_can() {
         combinedData.canData.hCid = canMsgData.rxBuf[0];
         combinedData.canData.lCid = canMsgData.rxBuf[1];
         combinedData.canData.hs = canMsgData.rxBuf[2];
-        combinedData.canData.ct = canMsgData.rxBuf[3];
-        combinedData.canData.minC = canMsgData.rxBuf[4];
-        combinedData.canData.maxC = canMsgData.rxBuf[5];
+        combinedData.canData.minC = ((canMsgData.rxBuf[3] << 8) + canMsgData.rxBuf[4]) / 10000.00;
+        combinedData.canData.maxC = ((canMsgData.rxBuf[5] << 8) + canMsgData.rxBuf[6]) / 10000.00;
     }
     combinedData.canData.p = combinedData.canData.avgI * combinedData.canData.instU;
 }
@@ -1232,7 +1240,7 @@ void dim_display() {
 }
 
 // SCREEN TOUCH HANDLER FOR DISPLAY DIMMING ///////////////////////////////////////////
-void screen_touch(lv_event_t* e) {
+void screen_touch(lv_event_t *e) {
   lv_event_code_t code = lv_event_get_code(e);
   if(code == LV_EVENT_CLICKED) {
     previous_touch_ms = millis();
@@ -1247,7 +1255,7 @@ void screen_touch(lv_event_t* e) {
 
 
 // CREATE STATUS LABELS ////////////////////////////////////////////////////////////
-void create_status_label(const char* label_text, bms_status_data_t* data, bool finished = false) {
+void create_status_label(const char* label_text, bms_status_data_t *data, bool finished = false) {
 
   static uint8_t i = 0; // static variable to preserve value between function calls
 
@@ -1267,7 +1275,7 @@ void create_status_label(const char* label_text, bms_status_data_t* data, bool f
     }
     // add text to label index and allign vertically by index
     lv_label_set_text(data->status_label[i], label_text);
-    lv_obj_align_to(data->status_label[i], data->title_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 10 + i * 20); // 10 was 15 before underline added
+    lv_obj_align_to(data->status_label[i], data->title_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 15 + i * 20); // 10 was 15 before underline added
 
     // move to next index for next function call
     i++;
@@ -1326,7 +1334,7 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     // Relay status
     if ((combinedData.canData.ry & 0x0001) == 0x0000) { create_status_label("Discharge Relay Opened", data); flag_index++; }
     // CONTROLLED BY ARDUINO AND DISABLED IN BMS if ((combinedData.canData.ry & 0x0002) == 0x0000) { create_status_label("Charge Relay Opened", data); flag_index++; }
-    if ((combinedData.canData.ry & 0x0004) == 0x0000) { create_status_label("Charger Safety Relay Opened", data); flag_index++; } // opening with active signal
+    if ((combinedData.canData.ry & 0x0004) == 0x0004) { create_status_label("Charger Safety Relay Opened", data); flag_index++; } // opening with active signal
 
     // Custom status messages
     if ( canMsgData.send_mpo1 ) { create_status_label("Charge Disabled by Arduino", data); flag_index++; control_index++;}
@@ -1380,98 +1388,174 @@ void refresh_bms_status_data(lv_timer_t * timer) {
 }
 
 // CREATE BMS STATUS LABELS //////////////////////////////////////////////////////
-void create_bms_status_label(lv_obj_t* parent, lv_coord_t y, bms_status_data_t* data) {
-    if (data) {
-        data->parent = parent;
-        data->y = y;
+void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *data) {
+  if (data) {
+    data->parent = parent;
+    data->y = y;
 
-        // Create title label with underline style (hidden initially)
-        data->title_label = lv_label_create(parent);
-        lv_style_set_text_decor(&style, LV_TEXT_DECOR_UNDERLINE); // set underline style
-        lv_obj_add_style(data->title_label, &style, 0); // add style
-        lv_label_set_text(data->title_label, "BMS Status Messages");
-        lv_obj_align(data->title_label, LV_ALIGN_TOP_MID, 0, y);
-        lv_obj_add_flag(data->title_label, LV_OBJ_FLAG_HIDDEN);
+    // Create title label with underline style (hidden initially)
+    data->title_label = lv_label_create(parent);
+      lv_style_init(&underline);
+      lv_style_set_text_decor(&underline, LV_TEXT_DECOR_UNDERLINE); // set underline style
+      lv_obj_add_style(data->title_label, &underline, 0);
+      lv_label_set_text(data->title_label, "BMS Status Messages");
+      lv_obj_align(data->title_label, LV_ALIGN_TOP_MID, 0, y);
+      lv_obj_add_flag(data->title_label, LV_OBJ_FLAG_HIDDEN);
 
-        // Initialize button (hidden initially)
-        data->button = lv_btn_create(parent);
-        lv_obj_t* btn_label = lv_label_create(data->button);
-        lv_label_set_text(btn_label, "Clear BMS Flags");
-        lv_obj_add_event_cb(data->button, clear_bms_flag, LV_EVENT_CLICKED, NULL);
-        lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
+    // Initialize button (hidden initially)
+    data->button = lv_btn_create(parent);
+      lv_obj_t *btn_label = lv_label_create(data->button);
+      lv_label_set_text(btn_label, "Clear BMS Flags");
+      lv_obj_add_event_cb(data->button, clear_bms_flag, LV_EVENT_CLICKED, NULL);
+      lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
 
-        // Refresh status labels every second
-        data->timer = lv_timer_create(refresh_bms_status_data, 1000, data); // stored in struct to allow msgbox to pause timer inhibiting labels from showing on msgbox
-
-    }
+    // Refresh status labels every second
+    data->timer = lv_timer_create(refresh_bms_status_data, 1000, data); // stored in struct to allow msgbox to pause timer inhibiting labels from showing on msgbox
+  }
 }
 
 // DATA SCREEN UPDATER ////////////////////////////////////////////////////////////////
-void data_display_updater(lv_timer_t* timer) {
-  data_display_t* data = (data_display_t*)timer->user_data;
+void data_display_updater(lv_timer_t *timer) {
+  data_display_t *data = (data_display_t*)timer->user_data;
   char battery[4];
+  char charge[4];
+  char warning[4];
   
-  // battery symbol updater
-  if ( combinedData.canData.soc >= 60 && combinedData.canData.soc < 80 ) {
-    strcpy(battery, LV_SYMBOL_BATTERY_3);
-  }
-  else if ( combinedData.canData.soc >= 40 && combinedData.canData.soc < 60 ) {
-    strcpy(battery, LV_SYMBOL_BATTERY_2);
-  }
-  else if ( combinedData.canData.soc >= 20 && combinedData.canData.soc < 40 ) {
-    strcpy(battery, LV_SYMBOL_BATTERY_1);
-  }
-  else if ( combinedData.canData.soc < 20 ) {
-    strcpy(battery, LV_SYMBOL_BATTERY_EMPTY);
-  }
-  else {
+  // BATTERY SYMBOL UPDATER
+  if ( combinedData.canData.soc >= 80 ) {
     strcpy(battery, LV_SYMBOL_BATTERY_FULL);
   }
+  else if ( combinedData.canData.soc >= 60 ) {
+    strcpy(battery, LV_SYMBOL_BATTERY_3);
+  }
+  else if ( combinedData.canData.soc >= 40 ) {
+    strcpy(battery, LV_SYMBOL_BATTERY_2);
+  }
+  else if ( combinedData.canData.soc >= 20 ) {
+    strcpy(battery, LV_SYMBOL_BATTERY_1);
+  }
+  else {
+    strcpy(battery, LV_SYMBOL_BATTERY_EMPTY);
+  }
 
-  lv_arc_set_value(data->arc, combinedData.canData.soc);
-  lv_label_set_text_fmt(data->soc_label, "%c %d%c", battery, combinedData.canData.soc, "%");
-  lv_label_set_text_fmt(data->volt_label, "%.2f%c", combinedData.canData.instU, "V");
-  lv_label_set_text_fmt(data->amps_label, "%.1f%c", combinedData.canData.instI, "A");
-  lv_label_set_text_fmt(data->watt_label, "%d %c", combinedData.canData.p, "W");
-  lv_label_set_text_fmt(data->ah_label, "%.1f %s", combinedData.canData.ah, "Ah");
+  // CHARGE SYMBOL UPDATER
+  if ( (combinedData.canData.cu & 0x0001) == 0x0001 ) {
+    strcpy(charge, LV_SYMBOL_CHARGE);
+  }
+  else {
+    strcpy(charge, "");
+  }
+
+  if ( combinedData.canData.soc < 10 ) {
+    strcpy(warning, LV_SYMBOL_WARNING);
+  }
+  else {
+    strcpy(warning, "");
+  }
+
+  // UPDATE ARC VALUES
+  lv_arc_set_value(data->soc_arc, combinedData.canData.soc);
+
+  if ( combinedData.canData.p > 0 ) {
+    lv_arc_set_value(data->watt_dch_arc, combinedData.canData.p);
+  }
+  else {
+    lv_arc_set_value(data->watt_dch_arc, 0);
+  }
+  if ( combinedData.canData.p < 0 ) {
+    lv_arc_set_value(data->watt_chg_arc, combinedData.canData.p);
+  }
+  else {
+    lv_arc_set_value(data->watt_chg_arc, 0);
+  }
+
+  // UPDATE LABEL TEXT
+  lv_label_set_text_fmt(data->battery_label, "%s Battery", battery);
+  lv_label_set_text_fmt(data->charge_symbol, "%s", charge);
+  lv_label_set_text_fmt(data->warning_symbol, "%s", warning);
+  lv_label_set_text_fmt(data->soc_label, "%d%%", combinedData.canData.soc);
+  lv_label_set_text_fmt(data->volt_label, "%.2fV", combinedData.canData.instU);
+  lv_label_set_text_fmt(data->amps_label, "%.1fA", combinedData.canData.instI);
+  lv_label_set_text_fmt(data->watt_label, "%dW", combinedData.canData.p);
 }
 
 // CREATE DATA DISPLAY //////////////////////////////////////////////////////////////////
-void create_data_display(lv_obj_t *parent, data_display_t* data) {
-  
-    data->arc = lv_arc_create(parent);
-    lv_arc_set_rotation(data->arc, 270);
-    lv_arc_set_bg_angles(data->arc, 0, 360);
-    lv_obj_remove_style(data->arc, NULL, LV_PART_KNOB); // remove arc knob
-    lv_obj_clear_flag(data->arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
-    lv_obj_center(data->arc);
+void create_data_display(lv_obj_t *parent, data_display_t *data) {
 
-    data->soc_label = lv_label_create(parent);
-    //lv_style_set_text_font(&style, &lv_font_montserrat_28); // medium size font
-    lv_obj_add_style(data->soc_label, &style, 0); // add style
-    lv_obj_add_flag(data->soc_label, LV_OBJ_FLAG_CLICKABLE); // make if clickable
+  // CREATE 360 ARC FOR SOC READING
+  data->soc_arc = lv_arc_create(parent);
+    lv_obj_set_size(data->soc_arc, 200, 200);
+    lv_arc_set_rotation(data->soc_arc, 270);
+    lv_arc_set_bg_angles(data->soc_arc, 0, 360);
+    lv_obj_remove_style(data->soc_arc, NULL, LV_PART_KNOB); // remove arc knob
+    lv_obj_set_style_arc_width(data->soc_arc, 10, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(data->soc_arc, 20, LV_PART_INDICATOR);
+    lv_obj_clear_flag(data->soc_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
+    lv_obj_align_to(data->soc_arc, parent, LV_ALIGN_TOP_MID, 0, 30);
+
+  // CREATE ARC FOR CHG WATT READING
+  data->watt_chg_arc = lv_arc_create(parent);
+    lv_obj_set_size(data->watt_chg_arc, 300, 300);
+    lv_arc_set_rotation(data->watt_chg_arc, 45);
+    lv_arc_set_bg_angles(data->watt_chg_arc, 0, 45);
+    lv_arc_set_range(data->watt_chg_arc, 0, -2000); // range set to 2000W to show small charges
+    lv_arc_set_mode(data->watt_chg_arc, LV_ARC_MODE_REVERSE);
+    lv_obj_remove_style(data->watt_chg_arc, NULL, LV_PART_KNOB); // remove arc knob
+    lv_obj_set_style_arc_color(data->watt_chg_arc, lv_palette_main(LV_PALETTE_GREEN), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(data->watt_chg_arc, 10, LV_PART_MAIN);
+    //lv_obj_set_style_arc_width(data->watt_chg_arc, 15, LV_PART_INDICATOR); // CAUSING CRASH ISSUE *******************************************************
+    lv_obj_clear_flag(data->watt_chg_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
+    lv_obj_align_to(data->watt_chg_arc, parent, LV_ALIGN_CENTER, 8, -40);
+
+  // CREATE ARC FOR DCH WATT READING
+  data->watt_dch_arc = lv_arc_create(parent);
+    lv_obj_set_size(data->watt_dch_arc, 300, 300);
+    lv_arc_set_rotation(data->watt_dch_arc, 90);
+    lv_arc_set_bg_angles(data->watt_dch_arc, 0, 45);
+    lv_arc_set_range(data->watt_dch_arc, 0, 5000); // range set to 5000W to show small loads
+    lv_obj_remove_style(data->watt_dch_arc, NULL, LV_PART_KNOB); // remove arc knob
+    lv_obj_set_style_arc_color(data->watt_dch_arc, lv_palette_main(LV_PALETTE_RED), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(data->watt_dch_arc, 10, LV_PART_MAIN);
+    //lv_obj_set_style_arc_width(data->watt_dch_arc, 15, LV_PART_INDICATOR);
+    lv_obj_clear_flag(data->watt_dch_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
+    lv_obj_align_to(data->watt_dch_arc, parent, LV_ALIGN_CENTER, -8, -40);
+
+  // CREATE LABELS AND ASSOCIATED STYLES
+  data->battery_label = lv_label_create(parent);
+
+  data->soc_label = lv_label_create(parent);
+    lv_style_init(&large_font);
+    lv_style_set_text_font(&large_font, &lv_font_montserrat_34);
+    lv_obj_add_style(data->soc_label, &large_font, 0);
+    lv_obj_add_flag(data->soc_label, LV_OBJ_FLAG_CLICKABLE); // make it clickable to open msg_box
     lv_obj_add_event_cb(data->soc_label, can_msgbox, LV_EVENT_CLICKED, &canMsgBoxData); // add event handler to clicks
 
-    data->volt_label = lv_label_create(parent);
+  data->volt_label = lv_label_create(parent);
 
-    data->amps_label = lv_label_create(parent);
+  data->amps_label = lv_label_create(parent);
 
-    data->watt_label = lv_label_create(parent);
-    lv_obj_add_style(data->watt_label, &style, 0); // apply same font for watt as for soc
+  data->watt_label = lv_label_create(parent);
+    lv_style_init(&medium_font);
+    lv_style_set_text_font(&medium_font, &lv_font_montserrat_20);
+    lv_obj_add_style(data->watt_label, &medium_font, 0);
 
-    data->ah_label = lv_label_create(parent);
-    lv_obj_add_style(data->ah_label, &style, 0); // apply same font for watt as for soc
+  data->charge_symbol = lv_label_create(parent);
+    lv_obj_add_style(data->charge_symbol, &large_font, 0);
 
-    lv_obj_align_to(data->soc_label,  data->arc, LV_ALIGN_CENTER,         0, 0);
-    lv_obj_align_to(data->volt_label, data->arc, LV_ALIGN_BOTTOM_LEFT,    0, 0);
-    lv_obj_align_to(data->amps_label, data->arc, LV_ALIGN_BOTTOM_RIGHT,   0, 0);
-    lv_obj_align_to(data->watt_label, data->arc, LV_ALIGN_OUT_LEFT_MID, -20, 0);
-    lv_obj_align_to(data->ah_label,   data->arc, LV_ALIGN_OUT_RIGHT_MID, 20, 0);
-    //lv_obj_set_pos(data->soc_label, 0, 0);
+  data->warning_symbol = lv_label_create(parent);
+    lv_obj_add_style(data->warning_symbol, &large_font, 0);
+
+  // ALLIGN LABELS
+  lv_obj_align_to(data->battery_label,  data->soc_arc, LV_ALIGN_CENTER,       -20, -44);
+  lv_obj_align_to(data->soc_label,      data->soc_arc, LV_ALIGN_CENTER,         7,   0);
+  lv_obj_align_to(data->volt_label,     data->soc_arc, LV_ALIGN_LEFT_MID,      50,  44);
+  lv_obj_align_to(data->amps_label,     data->soc_arc, LV_ALIGN_RIGHT_MID,    -50,  44);
+  lv_obj_align_to(data->charge_symbol,  data->soc_arc, LV_ALIGN_OUT_LEFT_MID,  15,   0);
+  lv_obj_align_to(data->warning_symbol, data->soc_arc, LV_ALIGN_OUT_RIGHT_MID,-15,   0);
+  lv_obj_align_to(data->watt_label,     data->soc_arc, LV_ALIGN_OUT_BOTTOM_MID, 7,  20);
     
-    // data update timer
-    lv_timer_create(data_display_updater, 200, data);
-
+  // CREATE LABEL UPDATE TIMER
+  lv_timer_create(data_display_updater, 200, data);
 }
 
 
@@ -1507,9 +1591,6 @@ void setup() {
   // Set display brightness
   backlight.set(brightness);
 
-  // Initialise the style variable
-  lv_style_init(&style);
-
   // Create two columns on active screen, grid 2x1
   static lv_coord_t col_dsc[] = {370, 370, LV_GRID_TEMPLATE_LAST};
   static lv_coord_t row_dsc[] = {430, 430, LV_GRID_TEMPLATE_LAST};
@@ -1520,7 +1601,7 @@ void setup() {
   lv_obj_center(parent);
 
   // initialise container object
-  lv_obj_t* cont;
+  lv_obj_t *cont;
 
   // create left column container object
   cont = lv_obj_create(parent);
@@ -1532,7 +1613,7 @@ void setup() {
   create_clock_label(cont, &clockData);
 
   // Display bms messages arg2: y_pos
-  create_bms_status_label(cont, 175, &bmsStatusData);
+  create_bms_status_label(cont, 320, &bmsStatusData);
 
   // Initialise click event for CANdata message box
   canMsgBoxData.parent = cont;
