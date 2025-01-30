@@ -179,7 +179,7 @@ const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 static String buffer = "";
 
 //******************************************************************************************************
-//  BUG#1: CRASH WHEN INVERTER TURNED OFF AFTER NO LOAD MODE MODE OR IN NO LOAD MODE FIXED
+//  BUG#1: CRASH WHEN INVERTER TURNED OFF OCCASIONALLY
 //  BUG#2: FLASHING HEATER BUTTONS
 //  BUG#3: WHEN IN OFF NO LOAD MODE AND TURNING ON OTHER BUTTONS, ALL BUTTONS GO OFF
 //******************************************************************************************************
@@ -187,74 +187,70 @@ static String buffer = "";
 // CREATE BUTTONS /// TWO TIMERS CREATED HERE: TEMP UPDATER AND DCL CHECK
 void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms, user_data_t *data) {
 
-  // configure relay pins
+  // INITIALISE RELAY PINS
   pinMode(relay_pin, OUTPUT);
   digitalWrite(relay_pin, LOW); // initialise pin LOW
 
-  // Update struct with received arguments
+  // INITIALISE STRUCT DATA
   data->relay_pin = relay_pin;
   data->y_offset = y_offset;
   data->dcl_limit = dcl_limit;
   data->timeout_ms = timeout_ms;
 
-  // create button object and add to struct to be able to clear later
+  // CREATE BUTTON
   data->button = lv_btn_create(parent);
+    lv_obj_set_pos(data->button, 10, y_offset);
+    lv_obj_t *label = lv_label_create(data->button);
+    lv_label_set_text(label, label_text);
+    lv_obj_center(label);
+    //lv_obj_add_flag(data->button, LV_OBJ_FLAG_CHECKABLE);
 
-  lv_obj_set_pos(data->button, 10, y_offset);
-  lv_obj_t *label = lv_label_create(data->button);
-  lv_label_set_text(label, label_text);
-  lv_obj_center(label);
-  lv_obj_add_flag(data->button, LV_OBJ_FLAG_CHECKABLE);
-
-  // Disable all buttons by DCL limit
+  // ADD DCL TIMER AND LABEL
   data->dcl_label = lv_label_create(lv_obj_get_parent(data->button));
-  lv_label_set_long_mode(data->dcl_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
-  lv_label_set_text(data->dcl_label, "Battery Low Power                    Please Charge                     "); // spaces to allow a pause
-  lv_obj_set_width(data->dcl_label, 140);
-  lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
-  lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
-  lv_timer_create(dcl_check, 1000, data); // check every second
+    lv_label_set_long_mode(data->dcl_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_label_set_text(data->dcl_label, "Battery Low Power                    Please Charge                     ");
+    lv_obj_set_width(data->dcl_label, 140);
+    lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
+    lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
+  
+  // CREATE TIMER TO CHECK BMS DCL LIMIT FROM CANBUS
+  lv_timer_create(dcl_check, 1000, data);
 
-  // create temperature dropdown and dynamic temperature labels for thermostat buttons
+  // ADD EVENT HANDLER, LABELS AND UPDATE TIMER TO THERMOSTATIC HEATER BUTTONS
   if ( ! timeout_ms ) {
-    // create label and update the user data member for access within timer to allow only to update text not object
+    lv_obj_add_event_cb(data->button, thermostat_event_handler, LV_EVENT_ALL, data);
     data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
+      lv_obj_set_width(data->label_obj, 80);
+      lv_obj_set_pos(data->label_obj, 160, data->y_offset + 13);
+      lv_obj_set_style_text_align(data->label_obj, LV_TEXT_ALIGN_CENTER, 0);
 
-    // Set temp label width
-    lv_obj_set_width(data->label_obj, 80);
-    lv_obj_set_pos(data->label_obj, 160, data->y_offset + 13);
+    // CREATE TIMER TO UPDATE TEMPERATURE FROM M4-CORE MANAGED DHT22 SENSORS
+    lv_timer_create(update_temp, 10000, data);
 
-    // Align the text in the center
-    lv_obj_set_style_text_align(data->label_obj, LV_TEXT_ALIGN_CENTER, 0);
-
-    // Create timer for updating temperature labels
-    //lv_timer_create(update_temp, 10000, data);
-
-    // Set initial refresh symbol
+    // INITIALISE LABEL TEXT
     lv_label_set_text(data->label_obj, LV_SYMBOL_REFRESH);
 
-    // Make label clickable and add event handler for showing sensor message box
+    // ADD EVENT HANDLER TO TEMPERATURE INDICATOR
     lv_obj_add_flag(data->label_obj, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(data->label_obj, sensor_msgbox, LV_EVENT_CLICKED, data);
 
-    // Create Drop down for temperature selection
+    // CREATE TEMPERATURE SELECTION DROP DOWN MENU
     create_temperature_dropdown(parent, data);
   }
      
-  // Hot Water and Inverter Event Handler
-  if ( timeout_ms ) { // hot water and inverter
+  // ADD EVENT HANDLER FOR HOT WATER AND INVERTER BUTTONS
+  else {
     lv_obj_add_event_cb(data->button, hot_water_inverter_event_handler, LV_EVENT_ALL, data);
-  }
-  else { // heaters
-    lv_obj_add_event_cb(data->button, thermostat_event_handler, LV_EVENT_ALL, data);
-  }
-  // creating inverter status label
-  if ( relay_pin == RELAY1 ) {
-    data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
-    lv_obj_set_width(data->label_obj, 120);
-    lv_obj_align_to(data->label_obj, data->button, LV_ALIGN_OUT_RIGHT_MID, 80, 0);
-    // initialise label text
-    lv_label_set_text(data->label_obj, "OFF");
+
+    // INVERTER LABEL
+    if ( relay_pin == RELAY1 ) {
+      data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
+      lv_obj_set_width(data->label_obj, 120);
+      lv_obj_align_to(data->label_obj, data->button, LV_ALIGN_OUT_RIGHT_MID, 80, 0);
+
+      // INITIALISE LABEL TEXT
+      lv_label_set_text(data->label_obj, "OFF");
+    }
   }
 }
 
