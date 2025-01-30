@@ -228,7 +228,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     lv_obj_set_style_text_align(data->label_obj, LV_TEXT_ALIGN_CENTER, 0);
 
     // Create timer for updating temperature labels
-    lv_timer_create(update_temp, 10000, data);
+    //lv_timer_create(update_temp, 10000, data);
 
     // Set initial refresh symbol
     lv_label_set_text(data->label_obj, LV_SYMBOL_REFRESH);
@@ -301,8 +301,15 @@ void sunrise_detector(lv_timer_t *timer) {
 
   // determine if solar is available by custom flag charge power enable signal and start timing if not started previously
   if ( (combinedData.canData.cu & 0x0001) == 0x0001 && ! time_ms ) {
-    time_ms = millis();
-    return;
+    // if mppt using excessive battery enegry without charging disable it
+    if ( combinedData.canData.p > 30 ) {
+      mppt_delay = true;
+    }
+    // start time and return for another go
+    else {
+      time_ms = millis();
+      return;
+    }
   }
 
   // if solar signal lost
@@ -1380,7 +1387,7 @@ void data_display_updater(lv_timer_t *timer) {
     lv_arc_set_value(data->watt_dch_arc, combinedData.canData.avgI);
     lv_arc_set_value(data->watt_chg_arc, 0);
   }
-  else if ( combinedData.canData.avgI < 0 ) {
+  else {
     lv_arc_set_value(data->watt_chg_arc, abs(combinedData.canData.avgI));
     lv_arc_set_value(data->watt_dch_arc, 0);
   }
@@ -1412,27 +1419,27 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
   // CREATE ARC FOR CHG WATT READING
   data->watt_chg_arc = lv_arc_create(parent);
     lv_obj_set_size(data->watt_chg_arc, 300, 300);
-    lv_arc_set_rotation(data->watt_chg_arc, 45);
-    lv_arc_set_bg_angles(data->watt_chg_arc, 0, 45);
-    lv_arc_set_mode(data->watt_chg_arc, LV_ARC_MODE_REVERSE);
+    lv_arc_set_rotation(data->watt_chg_arc, 150);
+    lv_arc_set_bg_angles(data->watt_chg_arc, 0, 60);
     lv_obj_remove_style(data->watt_chg_arc, NULL, LV_PART_KNOB); // remove arc knob
     lv_obj_set_style_arc_color(data->watt_chg_arc, lv_palette_main(LV_PALETTE_GREEN), LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(data->watt_chg_arc, 10, LV_PART_MAIN);
     lv_obj_set_style_arc_width(data->watt_chg_arc, 15, LV_PART_INDICATOR);
     lv_obj_clear_flag(data->watt_chg_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
-    lv_obj_align_to(data->watt_chg_arc, parent, LV_ALIGN_CENTER, 8, -40);
+    lv_obj_align_to(data->watt_chg_arc, parent, LV_ALIGN_TOP_LEFT, 0, -15);
 
   // CREATE ARC FOR DCH WATT READING
   data->watt_dch_arc = lv_arc_create(parent);
     lv_obj_set_size(data->watt_dch_arc, 300, 300);
-    lv_arc_set_rotation(data->watt_dch_arc, 90);
-    lv_arc_set_bg_angles(data->watt_dch_arc, 0, 45);
+    lv_arc_set_rotation(data->watt_dch_arc, 330);
+    lv_arc_set_bg_angles(data->watt_dch_arc, 0, 60);
+    lv_arc_set_mode(data->watt_chg_arc, LV_ARC_MODE_REVERSE);
     lv_obj_remove_style(data->watt_dch_arc, NULL, LV_PART_KNOB); // remove arc knob
     lv_obj_set_style_arc_color(data->watt_dch_arc, lv_palette_main(LV_PALETTE_RED), LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(data->watt_dch_arc, 10, LV_PART_MAIN);
     lv_obj_set_style_arc_width(data->watt_dch_arc, 15, LV_PART_INDICATOR);
     lv_obj_clear_flag(data->watt_dch_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
-    lv_obj_align_to(data->watt_dch_arc, parent, LV_ALIGN_CENTER, -8, -40);
+    lv_obj_align_to(data->watt_dch_arc, parent, LV_ALIGN_TOP_RIGHT, 0, -15);
 
   // CREATE LABELS AND ASSOCIATED STYLES
   data->battery_label = lv_label_create(parent);
@@ -1454,19 +1461,19 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_obj_add_style(data->watt_label, &medium_font, 0);
 
   data->charge_symbol = lv_label_create(parent);
-    lv_obj_add_style(data->charge_symbol, &large_font, 0);
+    lv_obj_add_style(data->charge_symbol, &medium_font, 0);
 
   data->warning_symbol = lv_label_create(parent);
-    lv_obj_add_style(data->warning_symbol, &large_font, 0);
+    lv_obj_add_style(data->warning_symbol, &medium_font, 0);
 
   // ALLIGN LABELS
   lv_obj_align_to(data->battery_label,  data->soc_arc, LV_ALIGN_CENTER,       -20, -44);
   lv_obj_align_to(data->soc_label,      data->soc_arc, LV_ALIGN_CENTER,         7,   0);
   lv_obj_align_to(data->volt_label,     data->soc_arc, LV_ALIGN_LEFT_MID,      50,  44);
   lv_obj_align_to(data->amps_label,     data->soc_arc, LV_ALIGN_RIGHT_MID,    -50,  44);
-  lv_obj_align_to(data->charge_symbol,  data->soc_arc, LV_ALIGN_OUT_LEFT_MID,  15,   0);
-  lv_obj_align_to(data->warning_symbol, data->soc_arc, LV_ALIGN_OUT_RIGHT_MID,-15,   0);
-  lv_obj_align_to(data->watt_label,     data->soc_arc, LV_ALIGN_OUT_BOTTOM_MID, 7,  20);
+  lv_obj_align_to(data->charge_symbol,  data->soc_arc, LV_ALIGN_OUT_LEFT_MID, -10,   0);
+  lv_obj_align_to(data->warning_symbol, data->soc_arc, LV_ALIGN_OUT_RIGHT_MID, 10,   0);
+  lv_obj_align_to(data->watt_label,     data->soc_arc, LV_ALIGN_OUT_BOTTOM_MID, 7,  15);
     
   // CREATE LABEL UPDATE TIMER
   lv_timer_create(data_display_updater, 200, data);
@@ -1527,7 +1534,7 @@ void setup() {
   create_clock_label(cont, &clockData);
 
   // Display bms messages arg2: y_pos
-  create_bms_status_label(cont, 320, &bmsStatusData);
+  create_bms_status_label(cont, 280, &bmsStatusData);
 
   // Initialise click event for CANdata message box
   canMsgBoxData.parent = cont;
