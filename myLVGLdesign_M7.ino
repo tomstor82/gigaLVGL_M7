@@ -144,8 +144,8 @@ typedef struct {
 
 typedef struct {
   lv_obj_t *soc_arc = NULL;
-  lv_obj_t *watt_chg_arc = NULL;
-  lv_obj_t *watt_dch_arc = NULL;
+  lv_obj_t *charge_arc = NULL;
+  lv_obj_t *discharge_arc = NULL;
   lv_obj_t *battery_label = NULL;
   lv_obj_t *soc_label = NULL;
   lv_obj_t *volt_label = NULL;
@@ -153,8 +153,10 @@ typedef struct {
   lv_obj_t *watt_label = NULL;
   lv_obj_t *ah_label = NULL;
   lv_obj_t *charge_icon = NULL;
-  lv_obj_t *arrow_icon = NULL;
+  //lv_obj_t *arrow_icon = NULL;
   lv_obj_t *car_battery_icon = NULL;
+  lv_obj_t *charge_label = NULL;
+  lv_obj_t *load_label = NULL;
 } data_display_t;
 
 //Initialise structures
@@ -1284,11 +1286,10 @@ void refresh_bms_status_data(lv_timer_t * timer) {
 
       flag_index++;
       control_index++;
-
-      // If balancing only or custom messages, button remains hidden
-      if ( flag_index == control_index ) {
-        hide_button = true;
-      }
+    }
+    // If balancing only or custom messages, button remains hidden
+    if ( flag_index == control_index ) {
+      hide_button = true;
     }
 
   // Show title and button
@@ -1370,12 +1371,12 @@ void flash_icons(lv_timer_t *timer) {
   data_display_t *data = (data_display_t*)timer->user_data;
 
   // CREATE FLASHING CHARGE / DISCHARGE ARROW EFFECT
-  if ( lv_obj_has_flag(data->arrow_icon, LV_OBJ_FLAG_HIDDEN) ) {
+  /*if ( lv_obj_has_flag(data->arrow_icon, LV_OBJ_FLAG_HIDDEN) ) {
     lv_obj_clear_flag(data->arrow_icon, LV_OBJ_FLAG_HIDDEN);
   }
   else {
     lv_obj_add_flag(data->arrow_icon, LV_OBJ_FLAG_HIDDEN);
-  }
+  }*/
 
   // SHOW SUN ICON IF SOLAR DETECTED THROUGH CHARGE ENABLED SIGNAL TRANSMITTED FROM BMS
   if ( (combinedData.canData.cu & 0x0001) == 0x0001 && combinedData.canData.avgI < 0 ) {
@@ -1426,7 +1427,7 @@ void data_display_updater(lv_timer_t *timer) {
   }
 
   // ARROW DIRECTION UPDATER
-  if ( combinedData.canData.avgI < 0 ) {
+  /*if ( combinedData.canData.avgI < 0 ) {
     lv_obj_set_style_text_color(data->arrow_icon, lv_palette_main(LV_PALETTE_GREEN), NULL);
     lv_obj_align_to(data->arrow_icon, data->soc_arc, LV_ALIGN_OUT_RIGHT_MID, 15, -20);
     lv_label_set_text(data->arrow_icon, "\uF062"); // point up while charging
@@ -1438,7 +1439,7 @@ void data_display_updater(lv_timer_t *timer) {
   }
   else {
     lv_label_set_text(data->arrow_icon, "");
-  }
+  }*/
 
   // UPDATE SOC ARC VALUES AND CHANGE INDICATOR TO RED COLOUR FROM 10%
   lv_arc_set_value(data->soc_arc, combinedData.canData.soc);
@@ -1447,17 +1448,17 @@ void data_display_updater(lv_timer_t *timer) {
   }
 
   // UPDATE CHG & DCH ARC RANGES DYNAMICALLY
-  lv_arc_set_range(data->watt_dch_arc, 0, combinedData.canData.dcl);
-  lv_arc_set_range(data->watt_chg_arc, 0, combinedData.canData.ccl);
+  lv_arc_set_range(data->discharge_arc, 0, combinedData.canData.dcl);
+  lv_arc_set_range(data->charge_arc, 0, combinedData.canData.ccl);
 
   // UPDATE CHARGE AND DISCHARGE ARCS FROM AVERAGE CURRENT READING
   if ( combinedData.canData.avgI > 0 ) {
-    lv_arc_set_value(data->watt_dch_arc, combinedData.canData.avgI);
-    lv_arc_set_value(data->watt_chg_arc, 0);
+    lv_arc_set_value(data->discharge_arc, combinedData.canData.avgI);
+    lv_arc_set_value(data->charge_arc, 0);
   }
   else {
-    lv_arc_set_value(data->watt_chg_arc, abs(combinedData.canData.avgI));
-    lv_arc_set_value(data->watt_dch_arc, 0);
+    lv_arc_set_value(data->charge_arc, abs(combinedData.canData.avgI));
+    lv_arc_set_value(data->discharge_arc, 0);
   }
 
   // UPDATE LABEL TEXT
@@ -1483,32 +1484,38 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_obj_clear_flag(data->soc_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
     lv_obj_align_to(data->soc_arc, parent, LV_ALIGN_TOP_MID, 0, 30);
 
-  // CREATE ARC FOR CHG WATT READING
-  data->watt_chg_arc = lv_arc_create(parent);
-    lv_obj_set_size(data->watt_chg_arc, 300, 300);
-    lv_arc_set_rotation(data->watt_chg_arc, 150);
-    lv_arc_set_bg_angles(data->watt_chg_arc, 0, 60);
-    lv_obj_remove_style(data->watt_chg_arc, NULL, LV_PART_KNOB); // remove arc knob
-    lv_obj_set_style_arc_color(data->watt_chg_arc, lv_palette_main(LV_PALETTE_GREEN), LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(data->watt_chg_arc, 10, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(data->watt_chg_arc, 10, LV_PART_INDICATOR);
-    lv_obj_clear_flag(data->watt_chg_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
-    lv_obj_align_to(data->watt_chg_arc, parent, LV_ALIGN_TOP_LEFT, 0, -15);
+  // CREATE CHARGE ARC 
+  data->charge_arc = lv_arc_create(parent);
+    lv_obj_set_size(data->charge_arc, 300, 300);
+    lv_arc_set_rotation(data->charge_arc, 150);
+    lv_arc_set_bg_angles(data->charge_arc, 0, 60);
+    lv_obj_remove_style(data->charge_arc, NULL, LV_PART_KNOB); // remove arc knob
+    lv_obj_set_style_arc_color(data->charge_arc, lv_palette_main(LV_PALETTE_GREEN), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(data->charge_arc, 10, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(data->charge_arc, 10, LV_PART_INDICATOR);
+    lv_obj_clear_flag(data->charge_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
+    lv_obj_align_to(data->charge_arc, parent, LV_ALIGN_TOP_LEFT, 0, -15);
 
-  // CREATE ARC FOR DCH WATT READING
-  data->watt_dch_arc = lv_arc_create(parent);
-    lv_obj_set_size(data->watt_dch_arc, 300, 300);
-    lv_arc_set_rotation(data->watt_dch_arc, 330);
-    lv_arc_set_bg_angles(data->watt_dch_arc, 0, 60);
-    lv_arc_set_mode(data->watt_dch_arc, LV_ARC_MODE_REVERSE);
-    lv_obj_remove_style(data->watt_dch_arc, NULL, LV_PART_KNOB); // remove arc knob
-    lv_obj_set_style_arc_color(data->watt_dch_arc, lv_palette_main(LV_PALETTE_ORANGE), LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(data->watt_dch_arc, 10, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(data->watt_dch_arc, 10, LV_PART_INDICATOR);
-    lv_obj_clear_flag(data->watt_dch_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
-    lv_obj_align_to(data->watt_dch_arc, parent, LV_ALIGN_TOP_RIGHT, 0, -15);
+  // CREATE DISCHARGE
+  data->discharge_arc = lv_arc_create(parent);
+    lv_obj_set_size(data->discharge_arc, 300, 300);
+    lv_arc_set_rotation(data->discharge_arc, 330);
+    lv_arc_set_bg_angles(data->discharge_arc, 0, 60);
+    lv_arc_set_mode(data->discharge_arc, LV_ARC_MODE_REVERSE);
+    lv_obj_remove_style(data->discharge_arc, NULL, LV_PART_KNOB); // remove arc knob
+    lv_obj_set_style_arc_color(data->discharge_arc, lv_palette_main(LV_PALETTE_ORANGE), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(data->discharge_arc, 10, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(data->discharge_arc, 10, LV_PART_INDICATOR);
+    lv_obj_clear_flag(data->discharge_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
+    lv_obj_align_to(data->discharge_arc, parent, LV_ALIGN_TOP_RIGHT, 0, -15);
 
   // CREATE LABELS AND ASSOCIATED STYLES
+  data->charge_label = lv_label_create(parent);
+    lv_label_set_text(data->charge_label, "CHARGE");
+  
+  data->load_label = lv_label_create(parent);
+    lv_label_set_text(data->load_label, "LOAD");
+
   data->battery_label = lv_label_create(parent);
 
   data->soc_label = lv_label_create(parent);    
@@ -1534,17 +1541,19 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
    lv_obj_set_style_text_font(data->car_battery_icon, &FontAwesomeIcons, NULL);
     lv_label_set_text(data->car_battery_icon, "\uF5DF");
 
-  data->arrow_icon = lv_label_create(parent);
-    lv_obj_set_style_text_font(data->arrow_icon, &FontAwesomeIcons, NULL);
+  /*data->arrow_icon = lv_label_create(parent);
+    lv_obj_set_style_text_font(data->arrow_icon, &FontAwesomeIcons, NULL);*/
 
   // ALLIGN LABELS
-  lv_obj_align_to(data->battery_label,      data->soc_arc, LV_ALIGN_CENTER,        -18, -44);
-  lv_obj_align_to(data->soc_label,          data->soc_arc, LV_ALIGN_CENTER,          0,   0);
-  lv_obj_align_to(data->volt_label,         data->soc_arc, LV_ALIGN_BOTTOM_MID,    -40, -44);
-  lv_obj_align_to(data->amps_label,         data->soc_arc, LV_ALIGN_BOTTOM_MID,     30, -44);
-  lv_obj_align_to(data->charge_icon,        data->soc_arc, LV_ALIGN_OUT_LEFT_MID,   14,   0);
-  lv_obj_align_to(data->car_battery_icon,   data->soc_arc, LV_ALIGN_OUT_RIGHT_MID,  14,   0);
-  lv_obj_align_to(data->watt_label,         data->soc_arc, LV_ALIGN_OUT_BOTTOM_MID,-17,  15);
+  lv_obj_align_to(data->charge_label,       data->soc_arc,        LV_ALIGN_OUT_LEFT_BOTTOM,  -5,   8);
+  lv_obj_align_to(data->load_label,         data->soc_arc,        LV_ALIGN_OUT_RIGHT_BOTTOM, 12,   8);
+  lv_obj_align_to(data->battery_label,      data->soc_arc,        LV_ALIGN_CENTER,          -18, -44);
+  lv_obj_align_to(data->soc_label,          data->soc_arc,        LV_ALIGN_CENTER,            0,   0);
+  lv_obj_align_to(data->volt_label,         data->soc_arc,        LV_ALIGN_BOTTOM_MID,      -40, -44);
+  lv_obj_align_to(data->amps_label,         data->soc_arc,        LV_ALIGN_BOTTOM_MID,       30, -44);
+  lv_obj_align_to(data->charge_icon,        data->soc_arc,        LV_ALIGN_OUT_LEFT_MID,     14,   0);
+  lv_obj_align_to(data->car_battery_icon,   data->soc_arc,        LV_ALIGN_OUT_RIGHT_MID,    14,   0);
+  lv_obj_align_to(data->watt_label,         data->soc_arc,        LV_ALIGN_OUT_BOTTOM_MID,    0,  15);
     
   // CREATE LABEL UPDATE TIMER
   lv_timer_create(data_display_updater, 200, data);
