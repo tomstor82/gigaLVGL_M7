@@ -627,14 +627,12 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
       data->on = true; // store state
 
       // Store delay timer for inverter search and for hot water timeout in struct to allow for deletion elsewhere
-      if ( ! data->timer ) {
-        data->timer = lv_timer_create(power_check, data->timeout_ms, data);
-        Serial.println("DEBUG creating power_check timer as it didn't exist");
+      if ( data->timer ) {
+        lv_timer_delete(data->timer);
+        Serial.println("DEBUG deleting power_check timer as it exist already");
       }
-      else {
-        lv_timer_reset(data->timer);
-        Serial.println("DEBUG resetting already existing power_check timer");
-      }
+      // CREATE COMBINED TIMER
+      data->timer = lv_timer_create(power_check, data->timeout_ms, data);
     }
 
     // Button OFF
@@ -697,8 +695,7 @@ void power_check(lv_timer_t * timer) {
   }
 
   if (on) {
-    lv_timer_reset(data->timer);
-    Serial.println("DEBUG power_check function just reset timer");
+    return; // changed from lv_timer_reset(timer) as I figure timer may be deleted in mean time
   }
 
   // INVERTER OFF INTERVAL START
