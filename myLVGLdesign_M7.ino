@@ -1,10 +1,10 @@
 #include <Arduino.h>
 #include <RPC.h>
 #include <Arduino_H7_Video.h>
-#include "lvgl.h"
-#include "Arduino_GigaDisplayTouch.h"
 #include <Arduino_CAN.h>
 #include <Arduino_GigaDisplay.h>
+#include <Arduino_GigaDisplayTouch.h>
+#include "lvgl.h"
 
 Arduino_H7_Video Display(800, 480, GigaDisplayShield);
 Arduino_GigaDisplayTouch TouchDetector;
@@ -17,6 +17,11 @@ GigaDisplayBacklight backlight;
 #define RELAY2 11   // ceiling heater
 #define RELAY3 12   // water heater
 #define RELAY4 13   // shower room
+
+// ADDING FONTS 0-9 AND % SYMBOL FROM MONTSERRAT_34 TO SAVE MEMORY
+LV_FONT_DECLARE(Montserrat34_0_9_percent);
+LV_FONT_DECLARE(FontAwesomeSolid);
+
 
 //  CANBUS data Identifier List
 //  ID 0x03B BYT0+1:INST_VOLT BYT2+3:INST_AMP BYT4+5:ABS_AMP BYT6:SOC **** ABS_AMP from OrionJr errendous ****
@@ -146,8 +151,10 @@ typedef struct {
   lv_obj_t *amps_label = NULL;
   lv_obj_t *watt_label = NULL;
   lv_obj_t *ah_label = NULL;
+  lv_obj_t *sun_symbol = NULL;
   lv_obj_t *charge_symbol = NULL;
-  lv_obj_t *warning_symbol = NULL;
+  lv_obj_t *arrow_symbol = NULL;
+  lv_obj_t *car_battery_symbol = NULL;
 } data_display_t;
 
 //Initialise structures
@@ -168,7 +175,6 @@ const uint16_t inverter_startup_delay_ms = 25000; // 25s startup required before
 const uint8_t off_interval_min = 3; // 3 minute off interval reduces standby consumption from 85Wh to around 12,5Wh -84%
 
 static lv_style_t underline;
-static lv_style_t large_font;
 static lv_style_t medium_font;
 
 static uint8_t brightness = 70;
@@ -203,7 +209,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     lv_obj_t *label = lv_label_create(data->button);
     lv_label_set_text(label, label_text);
     lv_obj_center(label);
-    //lv_obj_add_flag(data->button, LV_OBJ_FLAG_CHECKABLE);
+    lv_obj_add_flag(data->button, LV_OBJ_FLAG_CHECKABLE); // MAKE THE BUTTON STAY PRESSED UNTIL RELEASED
 
   // ADD DCL TIMER AND LABEL
   data->dcl_label = lv_label_create(lv_obj_get_parent(data->button));
@@ -295,20 +301,21 @@ void sunrise_detector(lv_timer_t *timer) {
   static bool mppt_delay = false;
   static uint32_t time_ms = 0;
 
-  // determine if solar is available by custom flag charge power enable signal and start timing if not started previously
+  // IS SOLAR CHARGE SIGNAL AVAILABLE THROUGH CUSTOM FLAG AND TIMER NOT RUNNING
   if ( (combinedData.canData.cu & 0x0001) == 0x0001 && ! time_ms ) {
-    // if mppt using excessive battery enegry without charging disable it
-    if ( combinedData.canData.p > 30 ) {
+
+    // IN LOW SUN CONDITIONS MPPT DRAINS BATTERY INSTEAD OF CHARGING. IF THIS HAPPENS WHEN INVERTER IS OFF, DISABLE MPPT
+    if ( ! userData[3].on && combinedData.canData.p > 20 ) {
       mppt_delay = true;
     }
-    // start time and return for another go
+    // START TIME AND RETURN FOR ANOTHER ROUND
     else {
       time_ms = millis();
       return;
     }
   }
 
-  // if solar signal lost
+  // IF SOLAR CHARGE SIGNAL IS LOST
   else if ( ! (combinedData.canData.cu & 0x0001) == 0x0001 && time_ms && ! mppt_delay ) {
 
     // within 10 seconds lets trigger mppt delay as relay flap detected
@@ -440,27 +447,29 @@ void dcl_check(lv_timer_t * timer) {
 
 // MESSAGE BOX FOR CAN-DATA EVENT HANDLERS AND UPDATE TIMER ////////////////////////////////////
 const char* set_can_msgbox_text() {
-  static char msgbox_text[360]; // Static buffer to retain the value
+  static char msgbox_text[512]; // Static buffer to retain the value
 
   snprintf(msgbox_text, sizeof(msgbox_text),
-                 "High Cell          %.2fV            #%d\n"
-                 "Low Cell           %.2fV            #%d\n\n"
+                 "High Cell          %.2fV           #%d\n"
+                 "Low Cell           %.2fV           #%d\n\n"
                  "Charge Limit                      %d A\n"
                  "Discharge Limit                %d A\n\n"
                  "Charge                                    %s\n"
-                 "Discharge                               %s\n\n"
-                 "Battery Cycles                     %d\n"
-                 "Battery Health                  %d%%\n"
-                 "Battery Capacity          %.1f Ah",
+                 "Discharge                               %s\n"
+                 "Charger Safety                       %s\n\n"
+                 "Cycles                                     %d\n"
+                 "Health                                %d%%\n\n"
+                 "Energy                          %.2f kW",
                  combinedData.canData.hC, combinedData.canData.hCid,
                  combinedData.canData.lC, combinedData.canData.lCid,
                  combinedData.canData.ccl,
                  combinedData.canData.dcl,
                  (combinedData.canData.cu & 0x0002) == 0x0002 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using MPO#1 feedback from BMS which controls both charge FETs
                  (combinedData.canData.ry & 0x0001) == 0x0001 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using BMS relay state
+                 (combinedData.canData.ry & 0x0004) == 0x0004 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE,
                  combinedData.canData.cc,
                  combinedData.canData.h,
-                 combinedData.canData.ah);
+                 (combinedData.canData.ah * combinedData.canData.instU) / 1000.0);
 
   return msgbox_text;
 }
@@ -620,6 +629,9 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
       if ( ! data->timer ) {
         data->timer = lv_timer_create(power_check, data->timeout_ms, data);
         Serial.println("DEBUG creating power_check timer as it didn't exist");
+      }
+      else {
+        lv_timer_reset(data->timer);
       }
     }
 
@@ -1194,7 +1206,7 @@ void create_status_label(const char* label_text, bms_status_data_t *data, bool f
     }
     // add text to label index and allign vertically by index
     lv_label_set_text(data->status_label[i], label_text);
-    lv_obj_align_to(data->status_label[i], data->title_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 15 + i * 20); // 10 was 15 before underline added
+    lv_obj_align_to(data->status_label[i], data->title_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 10 + i * 20); // 10 was 15 before underline added
 
     // move to next index for next function call
     i++;
@@ -1219,6 +1231,8 @@ void refresh_bms_status_data(lv_timer_t * timer) {
         data->status_label[i] = NULL; // Set pointer to NULL
       }
     }
+    // CRITICAL CAN TRANSMIT FAILURE
+    if ( canMsgData.len == 0 ) { create_status_label("No CAN data from BMS", data); flag_index++; control_index++; }
 
     // BMS flags
     if ((combinedData.canData.fu & 0x0100) == 0x0100) { create_status_label("Internal Hardware Fault", data); flag_index++; }
@@ -1251,14 +1265,12 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     if ((combinedData.canData.st & 0x8000) == 0x8000) { create_status_label("Charge Mode Activated over CANBUS", data); flag_index++; }
 
     // Relay status
-    if ((combinedData.canData.ry & 0x0001) == 0x0000) { create_status_label("Discharge Relay Opened", data); flag_index++; }
+    if ((combinedData.canData.ry & 0x0001) != 0x0001) { create_status_label("Discharge Relay Opened", data); flag_index++; }
     // CONTROLLED BY ARDUINO AND DISABLED IN BMS if ((combinedData.canData.ry & 0x0002) == 0x0000) { create_status_label("Charge Relay Opened", data); flag_index++; }
-    if ((combinedData.canData.ry & 0x0004) == 0x0004) { create_status_label("Charger Safety Relay Opened", data); flag_index++; } // opening with active signal
 
     // Custom status messages
     if ( canMsgData.send_mpo1 ) { create_status_label("Charge Disabled by Arduino", data); flag_index++; control_index++;}
     if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Discharge Disabled by Arduino", data); flag_index++; control_index++;} // If Inverter DCL CHECK triggered
-    if ( canMsgData.len == 0 ) { create_status_label("No CAN data from BMS", data); flag_index++; control_index++; }
 
     // Cell balancing check at end ensures higher importance messages appear above
     if ((combinedData.canData.st & 0x0008) == 0x0008) {
@@ -1333,12 +1345,60 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
   }
 }
 
+// DATA SCREEN FLASHING CHARGE SYMBOLS ////////////////////////////////////////////////
+void charge_flash(lv_timer_t *timer) {
+  data_display_t *data = (data_display_t*)timer->user_data;
+
+  // CREATE FLASHING CHARGE / DISCHARGE ARROW EFFECT
+  if ( lv_obj_has_flag(data->arrow_symbol, LV_OBJ_FLAG_HIDDEN) ) {
+    lv_obj_clear_flag(data->arrow_symbol, LV_OBJ_FLAG_HIDDEN);
+  }
+  else {
+    lv_obj_add_flag(data->arrow_symbol, LV_OBJ_FLAG_HIDDEN);
+  }
+
+  // HIDE OR SHOW ALTERNATING SUN OR CHARGE SYMBOL
+  if ( (combinedData.canData.cu & 0x0001) == 0x0001 ) {
+    if ( ! lv_obj_has_flag(data->charge_symbol, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_add_flag(data->charge_symbol, LV_OBJ_FLAG_HIDDEN);
+    }
+    if ( lv_obj_has_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_clear_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  else if ( combinedData.canData.avgI > 0 ) {
+    if ( ! lv_obj_has_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_add_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN);
+    }
+    if ( lv_obj_has_flag(data->charge_symbol, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_clear_flag(data->charge_symbol, LV_OBJ_FLAG_HIDDEN);
+    }
+    return; // no need to continue as sun symbol is hidden
+  }
+  else {
+    if ( ! lv_obj_has_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_add_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN);
+    }
+    if ( ! lv_obj_has_flag(data->charge_symbol, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_add_flag(data->charge_symbol, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  
+  // IF CHARGE SIGNAL FROM SOLAR BUT NO CHARGE OR IF MPPT HAS BEEN DISABLED, FLASH SUN SYMBOL
+  if ( (combinedData.canData.cu & 0x0001) == 0x0001 && combinedData.canData.avgI > 0 && userData[3].on == false || canMsgData.send_mpo1 ) {
+    if ( lv_obj_has_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_clear_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN);
+    }
+    else {
+      lv_obj_add_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+}
+
 // DATA SCREEN UPDATER ////////////////////////////////////////////////////////////////
 void data_display_updater(lv_timer_t *timer) {
   data_display_t *data = (data_display_t*)timer->user_data;
   char battery[4];
-  char charge[4];
-  char warning[4];
   
   // BATTERY SYMBOL UPDATER
   if ( combinedData.canData.soc >= 80 ) {
@@ -1357,28 +1417,25 @@ void data_display_updater(lv_timer_t *timer) {
     strcpy(battery, LV_SYMBOL_BATTERY_EMPTY);
   }
 
-  // CHARGE SYMBOL UPDATER
-  if ( (combinedData.canData.cu & 0x0001) == 0x0001 ) {
-    strcpy(charge, LV_SYMBOL_CHARGE);
+  // ARROW DIRECTION UPDATER
+  if ( combinedData.canData.avgI < 0 ) {
+     lv_label_set_text(data->arrow_symbol, "\uF063"); // point down while charging
   }
   else {
-    strcpy(charge, "");
+    lv_label_set_text(data->arrow_symbol, "\uF062");
   }
 
-  if ( combinedData.canData.soc < 10 ) {
-    strcpy(warning, LV_SYMBOL_WARNING);
-  }
-  else {
-    strcpy(warning, "");
+  // UPDATE SOC ARC VALUES AND CHANGE INDICATOR TO RED COLOUR FROM 10%
+  lv_arc_set_value(data->soc_arc, combinedData.canData.soc);
+  if ( combinedData.canData.soc <= 10 ) {
+    lv_obj_set_style_arc_color(data->soc_arc, lv_palette_main(LV_PALETTE_RED), LV_PART_INDICATOR);
   }
 
-  // UPDATE CHG & DCH ARC RANGES DYNAMICALLY
+  // UPDATE CHG & DCH ARC RANGES DYNAMICALLY *************** DOES THIS WORK?
   lv_arc_set_range(data->watt_dch_arc, 0, combinedData.canData.dcl);
   lv_arc_set_range(data->watt_chg_arc, 0, combinedData.canData.ccl);
 
-  // UPDATE ARC VALUES
-  lv_arc_set_value(data->soc_arc, combinedData.canData.soc);
-
+  // UPDATE CHARGE AND DISCHARGE ARCS FROM AVERAGE CURRENT READING
   if ( combinedData.canData.avgI > 0 ) {
     lv_arc_set_value(data->watt_dch_arc, combinedData.canData.avgI);
     lv_arc_set_value(data->watt_chg_arc, 0);
@@ -1390,8 +1447,6 @@ void data_display_updater(lv_timer_t *timer) {
 
   // UPDATE LABEL TEXT
   lv_label_set_text_fmt(data->battery_label, "%s Battery", battery);
-  lv_label_set_text_fmt(data->charge_symbol, "%s", charge);
-  lv_label_set_text_fmt(data->warning_symbol, "%s", warning);
   lv_label_set_text_fmt(data->soc_label, "%d%%", combinedData.canData.soc);
   lv_label_set_text_fmt(data->volt_label, "%.2fV", combinedData.canData.instU);
   lv_label_set_text_fmt(data->amps_label, "%.1fA", combinedData.canData.instI);
@@ -1440,10 +1495,8 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
   // CREATE LABELS AND ASSOCIATED STYLES
   data->battery_label = lv_label_create(parent);
 
-  data->soc_label = lv_label_create(parent);
-    lv_style_init(&large_font);
-    lv_style_set_text_font(&large_font, &lv_font_montserrat_34);
-    lv_obj_add_style(data->soc_label, &large_font, 0);
+  data->soc_label = lv_label_create(parent);    
+    lv_obj_set_style_text_font(data->soc_label, &Montserrat34_0_9_percent, NULL);
     lv_obj_add_flag(data->soc_label, LV_OBJ_FLAG_CLICKABLE); // make it clickable to open msg_box
     lv_obj_add_event_cb(data->soc_label, can_msgbox, LV_EVENT_CLICKED, &canMsgBoxData); // add event handler to clicks
 
@@ -1454,25 +1507,39 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
   data->watt_label = lv_label_create(parent);
     lv_style_init(&medium_font);
     lv_style_set_text_font(&medium_font, &lv_font_montserrat_20);
-    lv_obj_add_style(data->watt_label, &medium_font, 0);
+    lv_obj_add_style(data->watt_label, &medium_font, NULL);
+
+  data->sun_symbol = lv_label_create(parent);
+    lv_obj_set_style_text_font(data->sun_symbol, &FontAwesomeSolid, NULL);
+    lv_label_set_text(data->sun_symbol, "\uF185");
 
   data->charge_symbol = lv_label_create(parent);
-    lv_obj_add_style(data->charge_symbol, &medium_font, 0);
+    lv_obj_add_style(data->charge_symbol, &medium_font, NULL);
+    lv_label_set_text(data->charge_symbol, LV_SYMBOL_CHARGE);
 
-  data->warning_symbol = lv_label_create(parent);
-    lv_obj_add_style(data->warning_symbol, &medium_font, 0);
+  data->car_battery_symbol = lv_label_create(parent);
+   lv_obj_set_style_text_font(data->car_battery_symbol, &FontAwesomeSolid, NULL);
+    lv_label_set_text(data->car_battery_symbol, "\uF5DF");
+
+  data->arrow_symbol = lv_label_create(parent);
+    lv_obj_set_style_text_font(data->arrow_symbol, &FontAwesomeSolid, NULL);
 
   // ALLIGN LABELS
-  lv_obj_align_to(data->battery_label,  data->soc_arc, LV_ALIGN_CENTER,       -20, -44);
-  lv_obj_align_to(data->soc_label,      data->soc_arc, LV_ALIGN_CENTER,         7,   0);
-  lv_obj_align_to(data->volt_label,     data->soc_arc, LV_ALIGN_LEFT_MID,      50,  44);
-  lv_obj_align_to(data->amps_label,     data->soc_arc, LV_ALIGN_RIGHT_MID,    -50,  44);
-  lv_obj_align_to(data->charge_symbol,  data->soc_arc, LV_ALIGN_OUT_LEFT_MID, -10,   0);
-  lv_obj_align_to(data->warning_symbol, data->soc_arc, LV_ALIGN_OUT_RIGHT_MID, 10,   0);
-  lv_obj_align_to(data->watt_label,     data->soc_arc, LV_ALIGN_OUT_BOTTOM_MID, 7,  15);
+  lv_obj_align_to(data->battery_label,      data->soc_arc, LV_ALIGN_CENTER,       -20, -44);
+  lv_obj_align_to(data->soc_label,          data->soc_arc, LV_ALIGN_CENTER,         7,   0);
+  lv_obj_align_to(data->volt_label,         data->soc_arc, LV_ALIGN_LEFT_MID,      50,  44);
+  lv_obj_align_to(data->amps_label,         data->soc_arc, LV_ALIGN_RIGHT_MID,    -50,  44);
+  lv_obj_align_to(data->sun_symbol,         data->soc_arc, LV_ALIGN_OUT_LEFT_MID, -11,   0);
+  lv_obj_align_to(data->charge_symbol,      data->soc_arc, LV_ALIGN_OUT_LEFT_MID, -11,   0);
+  lv_obj_align_to(data->arrow_symbol,       data->soc_arc, LV_ALIGN_OUT_RIGHT_MID, 18, -10);
+  lv_obj_align_to(data->car_battery_symbol, data->soc_arc, LV_ALIGN_OUT_RIGHT_MID, 17,  10);
+  lv_obj_align_to(data->watt_label,         data->soc_arc, LV_ALIGN_OUT_BOTTOM_MID, 7,  15);
     
   // CREATE LABEL UPDATE TIMER
   lv_timer_create(data_display_updater, 200, data);
+
+  // FLASHING EFFECT FOR ARROWS AND SUN SYMBOLS
+  lv_timer_create(charge_flash, 1000, data);
 }
 
 
@@ -1514,7 +1581,7 @@ void setup() {
   lv_obj_t * parent = lv_obj_create(lv_scr_act());
   lv_obj_set_grid_dsc_array(parent, col_dsc, row_dsc);
   lv_obj_set_size(parent, Display.width(), Display.height());
-  lv_obj_set_style_bg_color(parent, lv_color_hex(0x03989e), LV_PART_MAIN);
+  //lv_obj_set_style_bg_color(parent, lv_color_hex(0x03989e), LV_PART_MAIN);
   lv_obj_center(parent);
 
   // initialise container object
@@ -1534,8 +1601,6 @@ void setup() {
 
   // Initialise click event for CANdata message box
   canMsgBoxData.parent = cont;
-  //lv_obj_add_flag(cont, LV_OBJ_FLAG_CLICKABLE); // add event handling
-  //lv_obj_add_event_cb(cont, can_msgbox, LV_EVENT_CLICKED, &canMsgBoxData); // add event handler function
 
   // check for sunrise by reading BMS charge enable signal from CANbus and sending MPO#1 signal to trip relay if flapping detected
   lv_timer_create(sunrise_detector, 1000, NULL);
