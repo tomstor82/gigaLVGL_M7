@@ -187,7 +187,7 @@ const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 static String buffer = "";
 
 //******************************************************************************************************
-//  BUG#1: CRASH WHEN INVERTER TURNED OFF OCCASIONALLY
+//  BUG#1: INVERTER AND HOT WATER CRASH AFTER TURNING ON A 2ND TIME WITHIN A FEW SECONDS
 //  BUG#2: FLASHING HEATER BUTTONS
 //  BUG#3: WHEN IN OFF NO LOAD MODE AND TURNING ON OTHER BUTTONS, ALL BUTTONS GO OFF
 //******************************************************************************************************
@@ -633,6 +633,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
       }
       else {
         lv_timer_reset(data->timer);
+        Serial.println("DEBUG resetting already existing power_check timer");
       }
     }
 
@@ -696,7 +697,8 @@ void power_check(lv_timer_t * timer) {
   }
 
   if (on) {
-    lv_timer_reset(timer);
+    lv_timer_reset(data->timer);
+    Serial.println("DEBUG power_check function just reset timer");
   }
 
   // INVERTER OFF INTERVAL START
@@ -1370,13 +1372,19 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
 void flash_icons(lv_timer_t *timer) {
   data_display_t *data = (data_display_t*)timer->user_data;
 
-  // CREATE FLASHING CHARGE / DISCHARGE ARROW EFFECT
-  /*if ( lv_obj_has_flag(data->arrow_icon, LV_OBJ_FLAG_HIDDEN) ) {
-    lv_obj_clear_flag(data->arrow_icon, LV_OBJ_FLAG_HIDDEN);
+  // RED FLASHING BATTERY ICON FROM 10% SOC AND DOWN
+  if ( combinedData.canData.soc <= 10 ) {
+    lv_obj_set_style_arc_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_RED), NULL);
+    if ( lv_obj_has_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
+    }
+    else {
+      lv_obj_add_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
+    }
   }
-  else {
-    lv_obj_add_flag(data->arrow_icon, LV_OBJ_FLAG_HIDDEN);
-  }*/
+  else if ( lv_obj_has_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN) ) {
+    lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
+  }
 
   // SHOW SUN ICON IF SOLAR DETECTED THROUGH CHARGE ENABLED SIGNAL TRANSMITTED FROM BMS
   if ( (combinedData.canData.cu & 0x0001) == 0x0001 && combinedData.canData.avgI < 0 ) {
@@ -1551,8 +1559,8 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
   lv_obj_align_to(data->soc_label,          data->soc_arc,        LV_ALIGN_CENTER,            0,   0);
   lv_obj_align_to(data->volt_label,         data->soc_arc,        LV_ALIGN_BOTTOM_MID,      -40, -44);
   lv_obj_align_to(data->amps_label,         data->soc_arc,        LV_ALIGN_BOTTOM_MID,       30, -44);
-  lv_obj_align_to(data->charge_icon,        data->soc_arc,        LV_ALIGN_OUT_LEFT_MID,     14,   0);
-  lv_obj_align_to(data->car_battery_icon,   data->soc_arc,        LV_ALIGN_OUT_RIGHT_MID,    14,   0);
+  lv_obj_align_to(data->charge_icon,        data->soc_arc,        LV_ALIGN_OUT_LEFT_MID,     15,   0);
+  lv_obj_align_to(data->car_battery_icon,   data->soc_arc,        LV_ALIGN_OUT_RIGHT_MID,    15,   0);
   lv_obj_align_to(data->watt_label,         data->soc_arc,        LV_ALIGN_OUT_BOTTOM_MID,    0,  15);
     
   // CREATE LABEL UPDATE TIMER
