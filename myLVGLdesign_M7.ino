@@ -1366,7 +1366,7 @@ void charge_flash(lv_timer_t *timer) {
       lv_obj_clear_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN);
     }
   }
-  else if ( combinedData.canData.avgI > 0 ) {
+  else if ( combinedData.canData.avgI < 0 ) {
     if ( ! lv_obj_has_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_add_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN);
     }
@@ -1484,7 +1484,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_obj_set_size(data->watt_dch_arc, 300, 300);
     lv_arc_set_rotation(data->watt_dch_arc, 330);
     lv_arc_set_bg_angles(data->watt_dch_arc, 0, 60);
-    lv_arc_set_mode(data->watt_chg_arc, LV_ARC_MODE_REVERSE);
+    lv_arc_set_mode(data->watt_dch_arc, LV_ARC_MODE_REVERSE);
     lv_obj_remove_style(data->watt_dch_arc, NULL, LV_PART_KNOB); // remove arc knob
     lv_obj_set_style_arc_color(data->watt_dch_arc, lv_palette_main(LV_PALETTE_RED), LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(data->watt_dch_arc, 10, LV_PART_MAIN);
