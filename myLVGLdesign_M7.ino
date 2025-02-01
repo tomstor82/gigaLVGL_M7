@@ -628,7 +628,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
 
       // Store delay timer for inverter search and for hot water timeout in struct to allow for deletion elsewhere
       if ( data->timer ) {
-        lv_timer_delete(data->timer);
+        lv_timer_del(data->timer);
         Serial.println("DEBUG deleting power_check timer as it exist already");
       }
       // CREATE COMBINED TIMER
