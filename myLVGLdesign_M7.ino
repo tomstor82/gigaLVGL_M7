@@ -18,9 +18,10 @@ GigaDisplayBacklight backlight;
 #define RELAY3 12   // water heater
 #define RELAY4 13   // shower room
 
-// ADDING FONTS 0-9 AND % SYMBOL FROM MONTSERRAT_34 TO SAVE MEMORY
+// ADDING 4-BIT FONTS WITH ONLY NEEDED CHARACTERS FROM MONTSERRAT 34 & 20 AND FONTAWESOME_SVG_SOLID 20 (https://lvgl.io/tools/fontconverter)
 LV_FONT_DECLARE(Montserrat34_0_9_percent);
-LV_FONT_DECLARE(FontAwesomeSolid);
+LV_FONT_DECLARE(Montserrat20_0_9_W_minus);
+LV_FONT_DECLARE(FontAwesomeIcons);
 
 
 //  CANBUS data Identifier List
@@ -95,11 +96,12 @@ struct CanMsgData {
 
   // send settings
   static const uint8_t CAN_ID = 0x002; // CAN id for the message (constant)
-  uint8_t msg_data[2]; // 2 bytes used in BMS for MPO#2 and MPO#1 respectively
+  uint8_t msg_data[3]; // 2 bytes used in BMS for MPO#2 and MPO#1 respectively
   uint8_t msg_cnt;
 
   bool send_mpo1 = false;
   bool send_mpo2 = false;
+  bool send_balancing_allowed = false;
 
   // Constructor to initialize non const values
   CanMsgData() : rxId(0), len(0), msg_data{}, msg_cnt(0) {}
@@ -151,7 +153,6 @@ typedef struct {
   lv_obj_t *amps_label = NULL;
   lv_obj_t *watt_label = NULL;
   lv_obj_t *ah_label = NULL;
-  lv_obj_t *sun_symbol = NULL;
   lv_obj_t *charge_symbol = NULL;
   lv_obj_t *arrow_symbol = NULL;
   lv_obj_t *car_battery_symbol = NULL;
@@ -261,6 +262,24 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 }
 
 
+
+
+
+
+
+
+// ALLOW BALANCING /////////////////////////////////////////////////////////////////////////////
+void balancing_allowed(lv_timer_t * timer) {
+  // DETECT IF SOLAR IS AVAILABLE BEFORE ALLOWING BALANCING
+  if ( (combinedData.canData.cu & 0x0001) == 0x0001 ) {
+    canMsgData.msg_data[2] = 0x01;
+    canMsgData.send_balancing_allowed = true;
+  }
+  else {
+    canMsgData.msg_data[2] = 0x00;
+    canMsgData.send_balancing_allowed = false;
+  }
+}
 
 // MPPT DELAYER ////////////////////////////////////////////////////////////////////////////////
 void mppt_delayer(bool mppt_delay) {
@@ -683,7 +702,7 @@ void power_check(lv_timer_t * timer) {
     }
 
     // Remain ON if discharge exceeds inverter standby - considering prestart_p and canData.p are signed it should cover most charge/discharge scenarios
-    else if ( (inverter_standby_p + inverter_prestart_p) < combinedData.canData.p ) {
+    else if ( (inverter_standby_p + inverter_prestart_p) < abs(combinedData.canData.p) ) {
       on = true;
       Serial.println("DEBUG discharge exceeds inverter standby");
     }
@@ -721,7 +740,7 @@ void power_check(lv_timer_t * timer) {
       time_ms = 0;
       data->on = false; // to enable inverter startup check
       lv_event_send(data->button, LV_EVENT_CLICKED, NULL);
-      return;
+      return; // to prevent label being written once finished
     }
 
     snprintf(label, sizeof(label), "OFF - NO LOAD\nON in %d minute%s", (off_interval_min - minute_count), plural);
@@ -1345,8 +1364,29 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
   }
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // DATA SCREEN FLASHING CHARGE SYMBOLS ////////////////////////////////////////////////
-void charge_flash(lv_timer_t *timer) {
+void flash_icons(lv_timer_t *timer) {
   data_display_t *data = (data_display_t*)timer->user_data;
 
   // CREATE FLASHING CHARGE / DISCHARGE ARROW EFFECT
@@ -1357,40 +1397,28 @@ void charge_flash(lv_timer_t *timer) {
     lv_obj_add_flag(data->arrow_symbol, LV_OBJ_FLAG_HIDDEN);
   }
 
-  // HIDE OR SHOW ALTERNATING SUN OR CHARGE SYMBOL
-  if ( (combinedData.canData.cu & 0x0001) == 0x0001 ) {
-    if ( ! lv_obj_has_flag(data->charge_symbol, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_add_flag(data->charge_symbol, LV_OBJ_FLAG_HIDDEN);
-    }
-    if ( lv_obj_has_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_clear_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN);
-    }
+  // CHARGE DETECTED AND CHARGER SAFETY RELAY IS CLOSED SHOW GRID POWER APPLIED
+  if ( combinedData.canData.avgI < 0 && (combinedData.canData.ry & 0x0004) == 0x0004 ) {
+    lv_label_set_text(data->charge_symbol, "\uF1E6"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
+    return; // no need to continue as this will not be flashing
   }
-  else if ( combinedData.canData.avgI < 0 ) {
-    if ( ! lv_obj_has_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_add_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN);
-    }
+  // IF SOLAR DETECTED SHOW SUN
+  else if ( (combinedData.canData.cu & 0x0001) == 0x0001 ) {
+    lv_label_set_text(data->charge_symbol, "\uF185"); // sun symbol
+  }
+  // NO CHARGE NO SYMBOL
+  else {
+    lv_label_set_text(data->charge_symbol, "");
+    return;
+  }
+  
+  // FLASH SUN IF THERE IS CHARGE SIGNAL FROM SOLAR BUT NO CHARGING OR MPPT HAS BEEN DISABLED
+  if ( combinedData.canData.avgI >= 0 && userData[3].on == false || canMsgData.send_mpo1 ) {
     if ( lv_obj_has_flag(data->charge_symbol, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(data->charge_symbol, LV_OBJ_FLAG_HIDDEN);
     }
-    return; // no need to continue as sun symbol is hidden
-  }
-  else {
-    if ( ! lv_obj_has_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_add_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN);
-    }
-    if ( ! lv_obj_has_flag(data->charge_symbol, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_add_flag(data->charge_symbol, LV_OBJ_FLAG_HIDDEN);
-    }
-  }
-  
-  // IF CHARGE SIGNAL FROM SOLAR BUT NO CHARGE OR IF MPPT HAS BEEN DISABLED, FLASH SUN SYMBOL
-  if ( (combinedData.canData.cu & 0x0001) == 0x0001 && combinedData.canData.avgI > 0 && userData[3].on == false || canMsgData.send_mpo1 ) {
-    if ( lv_obj_has_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_clear_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN);
-    }
     else {
-      lv_obj_add_flag(data->sun_symbol, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(data->charge_symbol, LV_OBJ_FLAG_HIDDEN);
     }
   }
 }
@@ -1417,13 +1445,20 @@ void data_display_updater(lv_timer_t *timer) {
     strcpy(battery, LV_SYMBOL_BATTERY_EMPTY);
   }
 
-  // ARROW DIRECTION UPDATER
-  if ( combinedData.canData.avgI < 0 ) {
-     lv_label_set_text(data->arrow_symbol, "\uF063"); // point down while charging
+  // ARROW DIRECTION UPDATER ************ TOO MUCH CLUTTER WITH ARROWS
+  /*if ( combinedData.canData.avgI < 0 ) {
+    lv_obj_set_style_text_color(data->arrow_symbol, lv_palette_main(LV_PALETTE_GREEN), NULL);
+    lv_obj_align_to(data->arrow_symbol, data->soc_arc, LV_ALIGN_OUT_RIGHT_MID, 15, -20);
+    lv_label_set_text(data->arrow_symbol, "\uF062"); // point up while charging
+  }
+  else if ( combinedData.canData.avgI > 0 ) {
+    lv_obj_set_style_text_color(data->arrow_symbol, lv_palette_main(LV_PALETTE_RED), NULL);
+    lv_obj_align_to(data->arrow_symbol, data->soc_arc, LV_ALIGN_OUT_RIGHT_MID, 15, 20);
+    lv_label_set_text(data->arrow_symbol, "\uF063");
   }
   else {
-    lv_label_set_text(data->arrow_symbol, "\uF062");
-  }
+    lv_label_set_text(data->arrow_symbol, "");
+  }*/
 
   // UPDATE SOC ARC VALUES AND CHANGE INDICATOR TO RED COLOUR FROM 10%
   lv_arc_set_value(data->soc_arc, combinedData.canData.soc);
@@ -1431,7 +1466,7 @@ void data_display_updater(lv_timer_t *timer) {
     lv_obj_set_style_arc_color(data->soc_arc, lv_palette_main(LV_PALETTE_RED), LV_PART_INDICATOR);
   }
 
-  // UPDATE CHG & DCH ARC RANGES DYNAMICALLY *************** DOES THIS WORK?
+  // UPDATE CHG & DCH ARC RANGES DYNAMICALLY
   lv_arc_set_range(data->watt_dch_arc, 0, combinedData.canData.dcl);
   lv_arc_set_range(data->watt_chg_arc, 0, combinedData.canData.ccl);
 
@@ -1463,7 +1498,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_arc_set_bg_angles(data->soc_arc, 0, 360);
     lv_obj_remove_style(data->soc_arc, NULL, LV_PART_KNOB); // remove arc knob
     lv_obj_set_style_arc_width(data->soc_arc, 10, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(data->soc_arc, 20, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(data->soc_arc, 15, LV_PART_INDICATOR);
     lv_obj_clear_flag(data->soc_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
     lv_obj_align_to(data->soc_arc, parent, LV_ALIGN_TOP_MID, 0, 30);
 
@@ -1475,7 +1510,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_obj_remove_style(data->watt_chg_arc, NULL, LV_PART_KNOB); // remove arc knob
     lv_obj_set_style_arc_color(data->watt_chg_arc, lv_palette_main(LV_PALETTE_GREEN), LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(data->watt_chg_arc, 10, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(data->watt_chg_arc, 15, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(data->watt_chg_arc, 10, LV_PART_INDICATOR);
     lv_obj_clear_flag(data->watt_chg_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
     lv_obj_align_to(data->watt_chg_arc, parent, LV_ALIGN_TOP_LEFT, 0, -15);
 
@@ -1488,7 +1523,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_obj_remove_style(data->watt_dch_arc, NULL, LV_PART_KNOB); // remove arc knob
     lv_obj_set_style_arc_color(data->watt_dch_arc, lv_palette_main(LV_PALETTE_RED), LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(data->watt_dch_arc, 10, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(data->watt_dch_arc, 15, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(data->watt_dch_arc, 10, LV_PART_INDICATOR);
     lv_obj_clear_flag(data->watt_dch_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
     lv_obj_align_to(data->watt_dch_arc, parent, LV_ALIGN_TOP_RIGHT, 0, -15);
 
@@ -1497,6 +1532,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
 
   data->soc_label = lv_label_create(parent);    
     lv_obj_set_style_text_font(data->soc_label, &Montserrat34_0_9_percent, NULL);
+    lv_obj_set_style_text_align(data->soc_label, LV_TEXT_ALIGN_CENTER, NULL);
     lv_obj_add_flag(data->soc_label, LV_OBJ_FLAG_CLICKABLE); // make it clickable to open msg_box
     lv_obj_add_event_cb(data->soc_label, can_msgbox, LV_EVENT_CLICKED, &canMsgBoxData); // add event handler to clicks
 
@@ -1505,41 +1541,34 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
   data->amps_label = lv_label_create(parent);
 
   data->watt_label = lv_label_create(parent);
-    lv_style_init(&medium_font);
-    lv_style_set_text_font(&medium_font, &lv_font_montserrat_20);
-    lv_obj_add_style(data->watt_label, &medium_font, NULL);
-
-  data->sun_symbol = lv_label_create(parent);
-    lv_obj_set_style_text_font(data->sun_symbol, &FontAwesomeSolid, NULL);
-    lv_label_set_text(data->sun_symbol, "\uF185");
+    lv_obj_set_style_text_font(data->watt_label, &Montserrat20_0_9_W_minus, NULL);
+    lv_obj_set_style_text_align(data->watt_label, LV_TEXT_ALIGN_CENTER, NULL);
 
   data->charge_symbol = lv_label_create(parent);
-    lv_obj_add_style(data->charge_symbol, &medium_font, NULL);
-    lv_label_set_text(data->charge_symbol, LV_SYMBOL_CHARGE);
+    lv_obj_set_style_text_font(data->charge_symbol, &FontAwesomeIcons, NULL);
+    lv_obj_set_style_text_color(data->charge_symbol, lv_palette_main(LV_PALETTE_YELLOW), NULL);
 
   data->car_battery_symbol = lv_label_create(parent);
-   lv_obj_set_style_text_font(data->car_battery_symbol, &FontAwesomeSolid, NULL);
+   lv_obj_set_style_text_font(data->car_battery_symbol, &FontAwesomeIcons, NULL);
     lv_label_set_text(data->car_battery_symbol, "\uF5DF");
 
-  data->arrow_symbol = lv_label_create(parent);
-    lv_obj_set_style_text_font(data->arrow_symbol, &FontAwesomeSolid, NULL);
+  /*data->arrow_symbol = lv_label_create(parent);
+    lv_obj_set_style_text_font(data->arrow_symbol, &FontAwesomeIcons, NULL);*/
 
   // ALLIGN LABELS
   lv_obj_align_to(data->battery_label,      data->soc_arc, LV_ALIGN_CENTER,       -20, -44);
-  lv_obj_align_to(data->soc_label,          data->soc_arc, LV_ALIGN_CENTER,         7,   0);
+  lv_obj_align_to(data->soc_label,          data->soc_arc, LV_ALIGN_CENTER,         0,   0);
   lv_obj_align_to(data->volt_label,         data->soc_arc, LV_ALIGN_LEFT_MID,      50,  44);
   lv_obj_align_to(data->amps_label,         data->soc_arc, LV_ALIGN_RIGHT_MID,    -50,  44);
-  lv_obj_align_to(data->sun_symbol,         data->soc_arc, LV_ALIGN_OUT_LEFT_MID, -11,   0);
-  lv_obj_align_to(data->charge_symbol,      data->soc_arc, LV_ALIGN_OUT_LEFT_MID, -11,   0);
-  lv_obj_align_to(data->arrow_symbol,       data->soc_arc, LV_ALIGN_OUT_RIGHT_MID, 18, -10);
-  lv_obj_align_to(data->car_battery_symbol, data->soc_arc, LV_ALIGN_OUT_RIGHT_MID, 17,  10);
-  lv_obj_align_to(data->watt_label,         data->soc_arc, LV_ALIGN_OUT_BOTTOM_MID, 7,  15);
+  lv_obj_align_to(data->charge_symbol,      data->soc_arc, LV_ALIGN_OUT_LEFT_MID,  14,   0);
+  lv_obj_align_to(data->car_battery_symbol, data->soc_arc, LV_ALIGN_OUT_RIGHT_MID, 14,   0);
+  lv_obj_align_to(data->watt_label,         data->soc_arc, LV_ALIGN_OUT_BOTTOM_MID, 0,  15);
     
   // CREATE LABEL UPDATE TIMER
   lv_timer_create(data_display_updater, 200, data);
 
   // FLASHING EFFECT FOR ARROWS AND SUN SYMBOLS
-  lv_timer_create(charge_flash, 1000, data);
+  lv_timer_create(flash_icons, 1000, data);
 }
 
 
@@ -1602,6 +1631,9 @@ void setup() {
   // Initialise click event for CANdata message box
   canMsgBoxData.parent = cont;
 
+  // CHECK IF SOLAR AVAILABLE TO START SENDING BALANCING ALLOWED SIGNAL TO BMS
+  lv_timer_create(balancing_allowed, 1000, NULL);
+
   // check for sunrise by reading BMS charge enable signal from CANbus and sending MPO#1 signal to trip relay if flapping detected
   lv_timer_create(sunrise_detector, 1000, NULL);
 
@@ -1649,7 +1681,7 @@ void loop() {
     sort_can();
 
     // send CAN if commanded
-    if ( canMsgData.send_mpo1 || canMsgData.send_mpo2 ) {
+    if ( canMsgData.send_mpo1 || canMsgData.send_mpo2 || canMsgData.send_balancing_allowed ) {
 
       CanMsg send_msg(CanStandardId(canMsgData.CAN_ID), sizeof(canMsgData.msg_data), canMsgData.msg_data);
 
