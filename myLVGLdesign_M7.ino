@@ -129,6 +129,7 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   uint8_t dcl_limit = 0;
   uint8_t set_temp = 20; // should match value of dropdown default index
   bool on = false; // simplifies code by substituting [lv_obj_has_state(data->button, LV_STATE_CHECKED)]
+  bool disabled = false; // used by thermostat to prevent dcl_check from enabling disabled buttons
 } user_data_t;
 
 typedef struct {
@@ -371,6 +372,7 @@ void button_off(user_data_t *data) {
   data->on = false;
   if ( data->timer ) {
     lv_timer_del(data->timer);
+    data->timer = NULL; // clear pointer
   }
   Serial.println("DEBUG button off function ran");
 }
@@ -387,8 +389,13 @@ void button_off(user_data_t *data) {
 void dcl_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
 
+  // IF BUTTON DISABLED ELSEWHERE SKIP THIS FUNCTION
+  if ( data->disabled ) {
+    return;
+  }
+
   // IF DCL IS ZERO OR CELL VOLTAGE TOO LOW AND NOT ALREADY DISABLED: LABEL INVERTER ONLY AND TURN OFF AND DISABLE ALL BUTTONS
-  if ( combinedData.canData.dcl == 0 || combinedData.canData.lC < (combinedData.canData.minC + 0.3) && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
+  else if ( combinedData.canData.dcl == 0 || combinedData.canData.lC < (combinedData.canData.minC + 0.3) && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
     for ( uint8_t i = 0; i < 4; i++ ) {
       if ( userData[i].on ) {
         lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL);
@@ -510,6 +517,7 @@ void close_can_msgbox_event_handler(lv_event_t *e) {
 
   if ( code == LV_EVENT_CLICKED) {
     lv_timer_del(data->timer); // Delete the timer
+    data->timer = NULL;
     lv_msgbox_close(data->msgbox);           // Delete the message box
 
     // Remove the screen overlay object
@@ -573,6 +581,7 @@ void close_sensor_msgbox_event_handler(lv_event_t *e) {
 
   if ( code == LV_EVENT_CLICKED) {
     lv_timer_del(data->timer); // Delete the timer
+    data->timer = NULL;
     lv_msgbox_close(data->msgbox);           // Delete the message box
 
     // Remove the screen overlay object
@@ -629,7 +638,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
       // Store delay timer for inverter search and for hot water timeout in struct to allow for deletion elsewhere
       if ( data->timer ) {
         lv_timer_del(data->timer);
-        Serial.println("DEBUG deleting power_check timer as it exist already");
+        data->timer = NULL;
       }
       // CREATE COMBINED TIMER
       data->timer = lv_timer_create(power_check, data->timeout_ms, data);
@@ -665,37 +674,29 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
 // POWER CHECK TIMER ///////////////////////////////////////////////////////////////////////
 void power_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
-  bool on = false;
 
   // Inverter
   if ( data->relay_pin == RELAY1 ) {
 
     // Remain ON if charging when SOC above 50%
     if ( combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) {
-      on = true;
-      Serial.println("DEBUG charging when SOC above 50%");
+      return;
     }
 
     // Remain ON if demand variable set
     else if ( pwr_demand ) {
-      on = true;
-      Serial.println("DEBUG demand variable set");
+      return;
     }
 
     // Remain ON if discharge exceeds inverter standby - considering prestart_p and canData.p are signed it should cover most charge/discharge scenarios
     else if ( (inverter_standby_p + inverter_prestart_p) < abs(combinedData.canData.p) ) {
-      on = true;
-      Serial.println("DEBUG discharge exceeds inverter standby");
+      return;
     }
   }
   
   // Hot water - reset timer if charging
   else if ( combinedData.canData.ccl < 10 && combinedData.canData.avgI < 0 ) {
-    on = true;
-  }
-
-  if (on) {
-    return; // changed from lv_timer_reset(timer) as I figure timer may be deleted in mean time
+    return;
   }
 
   // INVERTER OFF INTERVAL START
@@ -953,7 +954,7 @@ void update_temp(lv_timer_t *timer) {
   user_data_t *data = (user_data_t *)timer->user_data;
   static lv_timer_t *sensor_fault_timer = NULL;
   char buf[20];
-  bool disabled = false;
+  data->disabled = false; // reset before run - used to prevent dcl_check from enabling disabled buttons
   bool sensor_fault = false;
   bool all_sensors_faulty = false;
 
@@ -978,7 +979,7 @@ void update_temp(lv_timer_t *timer) {
     else {
       snprintf(buf, sizeof(buf), "----");
       all_sensors_faulty = true;
-      disabled = true;
+      data->disabled = true;
     }
     // CALL FAULT LABEL MAKER FUNCTION AT INTERVALS 8 OR 5 SEC
     if ( sensor_fault ) {
@@ -1001,19 +1002,19 @@ void update_temp(lv_timer_t *timer) {
     }
     else {
       snprintf(buf, sizeof(buf), "#3 --");
-      disabled = true;
+      data->disabled = true;
     }
   }
 
   // TURN OFF BUTTON AND ADD DISABLED STATE
-  if ( disabled && ! lv_obj_has_state(data->button, LV_STATE_DISABLED)) {
+  if ( data->disabled && ! lv_obj_has_state(data->button, LV_STATE_DISABLED)) {
     if (data->on == true) {
       lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
     }
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }
   // CLEAR DISABLED STATE IF NOT ENFORCED BY DCL_CHECK FUNCTION
-  else if ( ! disabled && lv_obj_has_state(data->button, LV_STATE_DISABLED) && ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+  else if ( ! data->disabled && lv_obj_has_state(data->button, LV_STATE_DISABLED) && ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
     lv_obj_clear_state(data->button, LV_STATE_DISABLED);
   }
 
@@ -1384,7 +1385,7 @@ void flash_icons(lv_timer_t *timer) {
   }
 
   // SHOW SUN ICON IF SOLAR DETECTED THROUGH CHARGE ENABLED SIGNAL TRANSMITTED FROM BMS
-  if ( (combinedData.canData.cu & 0x0001) == 0x0001 && combinedData.canData.avgI < 0 ) {
+  if ( (combinedData.canData.cu & 0x0001) == 0x0001 ) {
     lv_label_set_text(data->charge_icon, "\uF185"); // sun icon
   }
   // SHOW GRID ICON
@@ -1517,9 +1518,11 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
   // CREATE LABELS AND ASSOCIATED STYLES
   data->charge_label = lv_label_create(parent);
     lv_label_set_text(data->charge_label, "CHARGE");
+    //lv_obj_set_style_text_align(data->charge_label, LV_TEXT_ALIGN_CENTER, NULL);
   
   data->load_label = lv_label_create(parent);
     lv_label_set_text(data->load_label, "LOAD");
+    //lv_obj_set_style_text_align(data->load_label, LV_TEXT_ALIGN_CENTER, NULL);
 
   data->battery_label = lv_label_create(parent);
 
@@ -1556,8 +1559,8 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
   lv_obj_align_to(data->soc_label,          data->soc_arc,        LV_ALIGN_CENTER,            0,   0);
   lv_obj_align_to(data->volt_label,         data->soc_arc,        LV_ALIGN_BOTTOM_MID,      -40, -44);
   lv_obj_align_to(data->amps_label,         data->soc_arc,        LV_ALIGN_BOTTOM_MID,       30, -44);
-  lv_obj_align_to(data->charge_icon,        data->soc_arc,        LV_ALIGN_OUT_LEFT_MID,     15,   0);
-  lv_obj_align_to(data->car_battery_icon,   data->soc_arc,        LV_ALIGN_OUT_RIGHT_MID,    15,   0);
+  lv_obj_align_to(data->charge_icon,        data->soc_arc,        LV_ALIGN_OUT_LEFT_MID,     14,   0);
+  lv_obj_align_to(data->car_battery_icon,   data->soc_arc,        LV_ALIGN_OUT_RIGHT_MID,    16,   0);
   lv_obj_align_to(data->watt_label,         data->soc_arc,        LV_ALIGN_OUT_BOTTOM_MID,    0,  15);
     
   // CREATE LABEL UPDATE TIMER
