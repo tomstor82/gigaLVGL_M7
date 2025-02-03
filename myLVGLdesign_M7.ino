@@ -169,6 +169,40 @@ static can_msgbox_data_t canMsgBoxData;
 static data_display_t dataDisplay;
 static CombinedData combinedData;
 
+// Macro short-hands that are free
+#define CAN_RX        canMsgData.rxBuf
+#define TEMP1         combinedData.sensorData.temp1
+#define TEMP2         combinedData.sensorData.temp2
+#define TEMP3         combinedData.sensorData.temp3
+#define TEMP4         combinedData.sensorData.temp4
+#define RH1           combinedData.sensorData.humi1
+#define RH2           combinedData.sensorData.humi2
+#define RH3           combinedData.sensorData.humi3
+#define RH4           combinedData.sensorData.humi4
+#define WATTS         combinedData.canData.p
+#define VOLT          combinedData.canData.instU
+#define AMPS          combinedData.canData.instI
+#define AVG_AMPS      combinedData.canData.avgI
+#define AH            combinedData.canData.ah
+#define HI_CELL_V     combinedData.canData.hC
+#define LO_CELL_V     combinedData.canData.lC
+#define MAX_CELL_V    combinedData.canData.maxC
+#define MIN_CELL_V    combinedData.canData.minC
+#define SOC           combinedData.canData.soc
+#define HI_TEMP       combinedData.canData.h
+#define LO_TEMP       combinedData.canData.lT
+#define RELAYS        combinedData.canData.ry
+#define DCL           combinedData.canData.dcl
+#define CCL           combinedData.canData.ccl
+#define HEALTH        combinedData.canData.h
+#define HI_CELL_ID    combinedData.canData.hCid
+#define LO_CELL_ID    combinedData.canData.lCid
+#define BMS_FAULTS    combinedData.canData.fu
+#define BMS_STATUS    combinedData.canData.st
+#define CYCLES        combinedData.canData.cc
+#define HEAT_SINK     combinedData.canData.hs
+#define CUSTOM_FLAGS  combinedData.canData.cu
+
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size) int/float = 4 bytes
 int16_t inverter_prestart_p = 0; // must be signed
 const uint8_t inverter_standby_p = 75; // takes around 4 minutes to settle down after start
@@ -305,10 +339,10 @@ void sunrise_detector(lv_timer_t *timer) {
   static uint32_t time_ms = 0;
 
   // IS SOLAR CHARGE SIGNAL AVAILABLE THROUGH CUSTOM FLAG AND TIMER NOT RUNNING
-  if ( (combinedData.canData.cu & 0x0001) == 0x0001 && ! time_ms ) {
+  if ( (CUSTOM_FLAGS & 0x0001) == 0x0001 && ! time_ms ) {
 
     // IN LOW SUN CONDITIONS MPPT DRAINS BATTERY INSTEAD OF CHARGING. IF THIS HAPPENS WHEN INVERTER IS OFF, DISABLE MPPT
-    if ( ! userData[3].on && combinedData.canData.p > 20 ) {
+    if ( ! userData[3].on && WATTS > 10 ) {
       mppt_delay = true;
     }
     // START TIME AND RETURN FOR ANOTHER ROUND
@@ -319,7 +353,7 @@ void sunrise_detector(lv_timer_t *timer) {
   }
 
   // IF SOLAR CHARGE SIGNAL IS LOST
-  else if ( ! (combinedData.canData.cu & 0x0001) == 0x0001 && time_ms && ! mppt_delay ) {
+  else if ( ! (CUSTOM_FLAGS & 0x0001) == 0x0001 && time_ms && ! mppt_delay ) {
 
     // within 10 seconds lets trigger mppt delay as relay flap detected
     if ( time_ms + 10000 > millis() ) {
@@ -351,7 +385,7 @@ void sunrise_detector(lv_timer_t *timer) {
 // CCL AND HIGH CELL VOLTAGE CHECK TIMER ////////////////////////////////////////////////////////////////////////////
 void ccl_check(lv_timer_t * timer) {
 
-  if ( combinedData.canData.ccl == 0 || combinedData.canData.hC > (combinedData.canData.maxC - 0.1) ) {
+  if ( CCL == 0 || HI_CELL_V > (MAX_CELL_V - 0.1) ) {
     canMsgData.send_mpo1 = true; // trip pv charge relay
     Serial.println("DEBUG ccl_check sending mpo1 signal");
   }
@@ -395,7 +429,7 @@ void dcl_check(lv_timer_t * timer) {
   }
 
   // IF DCL IS ZERO OR CELL VOLTAGE TOO LOW AND NOT ALREADY DISABLED: LABEL INVERTER ONLY AND TURN OFF AND DISABLE ALL BUTTONS
-  else if ( combinedData.canData.dcl == 0 || combinedData.canData.lC < (combinedData.canData.minC + 0.3) && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
+  else if ( DCL == 0 || LO_CELL_V < (MIN_CELL_V + 0.3) && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
     for ( uint8_t i = 0; i < 4; i++ ) {
       if ( userData[i].on ) {
         lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL);
@@ -420,7 +454,7 @@ void dcl_check(lv_timer_t * timer) {
     }
   }
   // INDIVIDUAL BUTTON LIMITS IF NOT ALREADY DISABLED
-  else if ( combinedData.canData.dcl < data->dcl_limit && ! lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
+  else if ( DCL < data->dcl_limit && ! lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
     if ( lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
     }
@@ -467,17 +501,19 @@ const char* set_can_msgbox_text() {
                  "Discharge                               %s\n\n"
                  "Cycles                                     %d\n"
                  "Health                                %d%%\n\n"
+                 "BMS Heatsink                   %d\u00B0C\n"
                  "Energy                          %.2f kW",
-                 combinedData.canData.hC, combinedData.canData.hCid,
-                 combinedData.canData.lC, combinedData.canData.lCid,
-                 combinedData.canData.ccl,
-                 combinedData.canData.dcl,
-                 (combinedData.canData.cu & 0x0002) == 0x0002 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using MPO#1 feedback from BMS which controls both charge FETs
-                 (combinedData.canData.ry & 0x0001) == 0x0001 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using BMS relay state
-                 //(combinedData.canData.ry & 0x0004) == 0x0004 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // this relay is controlled by charge enabled signal from pv panel
-                 combinedData.canData.cc,
-                 combinedData.canData.h,
-                 (combinedData.canData.ah * combinedData.canData.instU) / 1000.0);
+                 HI_CELL_V, HI_CELL_ID,
+                 LO_CELL_V, LO_CELL_ID,
+                 CCL,
+                 DCL,
+                 (CUSTOM_FLAGS & 0x0002) == 0x0002 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using MPO#1 feedback from BMS which controls both charge FETs
+                 (RELAYS & 0x0001) == 0x0001 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using BMS relay state
+                 //(RELAYS & 0x0004) == 0x0004 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // this relay is controlled by charge enabled signal from pv panel
+                 CYCLES,
+                 HEALTH,
+                 HEAT_SINK,
+                 (AH * VOLT) / 1000.0);
 
   return msgbox_text;
 }
@@ -541,10 +577,10 @@ const char* set_sensor_msgbox_text() {
                  "Temperature 2:            %.1f°C\nRelative Humidity 2:   %.1f%%\n\n"
                  "Temperature 3:            %.1f°C\nRelative Humidity 3:   %.1f%%\n\n"
                  "Temperature 4:            %.1f°C\nRelative Humidity 4:   %.1f%%",
-                 combinedData.sensorData.temp1, combinedData.sensorData.humi1,
-                 combinedData.sensorData.temp2, combinedData.sensorData.humi2,
-                 combinedData.sensorData.temp3, combinedData.sensorData.humi3,
-                 combinedData.sensorData.temp4, combinedData.sensorData.humi4);
+                 TEMP1, RH1,
+                 TEMP2, RH2,
+                 TEMP3, RH3,
+                 TEMP4, RH4);
 
   return msgbox_text;
 }
@@ -605,9 +641,9 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
 
       // Inverter
       if ( data->relay_pin == RELAY1 ) {
-        inverter_prestart_p = combinedData.canData.p;
+        inverter_prestart_p = WATTS;
         // Turn off mppt if pv relat closed but no charge detected to avoid startup issues
-        if ( inverter_prestart_p >= 0 && (inverter_standby_p + inverter_prestart_p) > combinedData.canData.p && (combinedData.canData.cu & 0x0002) == 0x0002 ) {
+        if ( inverter_prestart_p >= 0 && (inverter_standby_p + inverter_prestart_p) > WATTS && (CUSTOM_FLAGS & 0x0002) == 0x0002 ) {
           mppt_delayer(true); // as sunrise_detector calls mppt_delayer every 1s there's no need to call with false
           delay(500); // allowing for mppt to loose power
         }
@@ -679,7 +715,7 @@ void power_check(lv_timer_t * timer) {
   if ( data->relay_pin == RELAY1 ) {
 
     // Remain ON if charging when SOC above 50%
-    if ( combinedData.canData.avgI < -5 && combinedData.canData.soc > 50 ) {
+    if ( AVG_AMPS < -5 && SOC > 50 ) {
       return;
     }
 
@@ -689,13 +725,13 @@ void power_check(lv_timer_t * timer) {
     }
 
     // Remain ON if discharge exceeds inverter standby - considering prestart_p and canData.p are signed it should cover most charge/discharge scenarios
-    else if ( (inverter_standby_p + inverter_prestart_p) < abs(combinedData.canData.p) ) {
+    else if ( (inverter_standby_p + inverter_prestart_p) < abs(WATTS) ) {
       return;
     }
   }
   
   // Hot water - reset timer if charging
-  else if ( combinedData.canData.ccl < 10 && combinedData.canData.avgI < 0 ) {
+  else if ( CCL < 10 && AVG_AMPS < 0 ) {
     return;
   }
 
@@ -759,13 +795,13 @@ void thermostat_timer(lv_timer_t * timer) {
     if ( combinedData.sensorData.avg_temp != 999.0f && combinedData.sensorData.avg_temp < data->set_temp ) {
       on = true;
     }
-    else if ( combinedData.sensorData.temp1 != 999.0f && combinedData.sensorData.temp1 < data->set_temp ) {
+    else if ( TEMP1 != 999.0f && TEMP1 < data->set_temp ) {
       on = true;
     }
-    else if ( combinedData.sensorData.temp2 != 999.0f && combinedData.sensorData.temp2 < data->set_temp ) {
+    else if ( TEMP2 != 999.0f && TEMP2 < data->set_temp ) {
       on = true;
     }
-    else if ( combinedData.sensorData.temp3 != 999.0f && combinedData.sensorData.temp4 < data->set_temp ) {
+    else if ( TEMP3 != 999.0f && TEMP4 < data->set_temp ) {
       on = true;
     }
 
@@ -777,7 +813,7 @@ void thermostat_timer(lv_timer_t * timer) {
 
   // Shower heater thermostat
   else {
-    if ( combinedData.sensorData.temp3 < data->set_temp ) {
+    if ( TEMP3 < data->set_temp ) {
       on = true;
     }
 
@@ -911,15 +947,15 @@ void fault_label_maker(lv_timer_t *timer) {
   uint8_t index = 0;
   char faultMsg[20];
 
-  if (combinedData.sensorData.temp1 == 999.0f) {
+  if (TEMP1 == 999.0f) {
     faultArr[index] = 1;
     index++;
   }
-  if (combinedData.sensorData.temp2 == 999.0f) {
+  if (TEMP2 == 999.0f) {
     faultArr[index] = 2;
     index++;
   }
-  if (combinedData.sensorData.temp4 == 999.0f) {
+  if (TEMP4 == 999.0f) {
     faultArr[index] = 4;
     index++;
   }
@@ -963,16 +999,16 @@ void update_temp(lv_timer_t *timer) {
     if (combinedData.sensorData.avg_temp != 999.0f) {
       snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp);
     }
-    else if (combinedData.sensorData.temp1 != 999.0f) {
-      snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp1);
+    else if (TEMP1 != 999.0f) {
+      snprintf(buf, sizeof(buf), "%.1f\u00B0C", TEMP1);
       sensor_fault = true;
     }
-    else if (combinedData.sensorData.temp2 != 999.0f) {
-      snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp2);
+    else if (TEMP2 != 999.0f) {
+      snprintf(buf, sizeof(buf), "%.1f\u00B0C", TEMP2);
       sensor_fault = true;
     }
-    else if (combinedData.sensorData.temp4 != 999.0f) {
-      snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp4);
+    else if (TEMP4 != 999.0f) {
+      snprintf(buf, sizeof(buf), "%.1f\u00B0C", TEMP4);
       sensor_fault = true;
     }
     // ALL SENSORS FAULTY
@@ -997,8 +1033,8 @@ void update_temp(lv_timer_t *timer) {
 
   // CHECK SINGLE SENSOR FOR SHOWER ROOM
   else {
-    if (combinedData.sensorData.temp3 != 999.0f) {
-      snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.temp3);
+    if (TEMP3 != 999.0f) {
+      snprintf(buf, sizeof(buf), "%.1f\u00B0C", TEMP3);
     }
     else {
       snprintf(buf, sizeof(buf), "#3 --");
@@ -1063,21 +1099,21 @@ void clock_updater(lv_timer_t *timer) {
   char state[17];
 
   // Zero
-  if ( combinedData.canData.avgI == 0 ) {
+  if ( AVG_AMPS == 0 ) {
     strcpy(t, "");;
   }
 
   // Discharge
-  else if (combinedData.canData.avgI > 0) {
-    h = combinedData.canData.soc / (combinedData.canData.avgI/10.0);
-    m = (combinedData.canData.soc / (combinedData.canData.avgI/10.0) - h) * 60;
+  else if (AVG_AMPS > 0) {
+    h = SOC / (AVG_AMPS/10.0);
+    m = (SOC / (AVG_AMPS/10.0) - h) * 60;
     strcpy(state, "Discharged in");
   }
 
   // Charge
-  else if (combinedData.canData.avgI < 0) {
-    h = (200 - combinedData.canData.soc) / (abs(combinedData.canData.avgI)/10.0);
-    m = ((200 - combinedData.canData.soc) / (abs(combinedData.canData.avgI)/10.0) - h) * 60;
+  else if (AVG_AMPS < 0) {
+    h = (200 - SOC) / (abs(AVG_AMPS)/10.0);
+    m = ((200 - SOC) / (abs(AVG_AMPS)/10.0) - h) * 60;
     strcpy(state, "Fully Charged in");
   }
 
@@ -1111,40 +1147,53 @@ int16_t signValue(uint16_t canValue) {
 void sort_can() {
 
     if (canMsgData.rxId == 0x3B) {
-        combinedData.canData.instU = ((canMsgData.rxBuf[0] << 8) + canMsgData.rxBuf[1]) / 10.0;
-        combinedData.canData.instI = (signValue((canMsgData.rxBuf[2] << 8) + canMsgData.rxBuf[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
-        //combinedData.canData.absI = ((canMsgData.rxBuf[4] << 8) + canMsgData.rxBuf[5]) / 10.0; // orion2jr issue: set signed and -32767 to fix
-        combinedData.canData.soc = canMsgData.rxBuf[6] / 2;
+        VOLT = ((CAN_RX[0] << 8) + CAN_RX[1]) / 10.0;
+        AMPS = (signValue((CAN_RX[2] << 8) + CAN_RX[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
+        //combinedData.canData.absI = ((CAN_RX[4] << 8) + CAN_RX[5]) / 10.0; // orion2jr issue: set signed and -32767 to fix
+        SOC = CAN_RX[6] / 2;
     }
     if (canMsgData.rxId == 0x6B2) {
-        combinedData.canData.lC = ((canMsgData.rxBuf[0] << 8) + canMsgData.rxBuf[1]) / 10000.00;
-        combinedData.canData.hC = ((canMsgData.rxBuf[2] << 8) + canMsgData.rxBuf[3]) / 10000.00;
-        combinedData.canData.h = canMsgData.rxBuf[4];
-        combinedData.canData.cc = (canMsgData.rxBuf[5] << 8) + canMsgData.rxBuf[6];
+        LO_CELL_V = ((CAN_RX[0] << 8) + CAN_RX[1]) / 10000.00;
+        HI_CELL_V = ((CAN_RX[2] << 8) + CAN_RX[3]) / 10000.00;
+        HEALTH = CAN_RX[4];
+        CYCLES = (CAN_RX[5] << 8) + CAN_RX[6];
     }
     if (canMsgData.rxId == 0x0A9) {
-        combinedData.canData.ry = canMsgData.rxBuf[0];
-        combinedData.canData.ccl = canMsgData.rxBuf[1];
-        combinedData.canData.dcl = canMsgData.rxBuf[2];
-        combinedData.canData.ah = ((canMsgData.rxBuf[3] << 8) + canMsgData.rxBuf[4]) / 10.0;
-        combinedData.canData.avgI = (signValue((canMsgData.rxBuf[5] << 8) + canMsgData.rxBuf[6])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
+        RELAYS = CAN_RX[0];
+        CCL = CAN_RX[1];
+        DCL = CAN_RX[2];
+        AH = ((CAN_RX[3] << 8) + CAN_RX[4]) / 10.0;
+        AVG_AMPS = (signValue((CAN_RX[5] << 8) + CAN_RX[6])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
     }
     if (canMsgData.rxId == 0x0BD) {
-        combinedData.canData.fu = (canMsgData.rxBuf[0] << 8) + canMsgData.rxBuf[1];
-        combinedData.canData.hT = canMsgData.rxBuf[2];
-        combinedData.canData.lT = canMsgData.rxBuf[3];
-        combinedData.canData.cu = canMsgData.rxBuf[4];
-        combinedData.canData.st = (canMsgData.rxBuf[5] << 8) + canMsgData.rxBuf[6];
+        BMS_FAULTS = (CAN_RX[0] << 8) + CAN_RX[1];
+        HI_TEMP = CAN_RX[2];
+        LO_TEMP = CAN_RX[3];
+        CUSTOM_FLAGS = CAN_RX[4];
+        BMS_STATUS = (CAN_RX[5] << 8) + CAN_RX[6];
     }
     if (canMsgData.rxId == 0x0BE) {
-        combinedData.canData.hCid = canMsgData.rxBuf[0];
-        combinedData.canData.lCid = canMsgData.rxBuf[1];
-        combinedData.canData.hs = canMsgData.rxBuf[2];
-        combinedData.canData.minC = ((canMsgData.rxBuf[3] << 8) + canMsgData.rxBuf[4]) / 10000.00;
-        combinedData.canData.maxC = ((canMsgData.rxBuf[5] << 8) + canMsgData.rxBuf[6]) / 10000.00;
+        HI_CELL_ID = CAN_RX[0];
+        LO_CELL_ID = CAN_RX[1];
+        HEAT_SINK = CAN_RX[2];
+        MIN_CELL_V = ((CAN_RX[3] << 8) + CAN_RX[4]) / 10000.00;
+        MAX_CELL_V = ((CAN_RX[5] << 8) + CAN_RX[6]) / 10000.00;
     }
-    combinedData.canData.p = combinedData.canData.avgI * combinedData.canData.instU;
+    WATTS = AVG_AMPS * VOLT;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1156,6 +1205,15 @@ void retrieve_M4_data() {
   // Call the RPC function to get sensor data
   combinedData.sensorData = RPC.call("getSensorData").as<SensorData>();
 }
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1180,6 +1238,19 @@ void screen_touch(lv_event_t *e) {
     backlight.set(brightness);
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1236,45 +1307,45 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     if ( canMsgData.len == 0 ) { create_status_label("No CAN data from BMS", data); flag_index++; control_index++; }
 
     // BMS flags
-    if ((combinedData.canData.fu & 0x0100) == 0x0100) { create_status_label("Internal Hardware Fault", data); flag_index++; }
-    if ((combinedData.canData.fu & 0x0200) == 0x0200) { create_status_label("Internal Cell Comm Fault", data); flag_index++; }
-    if ((combinedData.canData.fu & 0x0400) == 0x0400) { create_status_label("Weak Cell Fault", data); flag_index++; }
-    if ((combinedData.canData.fu & 0x0800) == 0x0800) { create_status_label("Low Cell Voltage", data); flag_index++; }
-    if ((combinedData.canData.fu & 0x1000) == 0x1000) { create_status_label("Open Wire Fault", data); flag_index++; }
-    if ((combinedData.canData.fu & 0x2000) == 0x2000) { create_status_label("Current Sensor Fault", data); flag_index++; }
-    if ((combinedData.canData.fu & 0x4000) == 0x4000) { create_status_label("Abnormal SOC Behavior", data); flag_index++; }
-    if ((combinedData.canData.fu & 0x8000) == 0x8000) { create_status_label("Pack Too Hot Fault", data); flag_index++; }
-    if ((combinedData.canData.fu & 0x0001) == 0x0001) { create_status_label("Weak Pack Fault", data); flag_index++; }
-    if ((combinedData.canData.fu & 0x0002) == 0x0002) { create_status_label("External Thermistor Fault", data); flag_index++; }
-    if ((combinedData.canData.fu & 0x0004) == 0x0004) { create_status_label("Charge Relay Failure", data); flag_index++; }
-    if ((combinedData.canData.fu & 0x0008) == 0x0008) { create_status_label("Discharge Relay Fault", data); flag_index++; }
-    if ((combinedData.canData.fu & 0x0010) == 0x0010) { create_status_label("Safety Relay Fault", data); flag_index++; }
-    if ((combinedData.canData.fu & 0x0020) == 0x0020) { create_status_label("CAN communication Fault", data); flag_index++; }
-    if ((combinedData.canData.fu & 0x0040) == 0x0040) { create_status_label("Internal Thermistor Fault", data); flag_index++; }
-    if ((combinedData.canData.fu & 0x0080) == 0x0080) { create_status_label("Internal Logic Fault", data); flag_index++; }
+    if ((BMS_FAULTS & 0x0100) == 0x0100) { create_status_label("Internal Hardware Fault", data); flag_index++; }
+    if ((BMS_FAULTS & 0x0200) == 0x0200) { create_status_label("Internal Cell Comm Fault", data); flag_index++; }
+    if ((BMS_FAULTS & 0x0400) == 0x0400) { create_status_label("Weak Cell Fault", data); flag_index++; }
+    if ((BMS_FAULTS & 0x0800) == 0x0800) { create_status_label("Low Cell Voltage", data); flag_index++; }
+    if ((BMS_FAULTS & 0x1000) == 0x1000) { create_status_label("Open Wire Fault", data); flag_index++; }
+    if ((BMS_FAULTS & 0x2000) == 0x2000) { create_status_label("Current Sensor Fault", data); flag_index++; }
+    if ((BMS_FAULTS & 0x4000) == 0x4000) { create_status_label("Abnormal SOC Behavior", data); flag_index++; }
+    if ((BMS_FAULTS & 0x8000) == 0x8000) { create_status_label("Pack Too Hot Fault", data); flag_index++; }
+    if ((BMS_FAULTS & 0x0001) == 0x0001) { create_status_label("Weak Pack Fault", data); flag_index++; }
+    if ((BMS_FAULTS & 0x0002) == 0x0002) { create_status_label("External Thermistor Fault", data); flag_index++; }
+    if ((BMS_FAULTS & 0x0004) == 0x0004) { create_status_label("Charge Relay Failure", data); flag_index++; }
+    if ((BMS_FAULTS & 0x0008) == 0x0008) { create_status_label("Discharge Relay Fault", data); flag_index++; }
+    if ((BMS_FAULTS & 0x0010) == 0x0010) { create_status_label("Safety Relay Fault", data); flag_index++; }
+    if ((BMS_FAULTS & 0x0020) == 0x0020) { create_status_label("CAN communication Fault", data); flag_index++; }
+    if ((BMS_FAULTS & 0x0040) == 0x0040) { create_status_label("Internal Thermistor Fault", data); flag_index++; }
+    if ((BMS_FAULTS & 0x0080) == 0x0080) { create_status_label("Internal Logic Fault", data); flag_index++; }
 
     // Failsafe status
-    if ((combinedData.canData.st & 0x0001) == 0x0001) { create_status_label("Voltage Failsafe", data); flag_index++; }
-    if ((combinedData.canData.st & 0x0002) == 0x0002) { create_status_label("Current Failsafe", data); flag_index++; }
-    if ((combinedData.canData.st & 0x0004) == 0x0004) { create_status_label("Relay Failsafe", data); flag_index++; }
-    if ((combinedData.canData.st & 0x0010) == 0x0010) { create_status_label("Charge Interlock Failsafe", data); flag_index++; }
-    if ((combinedData.canData.st & 0x0020) == 0x0020) { create_status_label("Thermistor B-value Table Invalid", data); flag_index++; }
-    if ((combinedData.canData.st & 0x0040) == 0x0040) { create_status_label("Input Power Supply Failsafe", data); flag_index++; }
-    if ((combinedData.canData.st & 0x0100) == 0x0100) { create_status_label("Relays Opened under Load Failsafe", data); flag_index++; }
-    if ((combinedData.canData.st & 0x1000) == 0x1000) { create_status_label("Polarization Model 1 Active", data); flag_index++; }
-    if ((combinedData.canData.st & 0x2000) == 0x2000) { create_status_label("Polarization Model 2 Active", data); flag_index++; }
-    if ((combinedData.canData.st & 0x8000) == 0x8000) { create_status_label("Charge Mode Activated over CANBUS", data); flag_index++; }
+    if ((BMS_STATUS & 0x0001) == 0x0001) { create_status_label("Voltage Failsafe", data); flag_index++; }
+    if ((BMS_STATUS & 0x0002) == 0x0002) { create_status_label("Current Failsafe", data); flag_index++; }
+    if ((BMS_STATUS & 0x0004) == 0x0004) { create_status_label("Relay Failsafe", data); flag_index++; }
+    if ((BMS_STATUS & 0x0010) == 0x0010) { create_status_label("Charge Interlock Failsafe", data); flag_index++; }
+    if ((BMS_STATUS & 0x0020) == 0x0020) { create_status_label("Thermistor B-value Table Invalid", data); flag_index++; }
+    if ((BMS_STATUS & 0x0040) == 0x0040) { create_status_label("Input Power Supply Failsafe", data); flag_index++; }
+    if ((BMS_STATUS & 0x0100) == 0x0100) { create_status_label("Relays Opened under Load Failsafe", data); flag_index++; }
+    if ((BMS_STATUS & 0x1000) == 0x1000) { create_status_label("Polarization Model 1 Active", data); flag_index++; }
+    if ((BMS_STATUS & 0x2000) == 0x2000) { create_status_label("Polarization Model 2 Active", data); flag_index++; }
+    if ((BMS_STATUS & 0x8000) == 0x8000) { create_status_label("Charge Mode Activated over CANBUS", data); flag_index++; }
 
     // Relay status
-    if ((combinedData.canData.ry & 0x0001) != 0x0001) { create_status_label("Discharge Relay Opened", data); flag_index++; }
-    // CONTROLLED BY ARDUINO AND DISABLED IN BMS if ((combinedData.canData.ry & 0x0002) == 0x0000) { create_status_label("Charge Relay Opened", data); flag_index++; }
+    if ((RELAYS & 0x0001) != 0x0001) { create_status_label("Discharge Relay Opened", data); flag_index++; }
+    // CONTROLLED BY ARDUINO AND DISABLED IN BMS if ((RELAYS & 0x0002) == 0x0000) { create_status_label("Charge Relay Opened", data); flag_index++; }
 
     // Custom status messages
     if ( canMsgData.send_mpo1 ) { create_status_label("Charge Disabled by Arduino", data); flag_index++; control_index++;}
     if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Discharge Disabled by Arduino", data); flag_index++; control_index++;} // If Inverter DCL CHECK triggered
 
     // Cell balancing check at end ensures higher importance messages appear above
-    if ((combinedData.canData.st & 0x0008) == 0x0008) {
+    if ((BMS_STATUS & 0x0008) == 0x0008) {
       if ( balancing_label_showing ) {
         create_status_label("", data); // create blank label
         balancing_label_showing = false;
@@ -1370,8 +1441,8 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
 void flash_icons(lv_timer_t *timer) {
   data_display_t *data = (data_display_t*)timer->user_data;
 
-  // RED FLASHING BATTERY ICON FROM 10% SOC AND DOWN
-  if ( combinedData.canData.soc <= 10 ) {
+  // RED FLASHING BATTERY ICON FROM SOC 10% AND LESS
+  if ( SOC <= 10 ) {
     lv_obj_set_style_arc_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_RED), NULL);
     if ( lv_obj_has_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
@@ -1380,16 +1451,21 @@ void flash_icons(lv_timer_t *timer) {
       lv_obj_add_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
     }
   }
+  // MAKE BATTERY ICON VISIBLE IF PREVIOUSLY HIDDEN
   else if ( lv_obj_has_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN) ) {
     lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
   }
+  // ORANGE BATTERY FROM SOC 20% AND LESS 
+  else if ( SOC <= 20 ) {
+    lv_obj_set_style_arc_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_ORANGE), NULL);
+  }
 
   // SHOW SUN ICON IF SOLAR DETECTED THROUGH CHARGE ENABLED SIGNAL TRANSMITTED FROM BMS
-  if ( (combinedData.canData.cu & 0x0001) == 0x0001 ) {
+  if ( (CUSTOM_FLAGS & 0x0001) == 0x0001 ) {
     lv_label_set_text(data->charge_icon, "\uF185"); // sun icon
   }
   // SHOW GRID ICON
-  else if ( combinedData.canData.avgI < 0 ) {
+  else if ( AVG_AMPS < 0 ) {
     lv_label_set_text(data->charge_icon, "\uF1E6"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
     return; // no need to continue as this will not be flashing
   }
@@ -1400,7 +1476,7 @@ void flash_icons(lv_timer_t *timer) {
   }
   
   // FLASH SUN IF THERE IS CHARGE SIGNAL FROM SOLAR BUT NO CHARGING OR MPPT HAS BEEN DISABLED
-  if ( combinedData.canData.avgI >= 0 && userData[3].on == false || canMsgData.send_mpo1 ) {
+  if ( AVG_AMPS >= 0 && userData[3].on == false || canMsgData.send_mpo1 ) {
     if ( lv_obj_has_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
     }
@@ -1416,63 +1492,48 @@ void data_display_updater(lv_timer_t *timer) {
   char battery[4];
   
   // BATTERY SYMBOL UPDATER
-  if ( combinedData.canData.soc >= 80 ) {
+  if ( SOC >= 80 ) {
     strcpy(battery, LV_SYMBOL_BATTERY_FULL);
   }
-  else if ( combinedData.canData.soc >= 60 ) {
+  else if ( SOC >= 60 ) {
     strcpy(battery, LV_SYMBOL_BATTERY_3);
   }
-  else if ( combinedData.canData.soc >= 40 ) {
+  else if ( SOC >= 40 ) {
     strcpy(battery, LV_SYMBOL_BATTERY_2);
   }
-  else if ( combinedData.canData.soc >= 20 ) {
+  else if ( SOC >= 20 ) {
     strcpy(battery, LV_SYMBOL_BATTERY_1);
   }
   else {
     strcpy(battery, LV_SYMBOL_BATTERY_EMPTY);
   }
 
-  // ARROW DIRECTION UPDATER
-  /*if ( combinedData.canData.avgI < 0 ) {
-    lv_obj_set_style_text_color(data->arrow_icon, lv_palette_main(LV_PALETTE_GREEN), NULL);
-    lv_obj_align_to(data->arrow_icon, data->soc_arc, LV_ALIGN_OUT_RIGHT_MID, 15, -20);
-    lv_label_set_text(data->arrow_icon, "\uF062"); // point up while charging
-  }
-  else if ( combinedData.canData.avgI > 0 ) {
-    lv_obj_set_style_text_color(data->arrow_icon, lv_palette_main(LV_PALETTE_ORANGE), NULL);
-    lv_obj_align_to(data->arrow_icon, data->soc_arc, LV_ALIGN_OUT_RIGHT_MID, 15, 20);
-    lv_label_set_text(data->arrow_icon, "\uF063");
-  }
-  else {
-    lv_label_set_text(data->arrow_icon, "");
-  }*/
-
   // UPDATE SOC ARC VALUES AND CHANGE INDICATOR TO RED COLOUR FROM 10%
-  lv_arc_set_value(data->soc_arc, combinedData.canData.soc);
-  if ( combinedData.canData.soc <= 10 ) {
+  lv_arc_set_value(data->soc_arc, SOC);
+  if ( SOC <= 10 ) {
     lv_obj_set_style_arc_color(data->soc_arc, lv_palette_main(LV_PALETTE_RED), LV_PART_INDICATOR);
   }
 
   // UPDATE CHG & DCH ARC RANGES DYNAMICALLY
-  lv_arc_set_range(data->discharge_arc, 0, combinedData.canData.dcl);
-  lv_arc_set_range(data->charge_arc, 0, combinedData.canData.ccl);
+  lv_arc_set_range(data->discharge_arc, 0, DCL);
+  lv_arc_set_range(data->charge_arc, 0, CCL);
 
   // UPDATE CHARGE AND DISCHARGE ARCS FROM AVERAGE CURRENT READING
-  if ( combinedData.canData.avgI > 0 ) {
-    lv_arc_set_value(data->discharge_arc, combinedData.canData.avgI);
+  if ( AVG_AMPS > 0 ) {
+    lv_arc_set_value(data->discharge_arc, AVG_AMPS);
     lv_arc_set_value(data->charge_arc, 0);
   }
   else {
-    lv_arc_set_value(data->charge_arc, abs(combinedData.canData.avgI));
+    lv_arc_set_value(data->charge_arc, abs(AVG_AMPS));
     lv_arc_set_value(data->discharge_arc, 0);
   }
 
   // UPDATE LABEL TEXT
   lv_label_set_text_fmt(data->battery_label, "%s Battery", battery);
-  lv_label_set_text_fmt(data->soc_label, "%d%%", combinedData.canData.soc);
-  lv_label_set_text_fmt(data->volt_label, "%.2fV", combinedData.canData.instU);
-  lv_label_set_text_fmt(data->amps_label, "%.1fA", combinedData.canData.instI);
-  lv_label_set_text_fmt(data->watt_label, "%dW", combinedData.canData.p);
+  lv_label_set_text_fmt(data->soc_label, "%d%%", SOC);
+  lv_label_set_text_fmt(data->volt_label, "%.2fV", VOLT);
+  lv_label_set_text_fmt(data->amps_label, "%.1fA", AMPS);
+  lv_label_set_text_fmt(data->watt_label, "%dW", WATTS);
 }
 
 // CREATE DATA DISPLAY //////////////////////////////////////////////////////////////////
@@ -1522,7 +1583,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
   
   data->load_label = lv_label_create(parent);
     lv_label_set_text(data->load_label, "LOAD");
-    //lv_obj_set_style_text_align(data->load_label, LV_TEXT_ALIGN_CENTER, NULL);
+    //lv_obj_set_style_text_align(data->load_label, LV_TEXT_ALIGN_CENTER, NULL); // was used when i added % below. but it clutters
 
   data->battery_label = lv_label_create(parent);
 
@@ -1546,11 +1607,8 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_obj_set_style_text_color(data->charge_icon, lv_palette_main(LV_PALETTE_YELLOW), NULL);
 
   data->car_battery_icon = lv_label_create(parent);
-   lv_obj_set_style_text_font(data->car_battery_icon, &FontAwesomeIcons, NULL);
+    lv_obj_set_style_text_font(data->car_battery_icon, &FontAwesomeIcons, NULL);
     lv_label_set_text(data->car_battery_icon, "\uF5DF");
-
-  /*data->arrow_icon = lv_label_create(parent);
-    lv_obj_set_style_text_font(data->arrow_icon, &FontAwesomeIcons, NULL);*/
 
   // ALLIGN LABELS
   lv_obj_align_to(data->charge_label,       data->soc_arc,        LV_ALIGN_OUT_LEFT_BOTTOM,  -5,   8);
@@ -1673,7 +1731,7 @@ void loop() {
     CanMsg const msg = CAN.read();
     canMsgData.rxId = msg.id;
     canMsgData.len = msg.data_length;
-    memcpy(canMsgData.rxBuf, msg.data, canMsgData.len);
+    memcpy(CAN_RX, msg.data, canMsgData.len);
     sort_can();
 
     // send CAN if commanded
