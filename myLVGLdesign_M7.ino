@@ -31,19 +31,19 @@ LV_FONT_DECLARE(FontAwesomeIcons);
 //  ID 0x0BD BYT0+1:CUSTOM_FLAGS BYT2:HI_TMP BYT3:LO_TMP BYT4:CUSTOM_FLAGS BYT5:BMS_STATUS
 //  ID 0x0BE BYT0:HI_CL_ID BYT1:LO_CL_ID BYT2:INT_HEATSINK BYT3+4:MIN_CELL BYT5+6:MAX_CELL
 
-// Temp and Humidity data struct from M4
+// Temp and rhdity data struct from M4
 struct SensorData {
     float temp1;
     float temp2;
     float temp3;
     float temp4;
-    float humi1;
-    float humi2;
-    float humi3;
-    float humi4;
+    float rh1;
+    float rh2;
+    float rh3;
+    float rh4;
     float avg_temp;
 
-    MSGPACK_DEFINE_ARRAY(temp1, temp2, temp3, temp4, humi1, humi2, humi3, humi4, avg_temp);
+    MSGPACK_DEFINE_ARRAY(temp1, temp2, temp3, temp4, rh1, rh2, rh3, rh4, avg_temp);
 };
 
 // CanData struct
@@ -171,14 +171,15 @@ static CombinedData combinedData;
 
 // Macro short-hands that are free
 #define CAN_RX        canMsgData.rxBuf
+#define AVG_TEMP      combinedData.sensorData.avg_temp
 #define TEMP1         combinedData.sensorData.temp1
 #define TEMP2         combinedData.sensorData.temp2
 #define TEMP3         combinedData.sensorData.temp3
 #define TEMP4         combinedData.sensorData.temp4
-#define RH1           combinedData.sensorData.humi1
-#define RH2           combinedData.sensorData.humi2
-#define RH3           combinedData.sensorData.humi3
-#define RH4           combinedData.sensorData.humi4
+#define RH1           combinedData.sensorData.rh1
+#define RH2           combinedData.sensorData.rh2
+#define RH3           combinedData.sensorData.rh3
+#define RH4           combinedData.sensorData.rh4
 #define WATTS         combinedData.canData.p
 #define VOLT          combinedData.canData.instU
 #define AMPS          combinedData.canData.instI
@@ -792,7 +793,7 @@ void thermostat_timer(lv_timer_t * timer) {
   // Ceiling heater thermostat ( uses 3 or 1 sensors )
   else if ( data->relay_pin == RELAY2 ) {
     // need to check which sensor is working ( if none the temp updater will disable button )
-    if ( combinedData.sensorData.avg_temp != 999.0f && combinedData.sensorData.avg_temp < data->set_temp ) {
+    if ( AVG_TEMP != 999.0f && AVG_TEMP < data->set_temp ) {
       on = true;
     }
     else if ( TEMP1 != 999.0f && TEMP1 < data->set_temp ) {
@@ -988,7 +989,9 @@ void fault_label_maker(lv_timer_t *timer) {
 // TEMPERATURE UPDATER //////////////////////////////////////////////////////
 void update_temp(lv_timer_t *timer) {
   user_data_t *data = (user_data_t *)timer->user_data;
+
   static lv_timer_t *sensor_fault_timer = NULL;
+
   char buf[20];
   data->disabled = false; // reset before run - used to prevent dcl_check from enabling disabled buttons
   bool sensor_fault = false;
@@ -996,8 +999,8 @@ void update_temp(lv_timer_t *timer) {
 
   // LIVING ROOM CHECKING EACH SENSOR AND USING SINGLE WORKING SENSOR IF NO AVERAGE TEMPERATURE
   if (data->relay_pin == RELAY2) {
-    if (combinedData.sensorData.avg_temp != 999.0f) {
-      snprintf(buf, sizeof(buf), "%.1f\u00B0C", combinedData.sensorData.avg_temp);
+    if (AVG_TEMP != 999.0f) {
+      snprintf(buf, sizeof(buf), "%.1f\u00B0C", AVG_TEMP);
     }
     else if (TEMP1 != 999.0f) {
       snprintf(buf, sizeof(buf), "%.1f\u00B0C", TEMP1);
@@ -1026,7 +1029,7 @@ void update_temp(lv_timer_t *timer) {
       sensor_fault_timer = lv_timer_create(fault_label_maker, 5000, data);
       lv_timer_set_repeat_count(sensor_fault_timer, 2); // 5s * 2 = 10s which matches 1 function call interval
     }
-    else {
+    else if ( sensor_fault_timer ) {
       lv_timer_del(sensor_fault_timer);
     }
   }
