@@ -225,7 +225,8 @@ static String buffer = "";
 
 //******************************************************************************************************
 //  BUG#1:  CRASH WHEN DCL HIT 0 BUT INVERTER RELAY OPENED
-//  ADD:    SEND BALANCING SIGNAL TO BMS IF CHARGING WHILST PV RELAY CLOSED
+//  BUG#2:  OCCASIONAL CRASH DUE TO COLORING OF BATTERY ICON ?? SEEMS TO HAPPEN WITH CHANGE FROM CHARGE TO BATTERY OP
+//  BUG#3:  BUTTON SHOWING WHEN BALANCING ONLY AFTER SENDING BALANCING ALLOWED SIGNAL
 //******************************************************************************************************
 
 // CREATE BUTTONS /// TWO TIMERS CREATED HERE: TEMP UPDATER AND DCL CHECK
@@ -1295,8 +1296,6 @@ void refresh_bms_status_data(lv_timer_t * timer) {
 
     static bool balancing_label_showing = false; // Controlling the flashing feature
 
-    bool hide_button = false;
-
     int8_t flag_index = -1; // initialise as -1 as this is for indexing array
     int8_t control_index = -1; // controls button visibility for certain messages
 
@@ -1362,24 +1361,25 @@ void refresh_bms_status_data(lv_timer_t * timer) {
       flag_index++;
       control_index++;
     }
-    // If balancing only or custom messages, button remains hidden
-    if ( flag_index == control_index ) {
-      hide_button = true;
-    }
 
   // Show title and button
   if ( flag_index > -1 ) {
-
+ 
+    // SHOW TITLE
     if ( lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_clear_flag(data->title_label, LV_OBJ_FLAG_HIDDEN); // Remove hide flag
+      lv_obj_clear_flag(data->title_label, LV_OBJ_FLAG_HIDDEN);
     }
-    // Show button if more than just balancing flag is present
-    if ( lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) && ! hide_button ) {
-      lv_obj_clear_flag(data->button, LV_OBJ_FLAG_HIDDEN); // Remove hide flag
+    // SHOW BUTTON
+    if ( lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) && flag_index != control_index ) {
+      lv_obj_clear_flag(data->button, LV_OBJ_FLAG_HIDDEN);
+    }
+    // HIDE BUTTON
+    else {
+      lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
     }
   }
 
-  // Hide title and button if no flags are present
+  // HIDE EVERYTHING IF NO FLAGS AND IF THEY WERE PREVIOUSLY SHOWING
   else {
     if ( ! lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ){
        lv_obj_add_flag(data->title_label, LV_OBJ_FLAG_HIDDEN);
