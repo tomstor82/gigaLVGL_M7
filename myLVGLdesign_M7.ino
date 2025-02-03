@@ -96,11 +96,12 @@ struct CanMsgData {
 
   // send settings
   static const uint8_t CAN_ID = 0x002; // CAN id for the message (constant)
-  uint8_t msg_data[2]; // 2 bytes used in BMS for MPO#2 and MPO#1 respectively
+  uint8_t msg_data[3]; // 2 bytes used in BMS for MPO#2 and MPO#1 respectively
   uint8_t msg_cnt;
 
   bool send_mpo1 = false;
   bool send_mpo2 = false;
+  bool send_balancing_allowed = false;
 
   // Constructor to initialize non const values
   CanMsgData() : rxId(0), len(0), msg_data{}, msg_cnt(0) {}
@@ -223,7 +224,8 @@ const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 static String buffer = "";
 
 //******************************************************************************************************
-//  BUG#1: CRASH WHEN DCL HIT 0 BUT INVERTER RELAY OPENED
+//  BUG#1:  CRASH WHEN DCL HIT 0 BUT INVERTER RELAY OPENED
+//  ADD:    SEND BALANCING SIGNAL TO BMS IF CHARGING WHILST PV RELAY CLOSED
 //******************************************************************************************************
 
 // CREATE BUTTONS /// TWO TIMERS CREATED HERE: TEMP UPDATER AND DCL CHECK
@@ -474,8 +476,8 @@ void dcl_check(lv_timer_t * timer) {
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }
 
-  // IF NO DCL LIMIT HIDE FLAG AND ENABLE BUTTONS
-  else if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) && (RELAYS & 0x1) == 0x1 ) {
+  // IF NO DCL LIMIT AND DISCHARGE RELAY CLOSED HIDE FLAG AND ENABLE BUTTONS
+  else if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) && (RELAYS & 0x1) ) {
     if ( ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
     }
@@ -1442,24 +1444,40 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
 // DATA SCREEN FLASHING CHARGE SYMBOLS ////////////////////////////////////////////////
 void flash_icons(lv_timer_t *timer) {
   data_display_t *data = (data_display_t*)timer->user_data;
+  bool flashing_battery = false;
 
-  // RED FLASHING BATTERY ICON FROM SOC 10% AND LESS
-  if ( SOC <= 10 ) {
-    lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_RED), NULL);
-    if ( lv_obj_has_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
-    }
-    else {
-      lv_obj_add_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
-    }
+  // FLASHING GREEN WHILST CHARGING
+  if ( AVG_AMPS < 0 ) {
+    lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_GREEN), NULL);
+    flashing_battery = true;
+    Serial.println("DEBUG green battery whilst charging");
   }
-  // MAKE BATTERY ICON VISIBLE IF PREVIOUSLY HIDDEN
-  else if ( lv_obj_has_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN) ) {
-    lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
+  // WHITE ABOVE 20%
+  else if ( SOC > 20 ) {
+    lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_NONE), NULL);
+    Serial.println("DEBUG white battery above 20%");
   }
-  // ORANGE BATTERY FROM SOC 20% AND LESS 
-  else if ( SOC <= 20 ) {
+  // ORANGE BELOW 20%
+  else if ( SOC > 10 ) {
     lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_ORANGE), NULL);
+    Serial.println("DEBUG orange battery below 20%");
+  }
+  // RED FLASHING BATTERY ICON FROM SOC 10% AND LESS
+  else {
+    lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_RED), NULL);
+    flashing_battery = true;
+    Serial.println("DEBUG red battery below 10%");
+  }
+
+  // MAKE BATTERY ICON VISIBLE IF PREVIOUSLY HIDDEN
+  if ( lv_obj_has_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN) ) {
+    lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
+    Serial.println("DEBUG showing battery icon");
+  }
+  // HIDE IT AGAIN IF MENT TO FLASH
+  else if ( flashing_battery ) {
+    lv_obj_add_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
+    Serial.println("DEBUG hiding battery icon");
   }
 
   // SHOW SUN ICON IF SOLAR DETECTED THROUGH CHARGE ENABLED SIGNAL TRANSMITTED FROM BMS
@@ -1469,11 +1487,15 @@ void flash_icons(lv_timer_t *timer) {
   // SHOW GRID ICON
   else if ( AVG_AMPS < 0 ) {
     lv_label_set_text(data->charge_icon, "\uF1E6"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
+    canMsgData.msg_data[2] = 0x1;
+    canMsgData.send_balancing_allowed = true;
     return; // no need to continue as this will not be flashing
   }
   // NO CHARGE NO ICON
   else {
     lv_label_set_text(data->charge_icon, "");
+    canMsgData.send_balancing_allowed = false;
+    canMsgData.msg_data[2] = 0x0;
     return; // same for this
   }
   
@@ -1512,9 +1534,13 @@ void data_display_updater(lv_timer_t *timer) {
 
   // UPDATE SOC ARC VALUES AND CHANGE INDICATOR TO RED COLOUR FROM 10%
   lv_arc_set_value(data->soc_arc, SOC);
-  if ( SOC <= 10 ) {
+  if ( SOC > 10 ) {
+    lv_obj_set_style_arc_color(data->soc_arc, lv_palette_main(LV_PALETTE_LIGHT_BLUE), LV_PART_INDICATOR);
+  }
+  else {
     lv_obj_set_style_arc_color(data->soc_arc, lv_palette_main(LV_PALETTE_RED), LV_PART_INDICATOR);
   }
+
 
   // UPDATE CHG & DCH ARC RANGES DYNAMICALLY
   lv_arc_set_range(data->discharge_arc, 0, DCL);
@@ -1737,8 +1763,7 @@ void loop() {
     sort_can();
 
     // send CAN if commanded
-    if ( canMsgData.send_mpo1 || canMsgData.send_mpo2 ) {
-
+    if ( canMsgData.send_mpo1 || canMsgData.send_mpo2 || canMsgData.send_balancing_allowed ) {
       CanMsg send_msg(CanStandardId(canMsgData.CAN_ID), sizeof(canMsgData.msg_data), canMsgData.msg_data);
 
       // retry if send failed (only for mpo2 as mpo1 is timed)
