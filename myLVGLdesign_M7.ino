@@ -223,9 +223,7 @@ const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 static String buffer = "";
 
 //******************************************************************************************************
-//  BUG#1: INVERTER AND HOT WATER CRASH AFTER TURNING ON A 2ND TIME WITHIN A FEW SECONDS
-//  BUG#2: FLASHING HEATER BUTTONS
-//  BUG#3: WHEN IN OFF NO LOAD MODE AND TURNING ON OTHER BUTTONS, ALL BUTTONS GO OFF
+//  BUG#1: CRASH WHEN DCL HIT 0 BUT INVERTER RELAY OPENED
 //******************************************************************************************************
 
 // CREATE BUTTONS /// TWO TIMERS CREATED HERE: TEMP UPDATER AND DCL CHECK
@@ -430,13 +428,12 @@ void dcl_check(lv_timer_t * timer) {
   }
 
   // IF DCL IS ZERO OR CELL VOLTAGE TOO LOW AND NOT ALREADY DISABLED: LABEL INVERTER ONLY AND TURN OFF AND DISABLE ALL BUTTONS
-  else if ( DCL == 0 || LO_CELL_V < (MIN_CELL_V + 0.3) && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
+  else if ( DCL == 0 || LO_CELL_V < (MIN_CELL_V + 0.3) || (RELAYS & 0x0001) != 0x0001 && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
     for ( uint8_t i = 0; i < 4; i++ ) {
       if ( userData[i].on ) {
         lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL);
         // CHECK IF BUTTON IS STILL ON
         if ( userData[i].on ) {
-          Serial.println("DEBUG DCL_CHECK: LV_EVENT_SEND failed to turn off button");
           button_off(&userData[i]);
         }
       }
@@ -456,6 +453,7 @@ void dcl_check(lv_timer_t * timer) {
   }
   // INDIVIDUAL BUTTON LIMITS IF NOT ALREADY DISABLED
   else if ( DCL < data->dcl_limit && ! lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
+    // SHOW LABEL
     if ( lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
     }
@@ -473,11 +471,11 @@ void dcl_check(lv_timer_t * timer) {
       }
     }
     // DISABLE BUTTON - TEST PERFORMED ALREADY
-     lv_obj_add_state(data->button, LV_STATE_DISABLED);
+    lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }
 
   // IF NO DCL LIMIT HIDE FLAG AND ENABLE BUTTONS
-  else if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
+  else if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) && (RELAYS & 0x1) == 0x1 ) {
     if ( ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
     }
@@ -1053,8 +1051,9 @@ void update_temp(lv_timer_t *timer) {
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }
   // CLEAR DISABLED STATE IF NOT ENFORCED BY DCL_CHECK FUNCTION
-  else if ( ! data->disabled && lv_obj_has_state(data->button, LV_STATE_DISABLED) && ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+  else if ( ! data->disabled && lv_obj_has_state(data->button, LV_STATE_DISABLED) && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
     lv_obj_clear_state(data->button, LV_STATE_DISABLED);
+    Serial.println("DEBUG clearing heater buttons disabled state");
   }
 
   // Update the label text
@@ -1446,7 +1445,7 @@ void flash_icons(lv_timer_t *timer) {
 
   // RED FLASHING BATTERY ICON FROM SOC 10% AND LESS
   if ( SOC <= 10 ) {
-    lv_obj_set_style_arc_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_RED), NULL);
+    lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_RED), NULL);
     if ( lv_obj_has_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
     }
@@ -1460,7 +1459,7 @@ void flash_icons(lv_timer_t *timer) {
   }
   // ORANGE BATTERY FROM SOC 20% AND LESS 
   else if ( SOC <= 20 ) {
-    lv_obj_set_style_arc_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_ORANGE), NULL);
+    lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_ORANGE), NULL);
   }
 
   // SHOW SUN ICON IF SOLAR DETECTED THROUGH CHARGE ENABLED SIGNAL TRANSMITTED FROM BMS
@@ -1620,8 +1619,8 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
   lv_obj_align_to(data->soc_label,          data->soc_arc,        LV_ALIGN_CENTER,            0,   0);
   lv_obj_align_to(data->volt_label,         data->soc_arc,        LV_ALIGN_BOTTOM_MID,      -40, -44);
   lv_obj_align_to(data->amps_label,         data->soc_arc,        LV_ALIGN_BOTTOM_MID,       30, -44);
-  lv_obj_align_to(data->charge_icon,        data->soc_arc,        LV_ALIGN_OUT_LEFT_MID,     14,   0);
-  lv_obj_align_to(data->car_battery_icon,   data->soc_arc,        LV_ALIGN_OUT_RIGHT_MID,    16,   0);
+  lv_obj_align_to(data->charge_icon,        data->soc_arc,        LV_ALIGN_OUT_LEFT_MID,     14,   5);
+  lv_obj_align_to(data->car_battery_icon,   data->soc_arc,        LV_ALIGN_OUT_RIGHT_MID,    16,   5);
   lv_obj_align_to(data->watt_label,         data->soc_arc,        LV_ALIGN_OUT_BOTTOM_MID,    0,  15);
     
   // CREATE LABEL UPDATE TIMER
