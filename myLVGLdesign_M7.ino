@@ -216,7 +216,7 @@ static CombinedData combinedData;
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size) int/float = 4 bytes
 int16_t inverter_prestart_p = 0; // must be signed
-const uint8_t inverter_standby_p = 75; // takes around 4 minutes to settle down after start
+const uint8_t inverter_standby_p = 85; // takes around 4 minutes to settle down after start (75W from documentation)
 uint8_t pwr_demand = 0;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
 const uint16_t inverter_startup_delay_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
@@ -233,9 +233,8 @@ const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 static String buffer = "";
 
 //******************************************************************************************************
-//  BUG#1:  CRASH WHEN DCL HIT 0 BUT INVERTER RELAY OPENED
+//  BUG#1:  CRASH WHEN NO LOAAD OFF AND BUTTON IS PRESSED OFF
 //  BUG#2:  OCCASIONAL CRASH DUE TO COLORING OF BATTERY ICON ?? SEEMS TO HAPPEN WITH CHANGE FROM CHARGE TO BATTERY OP
-//  BUG#3:  BUTTON SHOWING WHEN BALANCING ONLY AFTER SENDING BALANCING ALLOWED SIGNAL
 //******************************************************************************************************
 
 // CREATE BUTTONS /// TWO TIMERS CREATED HERE: TEMP UPDATER AND DCL CHECK
@@ -421,11 +420,13 @@ void ccl_check(lv_timer_t * timer) {
 void button_off(user_data_t *data) {
   digitalWrite(data->relay_pin, LOW);
   data->on = false;
+  Serial.println("DEBUG button_off function just set digital pin LOW");
   if ( data->timer ) {
     lv_timer_del(data->timer);
     data->timer = NULL; // clear pointer
+    Serial.println("DEBUG button_off function has deleted timer");
   }
-  Serial.println("DEBUG button off function ran");
+  Serial.println("DEBUG button_off function has finished");
 }
 
 
@@ -707,7 +708,9 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
 
       // inverter needs to manipulate the other buttons
       if ( data->relay_pin == RELAY1 ) {
+        Serial.println("DEBUG Inverter commanded OFF");
         lv_label_set_text(data->label_obj, "OFF");
+        Serial.println("DEBUG Inverter Label set text to: OFF");
         // turn off the other buttons
         for ( uint8_t i = 0; i < 3; i++ ) {
           if ( userData[i].on == true ) {
@@ -715,8 +718,10 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
             button_off(&userData[i]);
           }
         }
+        Serial.println("DEBUG Released all buttens that were ON");
         pwr_demand = 0;
         inverter_prestart_p = 0;
+        Serial.println("Set pwd_demand and inverter_prestart_p to 0");
       }
 
       // hot water
@@ -757,24 +762,32 @@ void power_check(lv_timer_t * timer) {
   }
 
   // INVERTER OFF INTERVAL START
-  else if ( data->relay_pin == RELAY1 && data->on == true ) {
+  if ( data->relay_pin == RELAY1 && data->on == true ) {
     static uint32_t time_ms = 0;
     static uint8_t minute_count = 0;
+    static bool delay_1min = false;
     char plural[2] = "s";
     char label[30];
 
     // INVERTER OFF AND LABEL UPDATER ALGORITHM
     if ( ! time_ms ) {
       time_ms = millis();
-      digitalWrite(data->relay_pin, LOW);
+      delay_1min = true;
+      return; // to prevent label being written
     }
-    else if ( (time_ms + (1 + minute_count) * 60 * 1000) < millis() && minute_count < off_interval_min ) {
+    // DELAY TURNING OFF INVERTER BY 1 MINUTE
+    else if ( (time_ms + 60 * 1000) < millis() && delay_1min ) {
+      time_ms = millis();
+      digitalWrite(data->relay_pin, LOW);
+      delay_1min = false;
+    }
+    else if ( (time_ms + (1 + minute_count) * 60 * 1000) < millis() && minute_count < off_interval_min && ! delay_1min ) {
       minute_count++;
       if ( minute_count == 2 ) {
         strcpy(plural, "");
       }
     }
-    else if ( (minute_count + 1) == off_interval_min ) {
+    else if ( (minute_count + 1) == off_interval_min && ! delay_1min ) {
       minute_count = 0;
       time_ms = 0;
       data->on = false; // to enable inverter startup check
@@ -782,8 +795,10 @@ void power_check(lv_timer_t * timer) {
       return; // to prevent label being written once finished
     }
 
-    snprintf(label, sizeof(label), "OFF - NO LOAD\nON in %d minute%s", (off_interval_min - minute_count), plural);
-    lv_label_set_text(data->label_obj, label);
+    if ( ! delay_1min ) {
+      snprintf(label, sizeof(label), "OFF - NO LOAD\nON in %d minute%s", (off_interval_min - minute_count), plural);
+      lv_label_set_text(data->label_obj, label);
+    }
   }
 
   // Hot water off
@@ -1550,6 +1565,7 @@ void data_display_updater(lv_timer_t *timer) {
 
   // UPDATE SOC ARC VALUES AND CHANGE INDICATOR TO RED COLOUR FROM 10%
   lv_arc_set_value(data->soc_arc, SOC);
+  
   if ( SOC > 10 ) {
     lv_obj_set_style_arc_color(data->soc_arc, lv_palette_main(LV_PALETTE_LIGHT_BLUE), LV_PART_INDICATOR);
   }
