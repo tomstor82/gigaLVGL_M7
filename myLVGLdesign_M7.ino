@@ -159,6 +159,7 @@ typedef struct {
   lv_obj_t *car_battery_icon = NULL;
   lv_obj_t *charge_label = NULL;
   lv_obj_t *load_label = NULL;
+  char dynamic_label[30];
 } data_display_t;
 
 //Initialise structures
@@ -176,6 +177,7 @@ static CombinedData combinedData;
 #define TX_CLR_BMS    canMsgData.send_byte0
 #define TX_TRIP_PV    canMsgData.send_byte1
 #define TX_BALANCING  canMsgData.send_byte2
+
 #define AVG_TEMP      combinedData.sensorData.avg_temp
 #define TEMP1         combinedData.sensorData.temp1
 #define TEMP2         combinedData.sensorData.temp2
@@ -185,6 +187,7 @@ static CombinedData combinedData;
 #define RH2           combinedData.sensorData.rh2
 #define RH3           combinedData.sensorData.rh3
 #define RH4           combinedData.sensorData.rh4
+
 #define WATTS         combinedData.canData.p
 #define VOLT          combinedData.canData.instU
 #define AMPS          combinedData.canData.instI
@@ -209,7 +212,7 @@ static CombinedData combinedData;
 #define HEAT_SINK     combinedData.canData.hs
 #define CUSTOM_FLAGS  combinedData.canData.cu
 
-#define DYNAMIC_LABEL dynamic_label
+#define DYNAMIC_LABEL dataDisplay.dynamic_label
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size) int/float = 4 bytes
 int16_t inverter_prestart_p = 0; // must be signed
@@ -228,8 +231,6 @@ const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 
 // for M4 messages
 static String buffer = "";
-
-char dynamic_label[30];
 
 //******************************************************************************************************
 //  BUG#1:  CRASH WHEN DCL HIT 0 BUT INVERTER RELAY OPENED
@@ -350,15 +351,15 @@ void sunrise_detector(lv_timer_t *timer) {
   // IS SOLAR CHARGE SIGNAL AVAILABLE THROUGH CUSTOM FLAG AND MPPT DELAY NOT RUNNING
   if ( (CUSTOM_FLAGS & 0x0001) == 0x0001 && ! mppt_delay ) {
 
-    // IF MPPT DRAINS BATTERY WHILST INVERTER IS OFF AND PV HAS BEEN DISABLED FOR 30S
-    if ( ! userData[3].on && WATTS > 10 && (time_ms + 30 * 1000) < millis() ) {
-      mppt_delay = true;
-      //time_ms = millis();
-      strcpy(DYNAMIC_LABEL, "Charge Disabled due MPPT consumption");
-    }
     // START TIME TO CHECK WHEN SOLAR SIGNAL IS LOST
-    else if ( ! time_ms ) {
+    if ( ! time_ms ) {
       time_ms = millis();
+    }
+
+    // IF MPPT DRAINS BATTERY WHILST INVERTER IS OFF AND PV HAS BEEN DISABLED FOR 30S
+    else if ( ! userData[3].on && WATTS > 10 && (time_ms + 30 * 1000) < millis() ) {
+      mppt_delay = true;
+      strcpy(DYNAMIC_LABEL, "Solar OFF - MPPT drain");
     }
     return;
   }
@@ -369,7 +370,7 @@ void sunrise_detector(lv_timer_t *timer) {
     // within 10 seconds lets trigger mppt delay as relay flap detected
     if ( time_ms + 10000 > millis() ) {
       mppt_delay = true;
-      strcpy(DYNAMIC_LABEL, "Charge Disabled due Flapping Relay");
+      strcpy(DYNAMIC_LABEL, "Solar OFF - Relay flapping");
     }
 
     // more than 10s later e.g. sunset
@@ -400,7 +401,7 @@ void ccl_check(lv_timer_t * timer) {
   if ( CCL == 0 || HI_CELL_V > (MAX_CELL_V - 0.2) ) {
     TX_MSG[1] = 0x01;
     TX_TRIP_PV = true; // trip pv charge relay
-    strcpy(DYNAMIC_LABEL, "Charge Disabled by CCL Check function");
+    strcpy(DYNAMIC_LABEL, "Solar OFF - CCL enforced");
   }
   else {
     TX_TRIP_PV = false;
@@ -663,6 +664,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
         // Turn off mppt if pv relat closed but no charge detected to avoid startup issues
         if ( inverter_prestart_p >= 0 && (inverter_standby_p + inverter_prestart_p) > WATTS && (CUSTOM_FLAGS & 0x0002) == 0x0002 ) {
           mppt_delayer(true); // as sunrise_detector calls mppt_delayer every 1s there's no need to call with false
+          strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter start");
           delay(700); // allowing for mppt to loose power
         }
         lv_label_set_text(data->label_obj, "Inverter ON");
