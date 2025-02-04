@@ -209,6 +209,8 @@ static CombinedData combinedData;
 #define HEAT_SINK     combinedData.canData.hs
 #define CUSTOM_FLAGS  combinedData.canData.cu
 
+#define DYNAMIC_LABEL dynamic_label
+
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size) int/float = 4 bytes
 int16_t inverter_prestart_p = 0; // must be signed
 const uint8_t inverter_standby_p = 75; // takes around 4 minutes to settle down after start
@@ -226,6 +228,8 @@ const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 
 // for M4 messages
 static String buffer = "";
+
+char dynamic_label[30];
 
 //******************************************************************************************************
 //  BUG#1:  CRASH WHEN DCL HIT 0 BUT INVERTER RELAY OPENED
@@ -328,7 +332,6 @@ void mppt_delayer(bool mppt_delay) {
     case true:
       TX_MSG[1] = 0x01;
       TX_TRIP_PV = true; // this triggers send function in loop
-      Serial.println("DEBUG mppt_delayer called to disable pv charge");
       break;
     case false:
       TX_TRIP_PV = false;
@@ -344,18 +347,20 @@ void sunrise_detector(lv_timer_t *timer) {
   static bool mppt_delay = false;
   static uint32_t time_ms = 0;
 
-  // IS SOLAR CHARGE SIGNAL AVAILABLE THROUGH CUSTOM FLAG AND TIMER NOT RUNNING
-  if ( (CUSTOM_FLAGS & 0x0001) == 0x0001 && ! time_ms ) {
+  // IS SOLAR CHARGE SIGNAL AVAILABLE THROUGH CUSTOM FLAG AND MPPT DELAY NOT RUNNING
+  if ( (CUSTOM_FLAGS & 0x0001) == 0x0001 && ! mppt_delay ) {
 
-    // IN LOW SUN CONDITIONS MPPT DRAINS BATTERY INSTEAD OF CHARGING. IF THIS HAPPENS WHEN INVERTER IS OFF, DISABLE MPPT
-    if ( ! userData[3].on && WATTS > 10 ) {
+    // IF MPPT DRAINS BATTERY WHILST INVERTER IS OFF AND PV HAS BEEN DISABLED FOR 30S
+    if ( ! userData[3].on && WATTS > 10 && (time_ms + 30 * 1000) < millis() ) {
       mppt_delay = true;
+      //time_ms = millis();
+      strcpy(DYNAMIC_LABEL, "Charge Disabled due MPPT consumption");
     }
-    // START TIME AND RETURN FOR ANOTHER ROUND
-    else {
+    // START TIME TO CHECK WHEN SOLAR SIGNAL IS LOST
+    else if ( ! time_ms ) {
       time_ms = millis();
-      return;
     }
+    return;
   }
 
   // IF SOLAR CHARGE SIGNAL IS LOST
@@ -364,6 +369,7 @@ void sunrise_detector(lv_timer_t *timer) {
     // within 10 seconds lets trigger mppt delay as relay flap detected
     if ( time_ms + 10000 > millis() ) {
       mppt_delay = true;
+      strcpy(DYNAMIC_LABEL, "Charge Disabled due Flapping Relay");
     }
 
     // more than 10s later e.g. sunset
@@ -394,7 +400,7 @@ void ccl_check(lv_timer_t * timer) {
   if ( CCL == 0 || HI_CELL_V > (MAX_CELL_V - 0.2) ) {
     TX_MSG[1] = 0x01;
     TX_TRIP_PV = true; // trip pv charge relay
-    Serial.println("DEBUG ccl_check sending trip pv signal");
+    strcpy(DYNAMIC_LABEL, "Charge Disabled by CCL Check function");
   }
   else {
     TX_TRIP_PV = false;
@@ -1356,7 +1362,7 @@ void refresh_bms_status_data(lv_timer_t * timer) {
     // CONTROLLED BY ARDUINO AND DISABLED IN BMS if ((RELAYS & 0x0002) == 0x0000) { create_status_label("Charge Relay Opened", data); flag_index++; }
 
     // Custom status messages
-    if ( TX_TRIP_PV ) { create_status_label("Charge Disabled by Arduino", data); flag_index++; comparator_index++;}
+    if ( TX_TRIP_PV ) { create_status_label(DYNAMIC_LABEL, data); flag_index++; comparator_index++;}
     if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Discharge Disabled by Arduino", data); flag_index++; comparator_index++;} // If Inverter DCL CHECK triggered
 
     // Cell balancing check at end ensures higher importance messages appear above
@@ -1493,6 +1499,7 @@ void flash_icons(lv_timer_t *timer) {
   // SHOW GRID ICON
   else if ( AVG_AMPS < 0 ) {
     lv_label_set_text(data->charge_icon, "\uF1E6"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
+    // SEND BALANCING ALLOWED SIGNAL TO BMS
     TX_MSG[2] = 0x01;
     TX_BALANCING = true;
     return; // no need to continue as this will not be flashing
@@ -1500,13 +1507,14 @@ void flash_icons(lv_timer_t *timer) {
   // NO CHARGE NO ICON
   else {
     lv_label_set_text(data->charge_icon, "");
+    // SEND BALANCING NOT ALLOWED SIGNAL TO BMS
     TX_BALANCING = false;
     TX_MSG[2] = 0x00;
     return; // same for this
   }
   
   // FLASH SUN IF THERE IS CHARGE SIGNAL FROM SOLAR BUT NO CHARGING OR MPPT HAS BEEN DISABLED
-  if ( AVG_AMPS >= 0 && userData[3].on == false || TX_TRIP_PV ) {
+  if ( AVG_AMPS >= 0 && userData[3].on == false && (CUSTOM_FLAGS & 0x0001) == 0x0001 || TX_TRIP_PV ) {
     if ( lv_obj_has_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
     }
