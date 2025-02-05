@@ -96,12 +96,12 @@ struct CanMsgData {
 
   // send settings
   static const uint8_t CAN_ID = 0x002; // CAN id for the message (constant)
-  uint8_t msg_data[3]; // 2 bytes used in BMS for MPO#2 and MPO#1 respectively
+  uint8_t msg_data[3]; // 3 bytes used in BMS for MPO#2, MPO#1 and balancing allowed signals
   uint8_t msg_cnt;
 
-  bool send_byte1 = false;
-  bool send_byte0 = false;
-  bool send_byte2 = false;
+  bool send_byte1 = false; // clear bms signal
+  bool send_byte0 = false; // trip pv relay signal
+  bool send_byte2 = false; // balancing allowed signal
 
   // Constructor to initialize non const values
   CanMsgData() : rxId(0), len(0), msg_data{}, msg_cnt(0) {}
@@ -123,8 +123,8 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   lv_obj_t *button;
   lv_obj_t *dcl_label;
   lv_obj_t *label_obj;
-  lv_obj_t *msgbox;
   lv_timer_t *timer;
+  bool update_timer = false;
   uint8_t relay_pin = 0;
   uint8_t y_offset = 0;
   unsigned long timeout_ms = 0;
@@ -142,8 +142,14 @@ typedef struct {
   lv_obj_t *parent;
   lv_obj_t *label_obj;
   lv_obj_t *msgbox;
-  lv_timer_t *timer;
+  bool update_timer = false; //lv_timer_t *timer;
 } can_msgbox_data_t;
+
+typedef struct {
+  lv_obj_t *label_obj;
+  lv_obj_t *msgbox;
+  bool update_timer = false;
+} sensor_msgbox_data_t;
 
 typedef struct {
   lv_obj_t *soc_arc = NULL;
@@ -168,6 +174,7 @@ static bms_status_data_t bmsStatusData;
 static user_data_t userData[4] = {}; // 4 buttons with user_data
 static clock_data_t clockData;
 static can_msgbox_data_t canMsgBoxData;
+static sensor_msgbox_data_t sensorMsgBoxData;
 static data_display_t dataDisplay;
 static CombinedData combinedData;
 
@@ -275,14 +282,14 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
       lv_obj_set_style_text_align(data->label_obj, LV_TEXT_ALIGN_CENTER, 0);
 
     // CREATE TIMER TO UPDATE TEMPERATURE FROM M4-CORE MANAGED DHT22 SENSORS
-    lv_timer_create(update_temp, 10000, data);
+    //lv_timer_create(update_temp, 10000, data);
 
     // INITIALISE LABEL TEXT
     lv_label_set_text(data->label_obj, LV_SYMBOL_REFRESH);
 
     // ADD EVENT HANDLER TO TEMPERATURE INDICATOR
     lv_obj_add_flag(data->label_obj, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(data->label_obj, sensor_msgbox, LV_EVENT_CLICKED, data);
+    lv_obj_add_event_cb(data->label_obj, sensor_msgbox, LV_EVENT_CLICKED, &sensorMsgBoxData);
 
     // CREATE TEMPERATURE SELECTION DROP DOWN MENU
     create_temperature_dropdown(parent, data);
@@ -333,7 +340,7 @@ void mppt_delayer(bool mppt_delay) {
   if ( mppt_delay && ! start_time_ms ) {
     start_time_ms = millis();
   }
-  // IF FALSE AGRUMENT AND TIMER WITHIN PREDETERMINED PERIOD: SET TRUE
+  // IF FALSE ARGUMENT AND TIMER WITHIN PREDETERMINED PERIOD: SET TRUE
   else if ( ! mppt_delay && start_time_ms && (start_time_ms + 20 * 1000) > millis() ) {
     mppt_delay = true;
   }
@@ -344,7 +351,7 @@ void mppt_delayer(bool mppt_delay) {
 
   switch ( mppt_delay ) {
     case true:
-      TX_MSG[1] = 0x01;
+      TX_MSG[1] = 0x0001;
       TX_TRIP_PV = true; // this triggers send function in loop
       break;
     case false:
@@ -419,7 +426,7 @@ void sunrise_detector() {
 void ccl_check() {
 
   if ( CCL == 0 || HI_CELL_V > (MAX_CELL_V - 0.2) ) {
-    TX_MSG[1] = 0x01;
+    TX_MSG[1] = 0x0001;
     TX_TRIP_PV = true; // trip pv charge relay
     strcpy(DYNAMIC_LABEL, "Solar OFF - CCL enforced");
   }
@@ -450,13 +457,13 @@ void ccl_check() {
 void button_off(user_data_t *data) {
   digitalWrite(data->relay_pin, LOW);
   data->on = false;
-  Serial.println("DEBUG button_off function just set digital pin LOW");
+  //Serial.println("DEBUG button_off function just set digital pin LOW");
   if ( data->timer ) {
     lv_timer_del(data->timer);
     data->timer = NULL; // clear pointer
-    Serial.println("DEBUG button_off function has deleted timer");
+    //Serial.println("DEBUG button_off function has deleted timer");
   }
-  Serial.println("DEBUG button_off function has finished");
+  //Serial.println("DEBUG button_off function has finished");
 }
 
 
@@ -485,14 +492,14 @@ void dcl_check(user_data_t * data) {
   }
 
   // IF DCL IS ZERO OR CELL VOLTAGE TOO LOW AND NOT ALREADY DISABLED: LABEL INVERTER ONLY AND TURN OFF AND DISABLE ALL BUTTONS
-  else if ( DCL == 0 || LO_CELL_V < (MIN_CELL_V + 0.3) || (RELAYS & 0x01) != 0x01 && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
+  else if ( DCL == 0 || LO_CELL_V < (MIN_CELL_V + 0.3) || (RELAYS & 0x0001) != 0x0001 && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
     for ( uint8_t i = 0; i < 4; i++ ) {
       if ( userData[i].on ) {
         lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL);
         // CHECK IF BUTTON IS STILL ON
         if ( userData[i].on ) {
           button_off(&userData[i]);
-          Serial.println("DEBUG DCL_CHECK: LV_EVENT_SEND failed to turn off buttons");
+          //Serial.println("DEBUG DCL_CHECK: LV_EVENT_SEND failed to turn off buttons");
         }
       }
       // DISABLE ALL BUTTONS IF NOT ALREADY DONE
@@ -520,7 +527,7 @@ void dcl_check(user_data_t * data) {
       lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
       // CHECK IF BUTTON IS STILL ON
       if ( data->on ) {
-        Serial.println("DEBUG DCL_CHECK: LV_EVENT_SEND failed to turn off individual button");
+        //Serial.println("DEBUG DCL_CHECK: LV_EVENT_SEND failed to turn off individual button");
         button_off(data);
       }
       // UPDATE INVERTER LABEL
@@ -533,8 +540,8 @@ void dcl_check(user_data_t * data) {
   }
 
   // IF NO DCL LIMIT AND DISCHARGE RELAY CLOSED HIDE FLAG AND ENABLE BUTTONS
-  else if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) && (RELAYS & 0x01) ) {
-    Serial.println("DEBUG DCL_CHECK: Enabling button");
+  else if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) && (RELAYS & 0x0001) ) {
+    //Serial.println("DEBUG DCL_CHECK: Enabling button");
     if ( ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
     }
@@ -591,8 +598,8 @@ const char* set_can_msgbox_text() {
   return msgbox_text;
 }
 
-void can_msgbox_update_timer(lv_timer_t *timer) {
-  can_msgbox_data_t *data = (can_msgbox_data_t*)timer->user_data;
+void can_msgbox_update_timer(can_msgbox_data_t *data) { //lv_timer_t *timer) {
+  //can_msgbox_data_t *data = (can_msgbox_data_t*)timer->user_data;
   lv_obj_t *label = lv_msgbox_get_text(data->msgbox); // get msgbox text string object excluding title
   lv_label_set_text(label, set_can_msgbox_text()); // Update the text object in the msgBox
 }
@@ -613,7 +620,7 @@ void can_msgbox(lv_event_t *e) {
         lv_obj_add_event_cb(overlay, close_can_msgbox_event_handler, LV_EVENT_CLICKED, data);
 
         // Create timer to update data every 10 seconds
-        data->timer = lv_timer_create(can_msgbox_update_timer, 10000, data);
+        data->update_timer = true; //data->timer = lv_timer_create(can_msgbox_update_timer, 10000, data);
 
         // Pause BMS status data label timer as they show through msgbox
         bmsStatusData.update_timer = false;
@@ -625,8 +632,8 @@ void close_can_msgbox_event_handler(lv_event_t *e) {
   can_msgbox_data_t *data = (can_msgbox_data_t*)lv_event_get_user_data(e);
 
   if ( code == LV_EVENT_CLICKED) {
-    lv_timer_del(data->timer); // Delete the timer
-    data->timer = NULL;
+    data->update_timer = false; //lv_timer_del(data->timer); // Delete the timer
+    //data->timer = NULL;
     lv_msgbox_close(data->msgbox);           // Delete the message box
 
     // Remove the screen overlay object
@@ -669,18 +676,18 @@ const char* set_sensor_msgbox_text() {
   return msgbox_text;
 }
 
-void sensor_msgbox_update_timer(lv_timer_t *timer) {
-    user_data_t *data = (user_data_t*)timer->user_data;
+void sensor_msgbox_update_timer(sensor_msgbox_data_t *data) { //lv_timer_t *timer) {
+    //user_data_t *data = (user_data_t*)timer->user_data;
     lv_obj_t *label = lv_msgbox_get_text(data->msgbox); // get msgBox text string object excluding title
     lv_label_set_text(label, set_sensor_msgbox_text()); // Update the text object in the msgBox
 }
 
 void sensor_msgbox(lv_event_t *e) {
-    user_data_t *data = (user_data_t*)lv_event_get_user_data(e);
+    sensor_msgbox_data_t *data = (sensor_msgbox_data_t*)lv_event_get_user_data(e);
     lv_event_code_t code = lv_event_get_code(e);
 
     if (code == LV_EVENT_CLICKED) {
-        data->msgbox = lv_msgbox_create(lv_obj_get_parent(data->label_obj), "               Sensor Data", set_sensor_msgbox_text(), NULL, false);
+        data->msgbox = lv_msgbox_create(lv_obj_get_parent(userData[0].label_obj), "               Sensor Data", set_sensor_msgbox_text(), NULL, false);
         lv_obj_set_width(data->msgbox, LV_PCT(80)); // Set width to 80% of the screen
         lv_obj_align(data->msgbox, LV_ALIGN_CENTER, 0, 0); // Center the message box on the screen
 
@@ -691,17 +698,17 @@ void sensor_msgbox(lv_event_t *e) {
         lv_obj_add_event_cb(overlay, close_sensor_msgbox_event_handler, LV_EVENT_CLICKED, data);
 
         // Create timer to update data every 10 seconds
-        data->timer = lv_timer_create(sensor_msgbox_update_timer, 10000, data);
+        data->update_timer = true; //lv_timer_create(sensor_msgbox_update_timer, 10000, data);
     }
 }
 
 void close_sensor_msgbox_event_handler(lv_event_t *e) {
   lv_event_code_t code = lv_event_get_code(e);
-  user_data_t *data = (user_data_t*)lv_event_get_user_data(e);
+  sensor_msgbox_data_t *data = (sensor_msgbox_data_t*)lv_event_get_user_data(e);
 
   if ( code == LV_EVENT_CLICKED) {
-    lv_timer_del(data->timer); // Delete the timer
-    data->timer = NULL;
+    data->update_timer = false;//lv_timer_del(data->timer); // Delete the timer
+    //data->timer = NULL;
     lv_msgbox_close(data->msgbox);           // Delete the message box
 
     // Remove the screen overlay object
@@ -729,23 +736,24 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
   lv_event_code_t code = lv_event_get_code(e);
   if(code == LV_EVENT_CLICKED) {
 
-    // Button ON
+    // BUTTON ON
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
 
-      // Inverter
+      // INVERTER
       if ( data->relay_pin == RELAY1 ) {
         inverter_prestart_p = WATTS;
-        // Turn off mppt if pv relat closed but no charge detected to avoid startup issues
+        // TURN OFF MPPT IF SOLAR DETECTED BUT NO CHARGE TO AVOID STARTUP ISSUES
         if ( inverter_prestart_p >= 0 && (inverter_standby_p + inverter_prestart_p) > WATTS && (CUSTOM_FLAGS & 0x0002) == 0x0002 ) {
+          Serial.println("DEBUG disabling MPPT to start inverter");
           mppt_delayer(true); // as sunrise_detector calls mppt_delayer every 1s there's no need to call with false
           strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter start");
-          delay(700); // allowing for mppt to loose power
+          delay(700); // allows for mppt to loose power
         }
         lv_label_set_text(data->label_obj, "Inverter ON");
       }
 
-      // Hot water - try to start inverter if it's off
-      else if ( userData[3].on == false ) { // ( lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) == false ) {
+      // HOT WATER - try to start inverter if it's off
+      else if ( userData[3].on == false ) {
         lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL); // Have to include all 3 of these to make it work
         lv_event_send(userData[3].button, LV_EVENT_RELEASED, NULL);
         lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL);
@@ -769,13 +777,13 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
       if ( data->timer ) {
         lv_timer_del(data->timer);
         data->timer = NULL;
-        Serial.println("DEBUG inverter/hot water evt hdlr: deleting timer");
+        Serial.println("DEBUG inverter/hot water e handler: deleting timer");
       }
       // CREATE COMBINED TIMER
       data->timer = lv_timer_create(power_check, data->timeout_ms, data);
     }
 
-    // Button OFF
+    // BUTTON OFF
     else {
       button_off(data); // deletes timer, set digital pin LOW and sets on variable to false
 
@@ -904,8 +912,8 @@ void power_check(lv_timer_t * timer) {
 
 
 // THERMOSTAT TIMER ////////////////////////////////////////////////////////////////
-void thermostat_timer(lv_timer_t * timer) {
-  user_data_t * data = (user_data_t *)timer->user_data;
+void thermostat_checker(user_data_t * data) {
+  //user_data_t * data = (user_data_t *)timer->user_data;
 
   static uint32_t thermostat_off_ms = 0;
   bool on = false;
@@ -983,7 +991,7 @@ void thermostat_event_handler(lv_event_t * e) {
         }
       }
       data->on = true;
-      data->timer = lv_timer_create(thermostat_timer, 10000, data); // check temp diff every 10s
+      data->update_timer = true; //lv_timer_create(thermostat_timer, 10000, data); // check temp diff every 10s
       pwr_demand++;
     }
 
@@ -991,6 +999,7 @@ void thermostat_event_handler(lv_event_t * e) {
     else {
       data->on = false;
       button_off(data);
+      data->update_timer = false;
       pwr_demand ? pwr_demand-- : NULL;
     }
   }
@@ -1138,8 +1147,8 @@ void fault_label_maker(lv_timer_t *timer) {
 }
 
 // TEMPERATURE UPDATER //////////////////////////////////////////////////////
-void update_temp(lv_timer_t *timer) {
-  user_data_t *data = (user_data_t *)timer->user_data;
+void update_temp(user_data_t *data) {//lv_timer_t *timer) {
+  //user_data_t *data = (user_data_t *)timer->user_data;
 
   static lv_timer_t *sensor_fault_timer = NULL;
 
@@ -1234,7 +1243,7 @@ void clear_bms_flag(lv_event_t * e) {
 
   if(code == LV_EVENT_CLICKED) {
     TX_CLR_BMS = true;
-    TX_MSG[0] = 0x01;
+    TX_MSG[0] = 0x0001;
     canMsgData.msg_cnt = 0; // reset the retry count
   }
   Serial.println("Sending CAN msg to clear BMS flags");
@@ -1667,7 +1676,7 @@ void flash_icons(data_display_t *data) {
   else if ( AVG_AMPS < 0 ) {
     lv_label_set_text(data->charge_icon, "\uF1E6"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
     // SEND BALANCING ALLOWED SIGNAL TO BMS
-    TX_MSG[2] = 0x01;
+    TX_MSG[2] = 0x0001;
     TX_BALANCING = true;
     return; // no need to continue as this will not be flashing
   }
@@ -1843,8 +1852,8 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
 
 
 
-// INSTEAD OF INDIVIDUAL TIMERS I ADDED A HELPER FUNCTION TO CALL ALL 1s INTERVAL FUNCTIONS IN ONE GO - CURRENTLY 7 INDIVIDUAL TIMERS AND 9 COMBINED HERE ////////////////
-void combined_function_caller(lv_timer_t *timer) {
+// INSTEAD OF INDIVIDUAL TIMERS I ADDED A HELPER FUNCTION TO CALL ALL 1s INTERVAL FUNCTIONS IN ONE GO - CURRENTLY 5 INDIVIDUAL TIMERS AND 11 COMBINED HERE ////////////////
+void combined_1s_updater(lv_timer_t *timer) {
   sunrise_detector();
   ccl_check();
   clock_updater(&clockData);
@@ -1857,7 +1866,20 @@ void combined_function_caller(lv_timer_t *timer) {
   }
 }
 
-
+void combined_10s_updater(lv_timer_t *timer) {
+  if ( sensorMsgBoxData.update_timer ) {
+    sensor_msgbox_update_timer(&sensorMsgBoxData);
+  }
+  if ( canMsgBoxData.update_timer ) {
+    can_msgbox_update_timer(&canMsgBoxData);
+  }
+  for ( uint8_t i = 0; i < 2; i++ ) {
+    update_temp(&userData[i]);
+    if ( userData[i].update_timer ) {
+      thermostat_checker(&userData[i]);
+    }
+  }
+}
 
 
 
@@ -1923,10 +1945,11 @@ void setup() {
   create_bms_status_label(cont, 280, &bmsStatusData);
 
   // Initialise click event for CANdata message box
-  canMsgBoxData.parent = cont;
+  canMsgBoxData.parent = cont; // ****************** MAY WORK BETTER WITH SENSOR MSGBOX APPROACH AS NO SHINE THROUGH HAPPENS THERE **************
 
-  // RUN UNIFIED 1 SECOND TIMER
-  lv_timer_create(combined_function_caller, 1000, NULL);
+  // START COMBINED TIMERS FOR CALLING UPDATER FUNCTIONS
+  lv_timer_create(combined_1s_updater, 1000, NULL);
+  lv_timer_create(combined_10s_updater, 10000, NULL);
 
   // Create data display
   create_data_display(cont, &dataDisplay);
