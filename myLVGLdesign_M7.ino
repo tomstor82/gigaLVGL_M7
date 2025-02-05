@@ -267,7 +267,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
   
   // CREATE TIMER TO CHECK BMS DCL LIMIT FROM CANBUS
-  lv_timer_create(dcl_check, 1000, data);
+  //lv_timer_create(dcl_check, data);
 
   // ADD EVENT HANDLER, LABELS AND UPDATE TIMER TO THERMOSTATIC HEATER BUTTONS
   if ( ! timeout_ms ) {
@@ -339,10 +339,18 @@ void mppt_delayer(bool mppt_delay) {
    }
 }
 
-
+void unified_interval_function_caller(lv_timer_t *timer) {
+  sunrise_detector();
+  ccl_check();
+  clock_updater(&clockData);
+  flash_icons(&dataDisplay);
+  for (uint8_t i = 0; i < 4; i++) {
+    dcl_check(&userData[i]);
+  }
+}
 
 // SUNRISE DETECTOR ////////////////////////////////////////////////////////////////////////
-void sunrise_detector(lv_timer_t *timer) {
+void sunrise_detector() {
 
   static bool mppt_delay = false;
   static uint32_t time_ms = 0;
@@ -395,7 +403,7 @@ void sunrise_detector(lv_timer_t *timer) {
 
 
 // CCL AND HIGH CELL VOLTAGE CHECK TIMER ////////////////////////////////////////////////////////////////////////////
-void ccl_check(lv_timer_t * timer) {
+void ccl_check() {
 
   if ( CCL == 0 || HI_CELL_V > (MAX_CELL_V - 0.2) ) {
     TX_MSG[1] = 0x01;
@@ -438,8 +446,8 @@ void button_off(user_data_t *data) {
 
 
 // DCL AND LOW CELL VOLTAGE CHECK TIMER ////////////////////////////////////////////////////////////////////////////
-void dcl_check(lv_timer_t * timer) {
-  user_data_t * data = (user_data_t *)timer->user_data;
+void dcl_check(user_data_t * data) {
+  //user_data_t * data = (user_data_t *)timer->user_data;
 
   // IF BUTTON DISABLED ELSEWHERE SKIP THIS FUNCTION
   if ( data->disabled ) {
@@ -1055,19 +1063,22 @@ void update_temp(lv_timer_t *timer) {
       all_sensors_faulty = true;
       data->disabled = true;
     }
+
     // CALL FAULT LABEL MAKER FUNCTION AT INTERVALS 8 OR 5 SEC
     if ( sensor_fault ) {
       sensor_fault_timer = lv_timer_create(fault_label_maker, 8000, data);
-      lv_timer_set_repeat_count(sensor_fault_timer, 4); // 8s * 4 = 40s which matching 4 function call intervals
+      lv_timer_set_repeat_count(sensor_fault_timer, 1); // 8s * 4 = 40s which matching 4 function call intervals
+      Serial.println("DEBUG update_temp: Creating 8s sensor fault timer");
     }
     else if ( all_sensors_faulty ) {
       sensor_fault_timer = lv_timer_create(fault_label_maker, 5000, data);
-      lv_timer_set_repeat_count(sensor_fault_timer, 2); // 5s * 2 = 10s which matches 1 function call interval
+      lv_timer_set_repeat_count(sensor_fault_timer, 1); // 5s * 2 = 10s which matches 1 function call interval
+      Serial.println("DEBUG update_temp: Creating 5s sensor fault timer");
     }
-    else if ( sensor_fault_timer ) {
+    /*else if ( sensor_fault_timer ) {
       lv_timer_del(sensor_fault_timer);
       Serial.println("DEBUG update_temp: Deleting sensor fault timer");
-    }
+    }*/
   }
 
   // CHECK SINGLE SENSOR FOR SHOWER ROOM
@@ -1126,11 +1137,11 @@ void create_clock_label(lv_obj_t *parent, clock_data_t *data) {
   lv_obj_align(data->clock_label, LV_ALIGN_TOP_MID, 0, -5); // x=20 perfect if left aligned
 
   // text update timer
-  lv_timer_create(clock_updater, 1000, data);
+  //lv_timer_create(clock_updater, 1000, data);
 }
 
-void clock_updater(lv_timer_t *timer) {
-  clock_data_t *data = (clock_data_t *)timer->user_data;
+void clock_updater(clock_data_t *data) {
+  //clock_data_t *data = (clock_data_t *)timer->user_data;
 
   uint16_t h = 0;
   uint8_t m = 0;
@@ -1477,8 +1488,8 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
 
 
 // DATA SCREEN FLASHING CHARGE SYMBOLS ////////////////////////////////////////////////
-void flash_icons(lv_timer_t *timer) {
-  data_display_t *data = (data_display_t*)timer->user_data;
+void flash_icons(data_display_t *data) {
+  //data_display_t *data = (data_display_t*)timer->user_data;
   bool flashing_battery = false;
 
   // FLASHING GREEN WHILST CHARGING
@@ -1685,7 +1696,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
   lv_timer_create(data_display_updater, 200, data);
 
   // FLASHING EFFECT FOR ARROWS AND SUN
-  lv_timer_create(flash_icons, 1000, data);
+  //lv_timer_create(flash_icons, 1000, data);
 }
 
 
@@ -1748,11 +1759,14 @@ void setup() {
   // Initialise click event for CANdata message box
   canMsgBoxData.parent = cont;
 
+  // RUN UNIFIED 1 SECOUND TIMER
+  lv_timer_create(unified_interval_function_caller, 1000, NULL);
+  
   // check for sunrise by reading BMS charge enable signal from CANbus and sending MPO#1 signal to trip relay if flapping detected
-  lv_timer_create(sunrise_detector, 1000, NULL);
+  //lv_timer_create(sunrise_detector, 1000, NULL);
 
   // CCL limit checker for Solar Panel Relay control through CANbus
-  lv_timer_create(ccl_check, 1000, NULL);
+  //lv_timer_create(ccl_check, 1000, NULL);
 
   // Create data display
   create_data_display(cont, &dataDisplay);
