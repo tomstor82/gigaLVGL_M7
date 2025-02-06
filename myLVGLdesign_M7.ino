@@ -90,21 +90,19 @@ struct CombinedData {
 // Can Message Data struct
 struct CanMsgData {
   // receive settings
-  uint32_t rxId;
-  uint8_t len;
-  uint8_t rxBuf[8];
+  uint32_t rxId = 0;
+  uint8_t len = 0;
+  uint8_t rxBuf[8] = {};
 
   // send settings
-  static const uint8_t CAN_ID = 0x002; // CAN id for the message (constant)
-  uint8_t msg_data[3]; // 3 bytes used in BMS for MPO#2, MPO#1 and balancing allowed signals
-  uint8_t msg_cnt;
+  static const uint8_t CAN_ID = 0x02; // CAN id for the message (constant)
+  uint8_t msg_data[3] = {0x00, 0x00, 0x00}; // 3 bytes used in BMS for MPO#2, MPO#1 and balancing allowed signals uint8_t indicates each byte is 1 byte
+  uint8_t msg_cnt = 0;
 
-  bool send_byte1 = false; // clear bms signal
-  bool send_byte0 = false; // trip pv relay signal
-  bool send_byte2 = false; // balancing allowed signal
+  bool can_tx_mpo1 = false;
+  bool can_tx_mpo2 = false;
+  bool can_tx_balancing = false;
 
-  // Constructor to initialize non const values
-  CanMsgData() : rxId(0), len(0), msg_data{}, msg_cnt(0) {}
 };
 
 // Type defined structure for bms status messages allowing it to be passed to function
@@ -112,18 +110,18 @@ typedef struct {
     lv_obj_t *parent = NULL;
     lv_obj_t *title_label = NULL;
     lv_obj_t *button = NULL;
-    lv_obj_t *status_label[33];
+    lv_obj_t *status_label[33] = {};
     bool update_timer = true;
-    char dynamic_label[30];
+    bool ccl_enforced = false;
+    char dynamic_label[30] = {};
     uint8_t y = NULL;
 } bms_status_data_t;
 
 // define struct for function user-data
 typedef struct { // typedef used to not having to use the struct keyword for declaring struct variable
-  lv_obj_t *button;
-  lv_obj_t *dcl_label;
-  lv_obj_t *label_obj;
-  lv_timer_t *timer;
+  lv_obj_t *button = NULL;
+  lv_obj_t *dcl_label = NULL;
+  lv_obj_t *label_obj = NULL;
   bool update_timer = false;
   uint8_t relay_pin = 0;
   uint8_t y_offset = 0;
@@ -135,19 +133,19 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
 } user_data_t;
 
 typedef struct {
-  lv_obj_t *clock_label;
+  lv_obj_t *clock_label = NULL;
 } clock_data_t;
 
 typedef struct {
-  lv_obj_t *parent;
-  lv_obj_t *label_obj;
-  lv_obj_t *msgbox;
-  bool update_timer = false; //lv_timer_t *timer;
+  lv_obj_t *parent = NULL;
+  lv_obj_t *label_obj = NULL;
+  lv_obj_t *msgbox = NULL;
+  bool update_timer = false;
 } can_msgbox_data_t;
 
 typedef struct {
-  lv_obj_t *label_obj;
-  lv_obj_t *msgbox;
+  lv_obj_t *label_obj = NULL;
+  lv_obj_t *msgbox = NULL;
   bool update_timer = false;
 } sensor_msgbox_data_t;
 
@@ -162,7 +160,6 @@ typedef struct {
   lv_obj_t *watt_label = NULL;
   lv_obj_t *ah_label = NULL;
   lv_obj_t *charge_icon = NULL;
-  //lv_obj_t *arrow_icon = NULL;
   lv_obj_t *car_battery_icon = NULL;
   lv_obj_t *charge_label = NULL;
   lv_obj_t *load_label = NULL;
@@ -179,47 +176,49 @@ static data_display_t dataDisplay;
 static CombinedData combinedData;
 
 // Macro short-hands that are free
-#define CAN_RX        canMsgData.rxBuf
-#define TX_MSG        canMsgData.msg_data
-#define TX_CLR_BMS    canMsgData.send_byte0
-#define TX_TRIP_PV    canMsgData.send_byte1
-#define TX_BALANCING  canMsgData.send_byte2
+#define CAN_RX_BUF      canMsgData.rxBuf
+#define CAN_MSG         canMsgData.msg_data
+#define CAN_TX_MPO1     canMsgData.can_tx_mpo1
+#define CAN_TX_MPO2     canMsgData.can_tx_mpo2
+#define CAN_TX_BLCG     canMsgData.can_tx_balancing
+#define CAN_RETRIES     canMsgData.msg_cnt
 
-#define AVG_TEMP      combinedData.sensorData.avg_temp
-#define TEMP1         combinedData.sensorData.temp1
-#define TEMP2         combinedData.sensorData.temp2
-#define TEMP3         combinedData.sensorData.temp3
-#define TEMP4         combinedData.sensorData.temp4
-#define RH1           combinedData.sensorData.rh1
-#define RH2           combinedData.sensorData.rh2
-#define RH3           combinedData.sensorData.rh3
-#define RH4           combinedData.sensorData.rh4
+#define AVG_TEMP        combinedData.sensorData.avg_temp
+#define TEMP1           combinedData.sensorData.temp1
+#define TEMP2           combinedData.sensorData.temp2
+#define TEMP3           combinedData.sensorData.temp3
+#define TEMP4           combinedData.sensorData.temp4
+#define RH1             combinedData.sensorData.rh1
+#define RH2             combinedData.sensorData.rh2
+#define RH3             combinedData.sensorData.rh3
+#define RH4             combinedData.sensorData.rh4
 
-#define WATTS         combinedData.canData.p
-#define VOLT          combinedData.canData.instU
-#define AMPS          combinedData.canData.instI
-#define AVG_AMPS      combinedData.canData.avgI
-#define AH            combinedData.canData.ah
-#define HI_CELL_V     combinedData.canData.hC
-#define LO_CELL_V     combinedData.canData.lC
-#define MAX_CELL_V    combinedData.canData.maxC
-#define MIN_CELL_V    combinedData.canData.minC
-#define SOC           combinedData.canData.soc
-#define HI_TEMP       combinedData.canData.h
-#define LO_TEMP       combinedData.canData.lT
-#define RELAYS        combinedData.canData.ry
-#define DCL           combinedData.canData.dcl
-#define CCL           combinedData.canData.ccl
-#define HEALTH        combinedData.canData.h
-#define HI_CELL_ID    combinedData.canData.hCid
-#define LO_CELL_ID    combinedData.canData.lCid
-#define BMS_FAULTS    combinedData.canData.fu
-#define BMS_STATUS    combinedData.canData.st
-#define CYCLES        combinedData.canData.cc
-#define HEAT_SINK     combinedData.canData.hs
-#define CUSTOM_FLAGS  combinedData.canData.cu
+#define WATTS           combinedData.canData.p
+#define VOLT            combinedData.canData.instU
+#define AMPS            combinedData.canData.instI
+#define AVG_AMPS        combinedData.canData.avgI
+#define AH              combinedData.canData.ah
+#define HI_CELL_V       combinedData.canData.hC
+#define LO_CELL_V       combinedData.canData.lC
+#define MAX_CELL_V      combinedData.canData.maxC
+#define MIN_CELL_V      combinedData.canData.minC
+#define SOC             combinedData.canData.soc
+#define HI_TEMP         combinedData.canData.h
+#define LO_TEMP         combinedData.canData.lT
+#define RELAYS          combinedData.canData.ry
+#define DCL             combinedData.canData.dcl
+#define CCL             combinedData.canData.ccl
+#define HEALTH          combinedData.canData.h
+#define HI_CELL_ID      combinedData.canData.hCid
+#define LO_CELL_ID      combinedData.canData.lCid
+#define BMS_FAULTS      combinedData.canData.fu
+#define BMS_STATUS      combinedData.canData.st
+#define CYCLES          combinedData.canData.cc
+#define HEAT_SINK       combinedData.canData.hs
+#define CUSTOM_FLAGS    combinedData.canData.cu
 
-#define DYNAMIC_LABEL bmsStatusData.dynamic_label
+#define DYNAMIC_LABEL   bmsStatusData.dynamic_label
+#define CCL_ENFORCED    bmsStatusData.ccl_enforced
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size) int/float = 4 bytes
 int16_t inverter_prestart_p = 0; // must be signed
@@ -281,9 +280,6 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
       lv_obj_set_pos(data->label_obj, 160, data->y_offset + 13);
       lv_obj_set_style_text_align(data->label_obj, LV_TEXT_ALIGN_CENTER, 0);
 
-    // CREATE TIMER TO UPDATE TEMPERATURE FROM M4-CORE MANAGED DHT22 SENSORS
-    //lv_timer_create(update_temp, 10000, data);
-
     // INITIALISE LABEL TEXT
     lv_label_set_text(data->label_obj, LV_SYMBOL_REFRESH);
 
@@ -334,32 +330,33 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 void mppt_delayer(bool mppt_delay) {
   static uint32_t start_time_ms = 0;
 
-  // THIS FUNCTION IS CONTINIOUSLY CALLED BY SUNRISE_DETECTOR AND WILL SET ARG TO FALSE IF NEEDED
+  // THIS FUNCTION IS CONTINUOUSLY CALLED BY SUNRISE_DETECTOR AND WILL SET ARG TO FALSE IF NEEDED
 
   // IF TRUE ARGUMENT: START TIMER TO ALLOW MPPT TO REMAIN OFF FOR AT LEAST 20s
   if ( mppt_delay && ! start_time_ms ) {
-    start_time_ms = millis();
-  }
-  // IF FALSE ARGUMENT AND TIMER WITHIN PREDETERMINED PERIOD: SET TRUE
-  else if ( ! mppt_delay && start_time_ms && (start_time_ms + 20 * 1000) > millis() ) {
-    mppt_delay = true;
-  }
-  // IF TRUE BUT WITH TIMER OR IF FALSE WITH EXPIRED OR WITHOUT TIMER: RESET TIMER FOR NEXT FUNCTION CALL
-  else {
-    start_time_ms = 0;
+    start_time_ms = millis(); // Start the timer
   }
 
-  switch ( mppt_delay ) {
-    case true:
-      TX_MSG[1] = 0x0001;
-      TX_TRIP_PV = true; // this triggers send function in loop
-      break;
-    case false:
-      TX_TRIP_PV = false;
-      TX_MSG[1] = 0x00;
-   }
+  // IF FALSE ARGUMENT AND TIMER HAS NOT REACHED 20s: SET TRUE
+  if ( ! mppt_delay && start_time_ms ) {
+    if (millis() - start_time_ms < 20000) { // force true for 20s
+      mppt_delay = true;
+    }
+    else {
+      start_time_ms = 0; // Reset the timer after 20 seconds
+    }
+  }
+
+  // Update CAN_MSG and CAN_TX based on mppt_delay
+  if ( mppt_delay ) {
+    CAN_MSG[1] = 0x01;
+    CAN_TX_MPO1 = true; // This triggers send function in loop
+  }
+  else if ( ! CCL_ENFORCED ) {
+    CAN_TX_MPO1 = false;
+    CAN_MSG[1] = 0x00;
+  }
 }
-
 
 
 // SUNRISE DETECTOR ////////////////////////////////////////////////////////////////////////
@@ -369,7 +366,7 @@ void sunrise_detector() {
   static uint32_t time_ms = 0;
 
   // IS SOLAR CHARGE SIGNAL AVAILABLE THROUGH CUSTOM FLAG AND MPPT DELAY NOT RUNNING
-  if ( (CUSTOM_FLAGS & 0x0001) == 0x0001 && ! mppt_delay ) {
+  if ( (CUSTOM_FLAGS & 0x01) == 0x01 && ! mppt_delay ) {
 
     // START TIME TO CHECK WHEN SOLAR SIGNAL IS LOST
     if ( ! time_ms ) {
@@ -385,7 +382,7 @@ void sunrise_detector() {
   }
 
   // IF SOLAR CHARGE SIGNAL IS LOST
-  else if ( ! (CUSTOM_FLAGS & 0x0001) == 0x0001 && time_ms && ! mppt_delay ) {
+  else if ( ! (CUSTOM_FLAGS & 0x01) == 0x01 && time_ms && ! mppt_delay ) {
 
     // within 10 seconds lets trigger mppt delay as relay flap detected
     if ( time_ms + 10000 > millis() ) {
@@ -401,7 +398,7 @@ void sunrise_detector() {
   }
 
   // when mppt delay timer has expired - currently after 10 minutes
-  if ( mppt_delay && (time_ms + 10 * 60 * 1000) < millis() ) {
+  if ( mppt_delay && (time_ms + 10 * 60 * 1000) < millis() && ! CCL_ENFORCED ) {
     time_ms = 0;
     mppt_delay = false;
   }
@@ -425,14 +422,16 @@ void sunrise_detector() {
 // CCL AND HIGH CELL VOLTAGE CHECK TIMER ////////////////////////////////////////////////////////////////////////////
 void ccl_check() {
 
-  if ( CCL == 0 || HI_CELL_V > (MAX_CELL_V - 0.2) ) {
-    TX_MSG[1] = 0x0001;
-    TX_TRIP_PV = true; // trip pv charge relay
+  // ONLY TRIP RELAY, SUNRISE FUNCTION WILL RE-ENABLE IT
+  if ( CCL == 0 || HI_CELL_V > (MAX_CELL_V - 0.1) ) {
+    CAN_MSG[1] = 0x01;
+    CAN_TX_MPO1 = true; // trip pv charge relay by sending MPO#1 signal which is active LOW
     strcpy(DYNAMIC_LABEL, "Solar OFF - CCL enforced");
+    CCL_ENFORCED = true;
   }
-  else {
-    TX_TRIP_PV = false;
-    TX_MSG[1] = 0x00;
+  // ALLOW PV RELAY TO BE CLOSED WHEN CCL IS ABOVE 0 ( ASSUMING CCL WILL BE 0 IF MAX CELL VOLTAGE IS REACHED )
+  else if ( CCL > 0 || HI_CELL_V < (MAX_CELL_V - 0.2) ) {
+    CCL_ENFORCED = false;
   }
 }
 
@@ -441,30 +440,6 @@ void ccl_check() {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-// TURN OFF BUTTON FUNCTION //////////////////////////////////////////////////////////////////////////////////////
-void button_off(user_data_t *data) {
-  digitalWrite(data->relay_pin, LOW);
-  data->on = false;
-  //Serial.println("DEBUG button_off function just set digital pin LOW");
-  if ( data->timer ) {
-    lv_timer_del(data->timer);
-    data->timer = NULL; // clear pointer
-    //Serial.println("DEBUG button_off function has deleted timer");
-  }
-  //Serial.println("DEBUG button_off function has finished");
-}
 
 
 
@@ -498,8 +473,8 @@ void dcl_check(user_data_t * data) {
         lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL);
         // CHECK IF BUTTON IS STILL ON
         if ( userData[i].on ) {
-          button_off(&userData[i]);
-          //Serial.println("DEBUG DCL_CHECK: LV_EVENT_SEND failed to turn off buttons");
+          //button_off(&userData[i]);
+          Serial.println("ERROR dcl_check: LV_EVENT_SEND failed to turn off buttons");
         }
       }
       // DISABLE ALL BUTTONS IF NOT ALREADY DONE
@@ -527,8 +502,7 @@ void dcl_check(user_data_t * data) {
       lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
       // CHECK IF BUTTON IS STILL ON
       if ( data->on ) {
-        //Serial.println("DEBUG DCL_CHECK: LV_EVENT_SEND failed to turn off individual button");
-        button_off(data);
+        Serial.println("ERROR: dcl_check: button is still on after sending release event"); //button_off(data);
       }
       // UPDATE INVERTER LABEL
       if ( data->relay_pin == RELAY1 && lv_label_get_text(data->label_obj) != "OFF" ) {
@@ -588,7 +562,7 @@ const char* set_can_msgbox_text() {
                  LO_CELL_V, LO_CELL_ID,
                  CCL,
                  DCL,
-                 (CUSTOM_FLAGS & 0x0002) == 0x0002 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using MPO#1 feedback from BMS which controls both charge FETs
+                 (CUSTOM_FLAGS & 0x02) == 0x02 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using MPO#1 feedback from BMS which controls both charge FETs
                  (RELAYS & 0x0001) == 0x0001 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using BMS relay state
                  CYCLES,
                  HEALTH,
@@ -598,8 +572,7 @@ const char* set_can_msgbox_text() {
   return msgbox_text;
 }
 
-void can_msgbox_update_timer(can_msgbox_data_t *data) { //lv_timer_t *timer) {
-  //can_msgbox_data_t *data = (can_msgbox_data_t*)timer->user_data;
+void can_msgbox_update_timer(can_msgbox_data_t *data) {
   lv_obj_t *label = lv_msgbox_get_text(data->msgbox); // get msgbox text string object excluding title
   lv_label_set_text(label, set_can_msgbox_text()); // Update the text object in the msgBox
 }
@@ -620,7 +593,7 @@ void can_msgbox(lv_event_t *e) {
         lv_obj_add_event_cb(overlay, close_can_msgbox_event_handler, LV_EVENT_CLICKED, data);
 
         // Create timer to update data every 10 seconds
-        data->update_timer = true; //data->timer = lv_timer_create(can_msgbox_update_timer, 10000, data);
+        data->update_timer = true;
 
         // Pause BMS status data label timer as they show through msgbox
         bmsStatusData.update_timer = false;
@@ -632,8 +605,7 @@ void close_can_msgbox_event_handler(lv_event_t *e) {
   can_msgbox_data_t *data = (can_msgbox_data_t*)lv_event_get_user_data(e);
 
   if ( code == LV_EVENT_CLICKED) {
-    data->update_timer = false; //lv_timer_del(data->timer); // Delete the timer
-    //data->timer = NULL;
+    data->update_timer = false;
     lv_msgbox_close(data->msgbox);           // Delete the message box
 
     // Remove the screen overlay object
@@ -676,8 +648,7 @@ const char* set_sensor_msgbox_text() {
   return msgbox_text;
 }
 
-void sensor_msgbox_update_timer(sensor_msgbox_data_t *data) { //lv_timer_t *timer) {
-    //user_data_t *data = (user_data_t*)timer->user_data;
+void sensor_msgbox_update_timer(sensor_msgbox_data_t *data) {
     lv_obj_t *label = lv_msgbox_get_text(data->msgbox); // get msgBox text string object excluding title
     lv_label_set_text(label, set_sensor_msgbox_text()); // Update the text object in the msgBox
 }
@@ -707,9 +678,8 @@ void close_sensor_msgbox_event_handler(lv_event_t *e) {
   sensor_msgbox_data_t *data = (sensor_msgbox_data_t*)lv_event_get_user_data(e);
 
   if ( code == LV_EVENT_CLICKED) {
-    data->update_timer = false;//lv_timer_del(data->timer); // Delete the timer
-    //data->timer = NULL;
-    lv_msgbox_close(data->msgbox);           // Delete the message box
+    data->update_timer = false;
+    lv_msgbox_close(data->msgbox); // Delete the message box
 
     // Remove the screen overlay object
     lv_obj_del(lv_event_get_current_target(e));
@@ -734,6 +704,9 @@ void close_sensor_msgbox_event_handler(lv_event_t *e) {
 void hot_water_inverter_event_handler(lv_event_t *e) {
   user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
   lv_event_code_t code = lv_event_get_code(e);
+
+  static lv_timer_t *lv_timer = NULL;
+
   if(code == LV_EVENT_CLICKED) {
 
     // BUTTON ON
@@ -743,11 +716,10 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
       if ( data->relay_pin == RELAY1 ) {
         inverter_prestart_p = WATTS;
         // TURN OFF MPPT IF SOLAR DETECTED BUT NO CHARGE TO AVOID STARTUP ISSUES
-        if ( inverter_prestart_p >= 0 && (inverter_standby_p + inverter_prestart_p) > WATTS && (CUSTOM_FLAGS & 0x0002) == 0x0002 ) {
-          Serial.println("DEBUG disabling MPPT to start inverter");
+        if ( inverter_prestart_p >= 0 && (inverter_standby_p + inverter_prestart_p) > WATTS && (CUSTOM_FLAGS & 0x02) == 0x02 ) {
           mppt_delayer(true); // as sunrise_detector calls mppt_delayer every 1s there's no need to call with false
           strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter start");
-          delay(700); // allows for mppt to loose power
+          delay(500); // allows for mppt to loose power
         }
         lv_label_set_text(data->label_obj, "Inverter ON");
       }
@@ -774,35 +746,39 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
       data->on = true; // store state
 
       // Store delay timer for inverter search and for hot water timeout in struct to allow for deletion elsewhere
-      if ( data->timer ) {
-        lv_timer_del(data->timer);
-        data->timer = NULL;
-        Serial.println("DEBUG inverter/hot water e handler: deleting timer");
+      if ( lv_timer ) {
+        lv_timer_del( lv_timer );
+        lv_timer = NULL;
+        Serial.println("ERROR: hot_water_inverter_event_handler: deleting timer that should have been deleted previously");
       }
       // CREATE COMBINED TIMER
-      data->timer = lv_timer_create(power_check, data->timeout_ms, data);
+      lv_timer = lv_timer_create(power_check, data->timeout_ms, data);
     }
 
     // BUTTON OFF
     else {
-      button_off(data); // deletes timer, set digital pin LOW and sets on variable to false
+      digitalWrite(data->relay_pin, LOW);
+      data->on = false;
+      if ( lv_timer ) {
+        lv_timer_del( lv_timer );
+        lv_timer = NULL;
+        Serial.println("INFO: hot_water_inverter_event_handler: deleting power_check timer");
+      }
 
       // inverter needs to manipulate the other buttons
       if ( data->relay_pin == RELAY1 ) {
-        Serial.println("DEBUG Inverter commanded OFF");
         lv_label_set_text(data->label_obj, "OFF");
-        Serial.println("DEBUG Inverter Label set text to: OFF");
         // turn off the other buttons
         for ( uint8_t i = 0; i < 3; i++ ) {
           if ( userData[i].on == true ) {
-            lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL); // release button
-            button_off(&userData[i]);
+            //lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL); // DOES NOT WORK
+            digitalWrite(userData[i].relay_pin, LOW);
+            userData[i].on = false;
+            lv_obj_clear_state(userData[i].button, LV_STATE_PRESSED);
           }
         }
-        Serial.println("DEBUG Released all buttens that were ON");
         pwr_demand = 0;
         inverter_prestart_p = 0;
-        Serial.println("Set pwd_demand and inverter_prestart_p to 0");
       }
 
       // hot water
@@ -884,8 +860,11 @@ void power_check(lv_timer_t * timer) {
 
   // Hot water off
   else {
-    lv_obj_clear_state(data->button, LV_STATE_CHECKED);
-    button_off(data);
+    //lv_obj_clear_state(data->button, LV_STATE_CHECKED);
+    lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
+    if ( data->on ) {
+      Serial.println("ERROR: power_check: send event to release button failed");//button_off(data);
+    }
   }
 }
 
@@ -913,7 +892,6 @@ void power_check(lv_timer_t * timer) {
 
 // THERMOSTAT TIMER ////////////////////////////////////////////////////////////////
 void thermostat_checker(user_data_t * data) {
-  //user_data_t * data = (user_data_t *)timer->user_data;
 
   static uint32_t thermostat_off_ms = 0;
   bool on = false;
@@ -961,12 +939,10 @@ void thermostat_checker(user_data_t * data) {
   if ( on ) {
     digitalWrite(data->relay_pin, HIGH);
     thermostat_off_ms = 0;
-    data->on = true;
   }
   else {
     digitalWrite(data->relay_pin, LOW);
     thermostat_off_ms = millis();
-    data->on = false;
   }
 }
 
@@ -998,7 +974,7 @@ void thermostat_event_handler(lv_event_t * e) {
     // Button OFF
     else {
       data->on = false;
-      button_off(data);
+      digitalWrite(data->relay_pin, LOW);//button_off(data);
       data->update_timer = false;
       pwr_demand ? pwr_demand-- : NULL;
     }
@@ -1147,8 +1123,7 @@ void fault_label_maker(lv_timer_t *timer) {
 }
 
 // TEMPERATURE UPDATER //////////////////////////////////////////////////////
-void update_temp(user_data_t *data) {//lv_timer_t *timer) {
-  //user_data_t *data = (user_data_t *)timer->user_data;
+void update_temp(user_data_t *data) {
 
   static lv_timer_t *sensor_fault_timer = NULL;
 
@@ -1185,12 +1160,10 @@ void update_temp(user_data_t *data) {//lv_timer_t *timer) {
     if ( sensor_fault ) {
       sensor_fault_timer = lv_timer_create(fault_label_maker, 8000, data);
       lv_timer_set_repeat_count(sensor_fault_timer, 1); // deleting itself after 1 run
-      Serial.println("DEBUG update_temp: Creating 8s sensor fault timer");
     }
     else if ( all_sensors_faulty ) {
       sensor_fault_timer = lv_timer_create(fault_label_maker, 5000, data);
       lv_timer_set_repeat_count(sensor_fault_timer, 1); // deleting itself after 1 run
-      Serial.println("DEBUG update_temp: Creating 5s sensor fault timer");
     }
   }
 
@@ -1215,7 +1188,6 @@ void update_temp(user_data_t *data) {//lv_timer_t *timer) {
   // CLEAR DISABLED STATE IF NOT ENFORCED BY DCL_CHECK FUNCTION
   else if ( ! data->disabled && lv_obj_has_state(data->button, LV_STATE_DISABLED) && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
     lv_obj_clear_state(data->button, LV_STATE_DISABLED);
-    Serial.println("DEBUG clearing heater buttons disabled state");
   }
 
   // Update the label text
@@ -1242,9 +1214,9 @@ void clear_bms_flag(lv_event_t * e) {
   lv_event_code_t code = lv_event_get_code(e);
 
   if(code == LV_EVENT_CLICKED) {
-    TX_CLR_BMS = true;
-    TX_MSG[0] = 0x0001;
-    canMsgData.msg_cnt = 0; // reset the retry count
+    CAN_TX_MPO2 = true;
+    CAN_MSG[0] = 0x01;
+    CAN_RETRIES = 0; // reset the retry count
   }
   Serial.println("Sending CAN msg to clear BMS flags");
 }
@@ -1351,37 +1323,37 @@ int16_t signValue(uint16_t canValue) {
 void sort_can() {
 
     if (canMsgData.rxId == 0x3B) {
-        VOLT = ((CAN_RX[0] << 8) + CAN_RX[1]) / 10.0;
-        AMPS = (signValue((CAN_RX[2] << 8) + CAN_RX[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
-        //combinedData.canData.absI = ((CAN_RX[4] << 8) + CAN_RX[5]) / 10.0; // orion2jr issue: set signed and -32767 to fix
-        SOC = CAN_RX[6] / 2;
+        VOLT = ((CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1]) / 10.0;
+        AMPS = (signValue((CAN_RX_BUF[2] << 8) + CAN_RX_BUF[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
+        //combinedData.canData.absI = ((CAN_RX_BUF[4] << 8) + CAN_RX_BUF[5]) / 10.0; // orion2jr issue: set signed and -32767 to fix
+        SOC = CAN_RX_BUF[6] / 2;
     }
     if (canMsgData.rxId == 0x6B2) {
-        LO_CELL_V = ((CAN_RX[0] << 8) + CAN_RX[1]) / 10000.00;
-        HI_CELL_V = ((CAN_RX[2] << 8) + CAN_RX[3]) / 10000.00;
-        HEALTH = CAN_RX[4];
-        CYCLES = (CAN_RX[5] << 8) + CAN_RX[6];
+        LO_CELL_V = ((CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1]) / 10000.00;
+        HI_CELL_V = ((CAN_RX_BUF[2] << 8) + CAN_RX_BUF[3]) / 10000.00;
+        HEALTH = CAN_RX_BUF[4];
+        CYCLES = (CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6];
     }
     if (canMsgData.rxId == 0x0A9) {
-        RELAYS = CAN_RX[0];
-        CCL = CAN_RX[1];
-        DCL = CAN_RX[2];
-        AH = ((CAN_RX[3] << 8) + CAN_RX[4]) / 10.0;
-        AVG_AMPS = (signValue((CAN_RX[5] << 8) + CAN_RX[6])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
+        RELAYS = CAN_RX_BUF[0];
+        CCL = CAN_RX_BUF[1];
+        DCL = CAN_RX_BUF[2];
+        AH = ((CAN_RX_BUF[3] << 8) + CAN_RX_BUF[4]) / 10.0;
+        AVG_AMPS = (signValue((CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
     }
     if (canMsgData.rxId == 0x0BD) {
-        BMS_FAULTS = (CAN_RX[0] << 8) + CAN_RX[1];
-        HI_TEMP = CAN_RX[2];
-        LO_TEMP = CAN_RX[3];
-        CUSTOM_FLAGS = CAN_RX[4];
-        BMS_STATUS = (CAN_RX[5] << 8) + CAN_RX[6];
+        BMS_FAULTS = (CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1];
+        HI_TEMP = CAN_RX_BUF[2];
+        LO_TEMP = CAN_RX_BUF[3];
+        CUSTOM_FLAGS = CAN_RX_BUF[4];
+        BMS_STATUS = (CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6];
     }
     if (canMsgData.rxId == 0x0BE) {
-        HI_CELL_ID = CAN_RX[0];
-        LO_CELL_ID = CAN_RX[1];
-        HEAT_SINK = CAN_RX[2];
-        MIN_CELL_V = ((CAN_RX[3] << 8) + CAN_RX[4]) / 10000.00;
-        MAX_CELL_V = ((CAN_RX[5] << 8) + CAN_RX[6]) / 10000.00;
+        HI_CELL_ID = CAN_RX_BUF[0];
+        LO_CELL_ID = CAN_RX_BUF[1];
+        HEAT_SINK = CAN_RX_BUF[2];
+        MIN_CELL_V = ((CAN_RX_BUF[3] << 8) + CAN_RX_BUF[4]) / 10000.00;
+        MAX_CELL_V = ((CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6]) / 10000.00;
     }
     WATTS = AVG_AMPS * VOLT;
 }
@@ -1507,7 +1479,7 @@ void refresh_bms_status_data(bms_status_data_t *data) {
     // CRITICAL CAN TRANSMIT FAILURE
     if ( canMsgData.len == 0 ) { create_status_label("No CAN data from BMS", data); flag_index++; comparator_index++; }
 
-    // BMS flags
+    // BMS flags 2 bytes
     if ((BMS_FAULTS & 0x0100) == 0x0100) { create_status_label("Internal Hardware Fault", data); flag_index++; }
     if ((BMS_FAULTS & 0x0200) == 0x0200) { create_status_label("Internal Cell Comm Fault", data); flag_index++; }
     if ((BMS_FAULTS & 0x0400) == 0x0400) { create_status_label("Weak Cell Fault", data); flag_index++; }
@@ -1525,7 +1497,7 @@ void refresh_bms_status_data(bms_status_data_t *data) {
     if ((BMS_FAULTS & 0x0040) == 0x0040) { create_status_label("Internal Thermistor Fault", data); flag_index++; }
     if ((BMS_FAULTS & 0x0080) == 0x0080) { create_status_label("Internal Logic Fault", data); flag_index++; }
 
-    // Failsafe status
+    // Failsafe status 2 bytes
     if ((BMS_STATUS & 0x0001) == 0x0001) { create_status_label("Voltage Failsafe", data); flag_index++; }
     if ((BMS_STATUS & 0x0002) == 0x0002) { create_status_label("Current Failsafe", data); flag_index++; }
     if ((BMS_STATUS & 0x0004) == 0x0004) { create_status_label("Relay Failsafe", data); flag_index++; }
@@ -1537,12 +1509,12 @@ void refresh_bms_status_data(bms_status_data_t *data) {
     if ((BMS_STATUS & 0x2000) == 0x2000) { create_status_label("Polarization Model 2 Active", data); flag_index++; }
     if ((BMS_STATUS & 0x8000) == 0x8000) { create_status_label("Charge Mode Activated over CANBUS", data); flag_index++; }
 
-    // Relay status
-    if ((RELAYS & 0x0001) != 0x0001) { create_status_label("Discharge Relay Opened", data); flag_index++; }
+    // Relay status 1 byte ( 2 bytes available includes mpo/mpi and charge statuses )
+    if ((RELAYS & 0x01) != 0x01) { create_status_label("Discharge Relay Opened", data); flag_index++; }
     // CONTROLLED BY ARDUINO AND DISABLED IN BMS if ((RELAYS & 0x0002) == 0x0000) { create_status_label("Charge Relay Opened", data); flag_index++; }
 
     // Custom status messages
-    if ( TX_TRIP_PV ) { create_status_label(DYNAMIC_LABEL, data); flag_index++; comparator_index++;}
+    if ( CAN_TX_MPO1 ) { create_status_label(DYNAMIC_LABEL, data); flag_index++; comparator_index++;}
     if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Discharge Disabled by Arduino", data); flag_index++; comparator_index++;} // If Inverter DCL CHECK triggered
 
     // Cell balancing check at end ensures higher importance messages appear above
@@ -1669,28 +1641,28 @@ void flash_icons(data_display_t *data) {
   }
 
   // SHOW SUN ICON IF SOLAR DETECTED THROUGH CHARGE ENABLED SIGNAL TRANSMITTED FROM BMS
-  if ( (CUSTOM_FLAGS & 0x0001) == 0x0001 ) {
+  if ( (CUSTOM_FLAGS & 0x01) == 0x01 ) {
     lv_label_set_text(data->charge_icon, "\uF185"); // sun icon
   }
   // SHOW GRID ICON
   else if ( AVG_AMPS < 0 ) {
     lv_label_set_text(data->charge_icon, "\uF1E6"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
     // SEND BALANCING ALLOWED SIGNAL TO BMS
-    TX_MSG[2] = 0x0001;
-    TX_BALANCING = true;
+    CAN_MSG[2] = 0x01;
+    CAN_TX_BLCG = true;
     return; // no need to continue as this will not be flashing
   }
   // NO CHARGE NO ICON
   else {
     lv_label_set_text(data->charge_icon, "");
     // SEND BALANCING NOT ALLOWED SIGNAL TO BMS
-    TX_BALANCING = false;
-    TX_MSG[2] = 0x00;
+    CAN_TX_BLCG = false;
+    CAN_MSG[2] = 0x00;
     return; // same for this
   }
   
   // FLASH SUN IF THERE IS CHARGE SIGNAL FROM SOLAR BUT NO CHARGING OR MPPT HAS BEEN DISABLED
-  if ( AVG_AMPS >= 0 && userData[3].on == false && (CUSTOM_FLAGS & 0x0001) == 0x0001 || TX_TRIP_PV ) {
+  if ( AVG_AMPS >= 0 && userData[3].on == false && (CUSTOM_FLAGS & 0x01) == 0x01 || CAN_TX_MPO1 ) {
     if ( lv_obj_has_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
     }
@@ -1988,24 +1960,24 @@ void loop() {
     CanMsg const msg = CAN.read();
     canMsgData.rxId = msg.id;
     canMsgData.len = msg.data_length;
-    memcpy(CAN_RX, msg.data, canMsgData.len);
+    memcpy(CAN_RX_BUF, msg.data, canMsgData.len);
     sort_can();
 
     // send CAN if commanded
-    if ( TX_CLR_BMS || TX_TRIP_PV || TX_BALANCING ) {
-      CanMsg send_msg(CanStandardId(canMsgData.CAN_ID), sizeof(TX_MSG), TX_MSG);
+    if ( CAN_TX_MPO1 || CAN_TX_MPO2 || CAN_TX_BLCG ) {
+      CanMsg send_msg(CanStandardId(canMsgData.CAN_ID), sizeof(CAN_MSG), CAN_MSG);
 
       // retry if send failed for byte 0 - clear bms through mpo2
       int const rc = CAN.write(send_msg);
-      if ( rc <= 0 && canMsgData.msg_cnt < 3 ) {
+      if ( rc <= 0 && CAN_RETRIES < 3 ) { // if CAN.write returns 0 or lower errors have occured in transmission
         Serial.print("CAN.write(...) failed with error code ");
         Serial.println(rc);
-        canMsgData.msg_cnt++;
+        CAN_RETRIES++;
       }
       // stop sending to mpo2 after 3 retries
-      else if ( TX_CLR_BMS ) {
-        TX_CLR_BMS = false; // stop sending after 3 tries
-        TX_MSG[0] = 0; // clear send data
+      else if ( CAN_TX_MPO2 ) {
+        CAN_MSG[0] = 0x00; // clear send data
+        CAN_TX_MPO2 = false;
       }
     }
   }
@@ -2032,7 +2004,7 @@ void loop() {
     dim_display();
   }
 
-  if (Serial) {
+  /*if (Serial) {
     // Average loop lap time of 256 iterations - reflects the lvgl delay at end of loop
     static uint8_t i = 0;
     static uint32_t start_time = millis();
@@ -2056,6 +2028,6 @@ void loop() {
       start_time = millis();
       finished = false;
     }
-  }
+  }*/
   delay(4); // lvgl recommends 5ms delay for display (code takes up 1ms)
 }
