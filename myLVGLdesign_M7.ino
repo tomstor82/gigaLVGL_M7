@@ -238,10 +238,10 @@ const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 // for M4 messages
 static String buffer = "";
 
-//******************************************************************************************************
-//  BUG#1:  CRASH WHEN NO LOAAD OFF AND BUTTON IS PRESSED OFF
-//  BUG#2:  OCCASIONAL CRASH DUE TO COLORING OF BATTERY ICON ?? SEEMS TO HAPPEN WITH CHANGE FROM CHARGE TO BATTERY OP
-//******************************************************************************************************
+//************************************************************************************************************
+//  BUG#1:  WHEN IN OFF NO LOAD MODE I WANT PWR_DEMAND TO OVERRIDE THIS
+//  BUG#2:  WHEN IN OFF NO LOAD MODE WITH ANOTHER BUTTON PRESSED, TURNING OFF INVERTER LEAVES BUTTONS STILL ON
+//************************************************************************************************************
 
 // CREATE BUTTONS /// TWO TIMERS CREATED HERE: TEMP UPDATER AND DCL CHECK
 void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms, user_data_t *data) {
@@ -774,7 +774,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
             //lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL); // DOES NOT WORK
             digitalWrite(userData[i].relay_pin, LOW);
             userData[i].on = false;
-            lv_obj_clear_state(userData[i].button, LV_STATE_PRESSED);
+            lv_obj_clear_state(userData[i].button, LV_STATE_CHECKED);
           }
         }
         pwr_demand = 0;
@@ -794,37 +794,56 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
 void power_check(lv_timer_t * timer) {
   user_data_t * data = (user_data_t *)timer->user_data;
 
-  // Inverter
+  // VARIABLE USED TO STOP INVERTER SLEEP MODE
+  bool on = false;
+
+  // SLEEP MODE VARIABLES
+  static uint32_t time_ms = 0;
+  static uint8_t minute_count = 0;
+  static bool delay_1min = false;
+  char plural[2] = "s";
+  char label[30];
+
+  // INVERTER CHECK
   if ( data->relay_pin == RELAY1 ) {
 
     // Remain ON if charging when SOC above 50%
     if ( AVG_AMPS < -5 && SOC > 50 ) {
-      return;
+      on = true;
     }
 
     // Remain ON if demand variable set
     else if ( pwr_demand ) {
-      return;
+      on = true;
     }
 
     // Remain ON if discharge exceeds inverter standby - considering prestart_p and canData.p are signed it should cover most charge/discharge scenarios
     else if ( (inverter_standby_p + inverter_prestart_p) < abs(WATTS) ) {
-      return;
+      on = true;
     }
   }
   
-  // Hot water - reset timer if charging
+  // HOT WATER CHECK - REMAIN ON IF CHARGE
   else if ( CCL < 10 && AVG_AMPS < 0 ) {
-    return;
+    on = true;
   }
 
-  // INVERTER OFF INTERVAL START
-  if ( data->relay_pin == RELAY1 && data->on == true ) {
-    static uint32_t time_ms = 0;
-    static uint8_t minute_count = 0;
-    static bool delay_1min = false;
-    char plural[2] = "s";
-    char label[30];
+  // KEEP HOT WATER/INVERTER ON, OR RESTART INVERTER IF IN SLEEP MODE
+  if ( on ) {
+    // IF INVERTER IN SLEEP MODE WAKE UP
+    if ( data->relay_pin == RELAY1 && time_ms && !delay_1min ) {
+      digitalWrite(data->relay_pin, HIGH);
+      lv_label_set_text(data->label_obj, "ON");
+      time_ms = 0; // RESET SLEEP TIMER
+      return;
+    }
+    else {
+      return;
+    }
+  }
+
+  // INVERTER SLEEP MODE
+  else if ( data->relay_pin == RELAY1 && data->on == true ) {
 
     // INVERTER OFF AND LABEL UPDATER ALGORITHM
     if ( ! time_ms ) {
@@ -832,8 +851,8 @@ void power_check(lv_timer_t * timer) {
       delay_1min = true;
       return; // to prevent label being written
     }
-    // DELAY TURNING OFF INVERTER BY 1 MINUTE
-    else if ( (time_ms + 60 * 1000) < millis() && delay_1min ) {
+    // KEEP INVERTER ON FOR AT LEAST 30s + POWER_CHECK TIMER
+    else if ( (time_ms + 30 * 1000) < millis() && delay_1min ) {
       time_ms = millis();
       digitalWrite(data->relay_pin, LOW);
       delay_1min = false;
@@ -974,7 +993,7 @@ void thermostat_event_handler(lv_event_t * e) {
     // Button OFF
     else {
       data->on = false;
-      digitalWrite(data->relay_pin, LOW);//button_off(data);
+      digitalWrite(data->relay_pin, LOW);
       data->update_timer = false;
       pwr_demand ? pwr_demand-- : NULL;
     }
