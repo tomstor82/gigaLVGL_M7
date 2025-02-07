@@ -54,7 +54,6 @@ struct CanData {
     float instU = 0;            // Voltage - multiplied by 10
     float instI = 0;            // Current - multiplied by 10 - negative value indicates charge
     float avgI = 0;             // Average current for clock and sun symbol calculations
-    //float absI;             // Absolute Current NOT WORKING CORRECTLY
     float ah = 0;               // Amp hours
     float hC = 0;               // High Cell Voltage in 0,0001V
     float lC = 0;               // Low Cell Voltage in 0,0001V
@@ -74,11 +73,12 @@ struct CanData {
     uint16_t fu = 0;            // BMS Faults
     uint16_t st = 0;            // BMS Status
     int cc = 0;                 // Total pack cycles (int to avoid overrun issues with uint16_t)
+    int cpcty = 0;              // Total pack capacity Ahr
 
     byte hs = 0;                // Internal Heatsink
     byte cu = 0;                // BMS custom flag currently used for sending charge power enabled and MPO#1 state (used for tripping chg enabled relay)
     
-    MSGPACK_DEFINE_ARRAY(instU, instI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, st, cc, avgI, hCid, lCid, p, hs, cu);
+    //MSGPACK_DEFINE_ARRAY(instU, instI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, st, cc, avgI, hCid, lCid, p, hs, cu, cpcty);
 };
 
 // Create combined struct with sensor and can data
@@ -216,6 +216,7 @@ static CombinedData combinedData;
 #define CYCLES          combinedData.canData.cc
 #define HEAT_SINK       combinedData.canData.hs
 #define CUSTOM_FLAGS    combinedData.canData.cu
+#define CAPACITY        combinedData.canData.cpcty
 
 #define DYNAMIC_LABEL   bmsStatusData.dynamic_label
 #define CCL_ENFORCED    bmsStatusData.ccl_enforced
@@ -224,12 +225,12 @@ static CombinedData combinedData;
 int16_t inverter_prestart_p = 0; // must be signed
 const uint8_t inverter_standby_p = 85; // takes around 4 minutes to settle down after start (75W from documentation)
 uint8_t pwr_demand = 0;
+bool inverter_delay = false;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
 const uint16_t inverter_startup_delay_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
 const uint8_t off_interval_min = 3; // 3 minute off interval reduces standby consumption from 85Wh to around 12,5Wh -84%
 
-static lv_style_t underline;
-static lv_style_t medium_font;
+//static lv_style_t underline;
 
 static uint8_t brightness = 70;
 uint32_t previous_touch_ms = 0;
@@ -330,21 +331,17 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 void mppt_delayer(bool mppt_delay) {
   static uint32_t start_time_ms = 0;
 
-  // THIS FUNCTION IS CONTINUOUSLY CALLED BY SUNRISE_DETECTOR AND WILL SET ARG TO FALSE IF NEEDED
-
   // IF TRUE ARGUMENT: START TIMER TO ALLOW MPPT TO REMAIN OFF FOR AT LEAST 20s
   if ( mppt_delay && ! start_time_ms ) {
     start_time_ms = millis(); // Start the timer
   }
 
   // IF FALSE ARGUMENT AND TIMER HAS NOT REACHED 20s: SET TRUE
-  if ( ! mppt_delay && start_time_ms ) {
-    if (millis() - start_time_ms < 20000) { // force true for 20s
-      mppt_delay = true;
-    }
-    else {
-      start_time_ms = 0; // Reset the timer after 20 seconds
-    }
+  else if ( ! mppt_delay && start_time_ms && millis() - start_time_ms < 20000) {
+    mppt_delay = true;
+  }
+  else {
+    start_time_ms = 0; // Reset the timer after 20 seconds
   }
 
   // Update CAN_MSG and CAN_TX based on mppt_delay
@@ -444,8 +441,12 @@ void ccl_check() {
 
 
 
-
-
+// FORCE BUTTON OFF AS lv_event_send(data->button, LV_EVENT_RELEASE) DOESN'T WORK  //////////////////////////////////////////////////////////////////
+void button_off(user_data_t *data) {
+  lv_obj_clear_state(data->button, LV_STATE_CHECKED);
+  digitalWrite(data->relay_pin, LOW);
+  data->on = false;
+}
 
 
 
@@ -459,7 +460,7 @@ void ccl_check() {
 
 
 // DCL AND LOW CELL VOLTAGE CHECK TIMER ////////////////////////////////////////////////////////////////////////////
-void dcl_check(user_data_t * data) {
+void dcl_check(user_data_t *data) {
 
   // IF BUTTON DISABLED ELSEWHERE SKIP THIS FUNCTION
   if ( data->disabled ) {
@@ -467,15 +468,10 @@ void dcl_check(user_data_t * data) {
   }
 
   // IF DCL IS ZERO OR CELL VOLTAGE TOO LOW AND NOT ALREADY DISABLED: LABEL INVERTER ONLY AND TURN OFF AND DISABLE ALL BUTTONS
-  else if ( DCL == 0 || LO_CELL_V < (MIN_CELL_V + 0.3) || (RELAYS & 0x0001) != 0x0001 && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
+  else if ( DCL == 0 || LO_CELL_V < (MIN_CELL_V + 0.3) || (RELAYS & 0x01) != 0x01 && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
     for ( uint8_t i = 0; i < 4; i++ ) {
       if ( userData[i].on ) {
-        lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL);
-        // CHECK IF BUTTON IS STILL ON
-        if ( userData[i].on ) {
-          //button_off(&userData[i]);
-          Serial.println("ERROR dcl_check: LV_EVENT_SEND failed to turn off buttons");
-        }
+        button_off(&userData[i]);
       }
       // DISABLE ALL BUTTONS IF NOT ALREADY DONE
       if ( ! lv_obj_has_state(userData[i].button, LV_STATE_DISABLED) ) {
@@ -499,11 +495,7 @@ void dcl_check(user_data_t * data) {
     }
     // TURN OFF BUTTON
     if ( data->on ) {
-      lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
-      // CHECK IF BUTTON IS STILL ON
-      if ( data->on ) {
-        Serial.println("ERROR: dcl_check: button is still on after sending release event"); //button_off(data);
-      }
+      button_off(data);
       // UPDATE INVERTER LABEL
       if ( data->relay_pin == RELAY1 && lv_label_get_text(data->label_obj) != "OFF" ) {
         lv_label_set_text(data->label_obj, "OFF");
@@ -550,8 +542,8 @@ const char* set_can_msgbox_text() {
   snprintf(msgbox_text, sizeof(msgbox_text),
                  "High Cell          %.2fV           #%d\n"
                  "Low Cell           %.2fV           #%d\n\n"
-                 "Charge Limit                      %d A\n"
-                 "Discharge Limit                %d A\n\n"
+                 "Charge Limit                     %d A\n"
+                 "Discharge Limit               %d A\n\n"
                  "Charge                                    %s\n"
                  "Discharge                               %s\n\n"
                  "Cycles                                     %d\n"
@@ -715,44 +707,48 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
       // INVERTER
       if ( data->relay_pin == RELAY1 ) {
         inverter_prestart_p = WATTS;
-        // TURN OFF MPPT IF SOLAR DETECTED BUT NO CHARGE TO AVOID STARTUP ISSUES
+        // TURN OFF MPPT IF SOLAR DETECTED BUT NO CHARGE TO AVOID START-UP POWER SURGE
         if ( inverter_prestart_p >= 0 && (inverter_standby_p + inverter_prestart_p) > WATTS && (CUSTOM_FLAGS & 0x02) == 0x02 ) {
-          mppt_delayer(true); // as sunrise_detector calls mppt_delayer every 1s there's no need to call with false
-          strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter start");
-          delay(500); // allows for mppt to loose power
+          mppt_delayer(true);
+          strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter starting");
+          inverter_delay = true;
         }
         lv_label_set_text(data->label_obj, "Inverter ON");
       }
 
-      // HOT WATER - try to start inverter if it's off
+      // HOT WATER - TRY TO START INVERTER IF OFF
       else if ( userData[3].on == false ) {
         lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL); // Have to include all 3 of these to make it work
         lv_event_send(userData[3].button, LV_EVENT_RELEASED, NULL);
         lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL);
-        // If inverter doesn't start clear hot water button clicked state
+
+        // IF INVERTER DOESN'T START TRIP HOT WATER BUTTON OFF
         if ( userData[3].on == false ) {
           lv_obj_clear_state(data->button, LV_STATE_CHECKED);
           return; // exit function if inverter doesn't start
         }
-        // If started successfully increment pwr demand
+        // IF INVERTER STARTED SUCCESSFULLY INCREMENT PWR_DEMAND
         else pwr_demand++;
       }
+      // WITH INVERTER ALREADY ON, ONLY INCREMENT PWR_DEMAND
+      else {
+        pwr_demand++; // only for hot water
+      }
 
-      // If inverter is ON already, only increment pwr demand
-      else pwr_demand++; // only for hot water
+      // TURN ON RELAY UNLESS MPPT DELAYER IS RUNNING
+      if ( data->relay_pin == RELAY1 && ! inverter_delay || data->relay_pin == RELAY3 ) {
+        digitalWrite(data->relay_pin, HIGH);
+      }
 
-      // Send signal to relay
-      digitalWrite(data->relay_pin, HIGH);
-      data->on = true; // store state
-
-      // Store delay timer for inverter search and for hot water timeout in struct to allow for deletion elsewhere
+      // DELETE TIMER BEFORE RE-DECLARATION
       if ( lv_timer ) {
         lv_timer_del( lv_timer );
         lv_timer = NULL;
-        Serial.println("ERROR: hot_water_inverter_event_handler: deleting timer that should have been deleted previously");
       }
       // CREATE COMBINED TIMER
       lv_timer = lv_timer_create(power_check, data->timeout_ms, data);
+      // SET BUTTON TO ON
+      data->on = true;
     }
 
     // BUTTON OFF
@@ -762,26 +758,23 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
       if ( lv_timer ) {
         lv_timer_del( lv_timer );
         lv_timer = NULL;
-        Serial.println("INFO: hot_water_inverter_event_handler: deleting power_check timer");
       }
 
-      // inverter needs to manipulate the other buttons
+      // INVERTER MANIPULATES BUTTONS THAT ARE ON
       if ( data->relay_pin == RELAY1 ) {
         lv_label_set_text(data->label_obj, "OFF");
-        // turn off the other buttons
+
+        // TURN OFF BUTTONS THAT ARE ON
         for ( uint8_t i = 0; i < 3; i++ ) {
           if ( userData[i].on == true ) {
-            //lv_event_send(userData[i].button, LV_EVENT_RELEASED, NULL); // DOES NOT WORK
-            digitalWrite(userData[i].relay_pin, LOW);
-            userData[i].on = false;
-            lv_obj_clear_state(userData[i].button, LV_STATE_CHECKED);
+            button_off(&userData[i]);
           }
         }
         pwr_demand = 0;
         inverter_prestart_p = 0;
       }
 
-      // hot water
+      // HOT WATER
       else {
         pwr_demand ? pwr_demand-- : NULL;
       }
@@ -830,14 +823,22 @@ void power_check(lv_timer_t * timer) {
 
   // KEEP HOT WATER/INVERTER ON, OR RESTART INVERTER IF IN SLEEP MODE
   if ( on ) {
-    // IF INVERTER IN SLEEP MODE WAKE UP
-    if ( data->relay_pin == RELAY1 && time_ms && !delay_1min ) {
+
+    // HOT WATER
+    if ( data->relay_pin == RELAY3 ) {
+      return;
+    }
+    // INVERTER PRE SLEEP 1 MIN DELAY
+    else if ( time_ms && delay_1min ) {
+      delay_1min = false;
+      time_ms = 0;
+      return;
+    }
+    // INVERTER IN SLEEP MODE
+    else if ( time_ms && ! delay_1min ) {
       digitalWrite(data->relay_pin, HIGH);
       lv_label_set_text(data->label_obj, "ON");
       time_ms = 0; // RESET SLEEP TIMER
-      return;
-    }
-    else {
       return;
     }
   }
@@ -877,13 +878,10 @@ void power_check(lv_timer_t * timer) {
     }
   }
 
-  // Hot water off
+  // HOT WATER OFF
   else {
-    //lv_obj_clear_state(data->button, LV_STATE_CHECKED);
-    lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
-    if ( data->on ) {
-      Serial.println("ERROR: power_check: send event to release button failed");//button_off(data);
-    }
+    button_off(data);
+    lv_timer_del(timer);
   }
 }
 
@@ -1279,15 +1277,15 @@ void clock_updater(clock_data_t *data) {
 
   // Discharge
   else if (AVG_AMPS > 0) {
-    h = SOC / (AVG_AMPS/10.0);
-    m = (SOC / (AVG_AMPS/10.0) - h) * 60;
+    h = SOC / AVG_AMPS;
+    m = (SOC / AVG_AMPS - h) * 60;
     strcpy(state, "Discharged in");
   }
 
   // Charge
   else if (AVG_AMPS < 0) {
-    h = (200 - SOC) / (abs(AVG_AMPS)/10.0);
-    m = ((200 - SOC) / (abs(AVG_AMPS)/10.0) - h) * 60;
+    h = (CAPACITY - SOC) / abs(AVG_AMPS);
+    m = ((CAPACITY - SOC) / abs(AVG_AMPS) - h) * 60;
     strcpy(state, "Fully Charged in");
   }
 
@@ -1344,7 +1342,7 @@ void sort_can() {
     if (canMsgData.rxId == 0x3B) {
         VOLT = ((CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1]) / 10.0;
         AMPS = (signValue((CAN_RX_BUF[2] << 8) + CAN_RX_BUF[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
-        //combinedData.canData.absI = ((CAN_RX_BUF[4] << 8) + CAN_RX_BUF[5]) / 10.0; // orion2jr issue: set signed and -32767 to fix
+        CAPACITY = ((CAN_RX_BUF[4] << 8) + CAN_RX_BUF[5]) / 10.0;
         SOC = CAN_RX_BUF[6] / 2;
     }
     if (canMsgData.rxId == 0x6B2) {
@@ -1590,9 +1588,10 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
 
     // Create title label with underline style (hidden initially)
     data->title_label = lv_label_create(parent);
-      lv_style_init(&underline);
-      lv_style_set_text_decor(&underline, LV_TEXT_DECOR_UNDERLINE); // set underline style
-      lv_obj_add_style(data->title_label, &underline, 0);
+      //lv_style_init(&underline);
+      //lv_style_set_text_decor(&underline, LV_TEXT_DECOR_UNDERLINE); // set underline style
+      //lv_obj_add_style(data->title_label, &underline, 0);
+      lv_obj_set_style_text_decor(data->title_label, LV_TEXT_DECOR_UNDERLINE, NULL);
       lv_label_set_text(data->title_label, "BMS Status Messages");
       lv_obj_align(data->title_label, LV_ALIGN_TOP_MID, 0, y);
       lv_obj_add_flag(data->title_label, LV_OBJ_FLAG_HIDDEN);
@@ -2023,6 +2022,15 @@ void loop() {
     dim_display();
   }
 
+  // 2 sec inverter delay after mppt disabled
+  if ( inverter_delay ) {
+    static uint32_t time_ms = millis();
+    if ( time_ms + 2000 < millis() ) {
+      digitalWrite(userData[3].relay_pin, HIGH);
+      time_ms = 0;
+      inverter_delay = false;
+    }
+  }
   /*if (Serial) {
     // Average loop lap time of 256 iterations - reflects the lvgl delay at end of loop
     static uint8_t i = 0;
