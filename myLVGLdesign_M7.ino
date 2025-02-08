@@ -76,9 +76,8 @@ struct CanData {
     int cpcty = 0;              // Total pack capacity Ahr
 
     byte hs = 0;                // Internal Heatsink
-    byte cu = 0;                // BMS custom flag currently used for sending charge power enabled and MPO#1 state (used for tripping chg enabled relay)
-    
-    //MSGPACK_DEFINE_ARRAY(instU, instI, soc, hC, lC, h, fu, hT, lT, ah, ry, dcl, ccl, st, cc, avgI, hCid, lCid, p, hs, cu, cpcty);
+    byte cu = 0;                // BMS custom flags: 0x01 = charge power enabled triggered by pv sense circuit, 0x02 = MPO#1 signal feedback to trip pv relay
+
 };
 
 // Create combined struct with sensor and can data
@@ -89,12 +88,12 @@ struct CombinedData {
 
 // Can Message Data struct
 struct CanMsgData {
-  // receive settings
+  // RX
   uint32_t rxId = 0;
   uint8_t len = 0;
   uint8_t rxBuf[8] = {};
 
-  // send settings
+  // TX
   static const uint8_t CAN_ID = 0x02; // CAN id for the message (constant)
   uint8_t msg_data[3] = {0x00, 0x00, 0x00}; // 3 bytes used in BMS for MPO#2, MPO#1 and balancing allowed signals uint8_t indicates each byte is 1 byte
   uint8_t msg_cnt = 0;
@@ -240,8 +239,8 @@ const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 static String buffer = "";
 
 //************************************************************************************************************
-//  BUG#1:  WHEN IN OFF NO LOAD MODE I WANT PWR_DEMAND TO OVERRIDE THIS
-//  BUG#2:  WHEN IN OFF NO LOAD MODE WITH ANOTHER BUTTON PRESSED, TURNING OFF INVERTER LEAVES BUTTONS STILL ON
+//  BUG#1:  DCL TRIPPED INVERTER WITHOUT WARNING AND BUTTON STILL ON?!
+//  BUG#2:  SOLAR OFF - INVERTER STARTING REMAINS ON WITH PV TRIPPED AFTER SUCCESSFUL START - MPPT DELAY TIMING ISSUE
 //************************************************************************************************************
 
 // CREATE BUTTONS /// TWO TIMERS CREATED HERE: TEMP UPDATER AND DCL CHECK
@@ -348,6 +347,7 @@ void mppt_delayer(bool mppt_delay) {
   if ( mppt_delay ) {
     CAN_MSG[1] = 0x01;
     CAN_TX_MPO1 = true; // This triggers send function in loop
+    Serial.println("Sending MPO#1 PV trip signal");
   }
   else if ( ! CCL_ENFORCED ) {
     CAN_TX_MPO1 = false;
@@ -368,6 +368,7 @@ void sunrise_detector() {
     // START TIME TO CHECK WHEN SOLAR SIGNAL IS LOST
     if ( ! time_ms ) {
       time_ms = millis();
+      return;
     }
 
     // IF MPPT DRAINS BATTERY WHILST INVERTER IS OFF AND PV HAS BEEN ENABLED FOR AT LEAST 30s
@@ -375,7 +376,6 @@ void sunrise_detector() {
       mppt_delay = true;
       strcpy(DYNAMIC_LABEL, "Solar OFF - MPPT drain");
     }
-    return;
   }
 
   // IF SOLAR CHARGE SIGNAL IS LOST
@@ -402,6 +402,8 @@ void sunrise_detector() {
 
   // Send signal to mppt_delayer function
   mppt_delayer(mppt_delay);
+  Serial.print("DEBUG sunrise_detector sending mppt_delayer signal: ");
+  Serial.println(mppt_delay);
 }
 
 
@@ -483,9 +485,7 @@ void dcl_check(user_data_t *data) {
       lv_obj_clear_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN);
     }
     // SET INVERTER LABEL TEXT
-    if ( lv_label_get_text(userData[3].label_obj) != "OFF" ) {
-      lv_label_set_text(userData[3].label_obj, "OFF");
-    }
+    lv_label_set_text(userData[3].label_obj, "OFF");
   }
   // INDIVIDUAL BUTTON LIMITS IF NOT ALREADY DISABLED
   else if ( DCL < data->dcl_limit && ! lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
@@ -497,7 +497,7 @@ void dcl_check(user_data_t *data) {
     if ( data->on ) {
       button_off(data);
       // UPDATE INVERTER LABEL
-      if ( data->relay_pin == RELAY1 && lv_label_get_text(data->label_obj) != "OFF" ) {
+      if ( data->relay_pin == RELAY1 ) {
         lv_label_set_text(data->label_obj, "OFF");
       }
     }
@@ -505,9 +505,8 @@ void dcl_check(user_data_t *data) {
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }
 
-  // IF NO DCL LIMIT AND DISCHARGE RELAY CLOSED HIDE FLAG AND ENABLE BUTTONS
-  else if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) && (RELAYS & 0x0001) ) {
-    //Serial.println("DEBUG DCL_CHECK: Enabling button");
+  // RE-ENABLE DISABLED BUTTON WITHIN DCL IF BMS DISCHARGE RELAY CLOSED
+  else if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) && (RELAYS & 0x01) == 0X01 ) {
     if ( ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
     }
@@ -708,7 +707,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
       if ( data->relay_pin == RELAY1 ) {
         inverter_prestart_p = WATTS;
         // TURN OFF MPPT IF SOLAR DETECTED BUT NO CHARGE TO AVOID START-UP POWER SURGE
-        if ( inverter_prestart_p >= 0 && (inverter_standby_p + inverter_prestart_p) > WATTS && (CUSTOM_FLAGS & 0x02) == 0x02 ) {
+        if ( WATTS >= 0 && (CUSTOM_FLAGS & 0x02) == 0x02 ) {
           mppt_delayer(true);
           strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter starting");
           inverter_delay = true;
@@ -736,7 +735,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
       }
 
       // TURN ON RELAY UNLESS MPPT DELAYER IS RUNNING
-      if ( data->relay_pin == RELAY1 && ! inverter_delay || data->relay_pin == RELAY3 ) {
+      if ( ! inverter_delay || data->relay_pin == RELAY3 ) {
         digitalWrite(data->relay_pin, HIGH);
       }
 
