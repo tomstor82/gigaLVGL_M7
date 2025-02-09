@@ -136,17 +136,10 @@ typedef struct {
 } clock_data_t;
 
 typedef struct {
-  lv_obj_t *parent = NULL;
   lv_obj_t *label_obj = NULL;
   lv_obj_t *msgbox = NULL;
   bool update_timer = false;
-} can_msgbox_data_t;
-
-typedef struct {
-  lv_obj_t *label_obj = NULL;
-  lv_obj_t *msgbox = NULL;
-  bool update_timer = false;
-} sensor_msgbox_data_t;
+} msgbox_data_t;
 
 typedef struct {
   lv_obj_t *soc_arc = NULL;
@@ -169,8 +162,7 @@ static CanMsgData canMsgData;
 static bms_status_data_t bmsStatusData;
 static user_data_t userData[4] = {}; // 4 buttons with user_data
 static clock_data_t clockData;
-static can_msgbox_data_t canMsgBoxData;
-static sensor_msgbox_data_t sensorMsgBoxData;
+static msgbox_data_t msgboxData[2] = {};
 static data_display_t dataDisplay;
 static CombinedData combinedData;
 
@@ -229,8 +221,6 @@ const uint32_t hot_water_interval_ms = 900000; // 15 min
 const uint16_t inverter_startup_delay_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
 const uint8_t off_interval_min = 3; // 3 minute off interval reduces standby consumption from 85Wh to around 12,5Wh -84%
 
-//static lv_style_t underline;
-
 static uint8_t brightness = 70;
 uint32_t previous_touch_ms = 0;
 const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
@@ -285,7 +275,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 
     // ADD EVENT HANDLER TO TEMPERATURE INDICATOR
     lv_obj_add_flag(data->label_obj, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(data->label_obj, sensor_msgbox, LV_EVENT_CLICKED, &sensorMsgBoxData);
+    lv_obj_add_event_cb(data->label_obj, sensor_msgbox, LV_EVENT_CLICKED, &msgboxData[1]);
 
     // CREATE TEMPERATURE SELECTION DROP DOWN MENU
     create_temperature_dropdown(parent, data);
@@ -336,7 +326,7 @@ void mppt_delayer(bool mppt_delay) {
   }
 
   // IF FALSE ARGUMENT AND TIMER HAS NOT REACHED 20s: SET TRUE
-  else if ( ! mppt_delay && start_time_ms && millis() - start_time_ms < 20000) {
+  else if ( ! mppt_delay && start_time_ms && start_time_ms + 20000 > millis() ) {
     mppt_delay = true;
   }
   else {
@@ -362,13 +352,12 @@ void sunrise_detector() {
   static bool mppt_delay = false;
   static uint32_t time_ms = 0;
 
-  // IS SOLAR CHARGE SIGNAL AVAILABLE THROUGH CUSTOM FLAG AND MPPT DELAY NOT RUNNING
+  // IS SOLAR CHARGE SIGNAL AVAILABLE THROUGH CUSTOM FLAG AND MPPT DELAY VARIABLE FALSE
   if ( (CUSTOM_FLAGS & 0x01) == 0x01 && ! mppt_delay ) {
 
     // START TIME TO CHECK WHEN SOLAR SIGNAL IS LOST
     if ( ! time_ms ) {
       time_ms = millis();
-      return;
     }
 
     // IF MPPT DRAINS BATTERY WHILST INVERTER IS OFF AND PV HAS BEEN ENABLED FOR AT LEAST 30s
@@ -464,12 +453,12 @@ void button_off(user_data_t *data) {
 // DCL AND LOW CELL VOLTAGE CHECK TIMER ////////////////////////////////////////////////////////////////////////////
 void dcl_check(user_data_t *data) {
 
-  // IF BUTTON DISABLED ELSEWHERE SKIP THIS FUNCTION
+  // THERMOSTAT BUTTONS MAY ALREADY BE DISABLED BY FAULTY DHT22 SENSORS
   if ( data->disabled ) {
     return;
   }
 
-  // IF DCL IS ZERO OR CELL VOLTAGE TOO LOW AND NOT ALREADY DISABLED: LABEL INVERTER ONLY AND TURN OFF AND DISABLE ALL BUTTONS
+  // IF DCL IS ZERO, CELL VOLTAGE LOW OR DCH RELAY OPEN AND BUTTON NOT ALREADY DISABLED
   else if ( DCL == 0 || LO_CELL_V < (MIN_CELL_V + 0.3) || (RELAYS & 0x01) != 0x01 && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
     for ( uint8_t i = 0; i < 4; i++ ) {
       if ( userData[i].on ) {
@@ -480,32 +469,32 @@ void dcl_check(user_data_t *data) {
         lv_obj_add_state(userData[i].button, LV_STATE_DISABLED);
       }
     }
-    // CLEAR HIDDEN FLAG ON INVERTER TO MAKE IT VISIBLE
+    // CLEAR HIDDEN FLAG ON INVERTER DCL LABEL ONLY
     if ( lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN);
     }
-    // SET INVERTER LABEL TEXT
+    // SET INVERTER STATUS LABEL TEXT
     lv_label_set_text(userData[3].label_obj, "OFF");
   }
   // INDIVIDUAL BUTTON LIMITS IF NOT ALREADY DISABLED
   else if ( DCL < data->dcl_limit && ! lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
-    // SHOW LABEL
+    // SHOW DCL LABEL
     if ( lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
     }
     // TURN OFF BUTTON
     if ( data->on ) {
       button_off(data);
-      // UPDATE INVERTER LABEL
+      // UPDATE INVERTER STATUS LABEL
       if ( data->relay_pin == RELAY1 ) {
         lv_label_set_text(data->label_obj, "OFF");
       }
     }
-    // DISABLE BUTTON - TEST PERFORMED ALREADY
+    // DISABLE BUTTON - TEST PERFORMED IN ELSE IF CONDITION
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }
 
-  // RE-ENABLE DISABLED BUTTON WITHIN DCL IF BMS DISCHARGE RELAY CLOSED
+  // RE-ENABLE DISABLED BUTTON IF WITHIN DCL AND IF BMS DISCHARGE RELAY CLOSED
   else if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) && (RELAYS & 0x01) == 0X01 ) {
     if ( ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
@@ -563,17 +552,18 @@ const char* set_can_msgbox_text() {
   return msgbox_text;
 }
 
-void can_msgbox_update_timer(can_msgbox_data_t *data) {
+void can_msgbox_update_timer(msgbox_data_t *data) {
   lv_obj_t *label = lv_msgbox_get_text(data->msgbox); // get msgbox text string object excluding title
   lv_label_set_text(label, set_can_msgbox_text()); // Update the text object in the msgBox
 }
 
 void can_msgbox(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
-    can_msgbox_data_t *data = (can_msgbox_data_t*)lv_event_get_user_data(e);
+    msgbox_data_t *data = (msgbox_data_t*)lv_event_get_user_data(e);
+    lv_obj_t *parent = lv_obj_get_parent(dataDisplay.soc_label);
     
     if (code == LV_EVENT_CLICKED) {
-        data->msgbox = lv_msgbox_create(data->parent, "     Battery Monitoring Data", set_can_msgbox_text(), NULL, false);
+        data->msgbox = lv_msgbox_create(parent, "     Battery Monitoring Data", set_can_msgbox_text(), NULL, false);
         lv_obj_set_width(data->msgbox, LV_PCT(80)); // Set width to 80% of the screen
         lv_obj_align(data->msgbox, LV_ALIGN_CENTER, 0, 0); // Center the message box on the screen
 
@@ -593,7 +583,7 @@ void can_msgbox(lv_event_t *e) {
 
 void close_can_msgbox_event_handler(lv_event_t *e) {
   lv_event_code_t code = lv_event_get_code(e);
-  can_msgbox_data_t *data = (can_msgbox_data_t*)lv_event_get_user_data(e);
+  msgbox_data_t *data = (msgbox_data_t*)lv_event_get_user_data(e);
 
   if ( code == LV_EVENT_CLICKED) {
     data->update_timer = false;
@@ -639,13 +629,13 @@ const char* set_sensor_msgbox_text() {
   return msgbox_text;
 }
 
-void sensor_msgbox_update_timer(sensor_msgbox_data_t *data) {
+void sensor_msgbox_update_timer(msgbox_data_t *data) {
     lv_obj_t *label = lv_msgbox_get_text(data->msgbox); // get msgBox text string object excluding title
     lv_label_set_text(label, set_sensor_msgbox_text()); // Update the text object in the msgBox
 }
 
 void sensor_msgbox(lv_event_t *e) {
-    sensor_msgbox_data_t *data = (sensor_msgbox_data_t*)lv_event_get_user_data(e);
+    msgbox_data_t *data = (msgbox_data_t*)lv_event_get_user_data(e);
     lv_event_code_t code = lv_event_get_code(e);
 
     if (code == LV_EVENT_CLICKED) {
@@ -666,7 +656,7 @@ void sensor_msgbox(lv_event_t *e) {
 
 void close_sensor_msgbox_event_handler(lv_event_t *e) {
   lv_event_code_t code = lv_event_get_code(e);
-  sensor_msgbox_data_t *data = (sensor_msgbox_data_t*)lv_event_get_user_data(e);
+  msgbox_data_t *data = (msgbox_data_t*)lv_event_get_user_data(e);
 
   if ( code == LV_EVENT_CLICKED) {
     data->update_timer = false;
@@ -1556,16 +1546,16 @@ void refresh_bms_status_data(bms_status_data_t *data) {
       lv_obj_clear_flag(data->title_label, LV_OBJ_FLAG_HIDDEN);
     }
     // SHOW BUTTON
-    if ( lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) && flag_index != comparator_index ) {
+    else if ( flag_index != comparator_index && lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(data->button, LV_OBJ_FLAG_HIDDEN);
     }
     // HIDE BUTTON
-    else {
+    else if ( flag_index == comparator_index && ! lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
     }
   }
 
-  // HIDE EVERYTHING IF NO FLAGS AND IF THEY WERE PREVIOUSLY SHOWING
+  // HIDE EVERYTHING IF NO FLAGS AND IF THEY WERE VISIBLE PREVIOUSLY
   else {
     if ( ! lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ){
        lv_obj_add_flag(data->title_label, LV_OBJ_FLAG_HIDDEN);
@@ -1587,9 +1577,6 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
 
     // Create title label with underline style (hidden initially)
     data->title_label = lv_label_create(parent);
-      //lv_style_init(&underline);
-      //lv_style_set_text_decor(&underline, LV_TEXT_DECOR_UNDERLINE); // set underline style
-      //lv_obj_add_style(data->title_label, &underline, 0);
       lv_obj_set_style_text_decor(data->title_label, LV_TEXT_DECOR_UNDERLINE, NULL);
       lv_label_set_text(data->title_label, "BMS Status Messages");
       lv_obj_align(data->title_label, LV_ALIGN_TOP_MID, 0, y);
@@ -1799,7 +1786,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_obj_set_style_text_font(data->soc_label, &Montserrat34_0_9_percent, NULL);
     lv_obj_set_style_text_align(data->soc_label, LV_TEXT_ALIGN_CENTER, NULL);
     lv_obj_add_flag(data->soc_label, LV_OBJ_FLAG_CLICKABLE); // make it clickable to open msg_box
-    lv_obj_add_event_cb(data->soc_label, can_msgbox, LV_EVENT_CLICKED, &canMsgBoxData); // add event handler to clicks
+    lv_obj_add_event_cb(data->soc_label, can_msgbox, LV_EVENT_CLICKED, &msgboxData[0]); // add event handler to clicks
 
   data->volt_label = lv_label_create(parent);
 
@@ -1856,11 +1843,11 @@ void combined_1s_updater(lv_timer_t *timer) {
 }
 
 void combined_10s_updater(lv_timer_t *timer) {
-  if ( sensorMsgBoxData.update_timer ) {
-    sensor_msgbox_update_timer(&sensorMsgBoxData);
+  if ( msgboxData[1].update_timer ) {
+    sensor_msgbox_update_timer(&msgboxData[1]);
   }
-  if ( canMsgBoxData.update_timer ) {
-    can_msgbox_update_timer(&canMsgBoxData);
+  if ( msgboxData[0].update_timer ) {
+    can_msgbox_update_timer(&msgboxData[0]);
   }
   for ( uint8_t i = 0; i < 2; i++ ) {
     update_temp(&userData[i]);
@@ -1915,7 +1902,6 @@ void setup() {
   lv_obj_t * parent = lv_obj_create(lv_scr_act());
   lv_obj_set_grid_dsc_array(parent, col_dsc, row_dsc);
   lv_obj_set_size(parent, Display.width(), Display.height());
-  //lv_obj_set_style_bg_color(parent, lv_palette_main(LV_PALETTE_GREY), LV_PART_MAIN);
   lv_obj_center(parent);
 
   // initialise container object
@@ -1934,7 +1920,7 @@ void setup() {
   create_bms_status_label(cont, 280, &bmsStatusData);
 
   // Initialise click event for CANdata message box
-  canMsgBoxData.parent = cont; // ****************** MAY WORK BETTER WITH SENSOR MSGBOX APPROACH AS NO SHINE THROUGH HAPPENS THERE **************
+  //canMsgBoxData.parent = cont; // ****************** MAY WORK BETTER WITH SENSOR MSGBOX APPROACH AS NO SHINE THROUGH HAPPENS THERE **************
 
   // START COMBINED TIMERS FOR CALLING UPDATER FUNCTIONS
   lv_timer_create(combined_1s_updater, 1000, NULL);
