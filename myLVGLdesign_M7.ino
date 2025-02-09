@@ -73,7 +73,7 @@ struct CanData {
     uint16_t fu = 0;            // BMS Faults
     uint16_t st = 0;            // BMS Status
     int cc = 0;                 // Total pack cycles (int to avoid overrun issues with uint16_t)
-    int cpcty = 0;              // Total pack capacity Ahr
+    //int cpcty = 0;              // Total pack capacity Ahr
 
     byte hs = 0;                // Internal Heatsink
     byte cu = 0;                // BMS custom flags: 0x01 = charge power enabled triggered by pv sense circuit, 0x02 = MPO#1 signal feedback to trip pv relay
@@ -121,6 +121,7 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   lv_obj_t *button = NULL;
   lv_obj_t *dcl_label = NULL;
   lv_obj_t *label_obj = NULL;
+  lv_timer_t *timer = NULL; // used for hot water and inverter
   bool update_timer = false;
   uint8_t relay_pin = 0;
   uint8_t y_offset = 0;
@@ -207,7 +208,7 @@ static CombinedData combinedData;
 #define CYCLES          combinedData.canData.cc
 #define HEAT_SINK       combinedData.canData.hs
 #define CUSTOM_FLAGS    combinedData.canData.cu
-#define CAPACITY        combinedData.canData.cpcty
+//#define CAPACITY        combinedData.canData.cpcty
 
 #define DYNAMIC_LABEL   bmsStatusData.dynamic_label
 #define CCL_ENFORCED    bmsStatusData.ccl_enforced
@@ -337,7 +338,6 @@ void mppt_delayer(bool mppt_delay) {
   if ( mppt_delay ) {
     CAN_MSG[1] = 0x01;
     CAN_TX_MPO1 = true; // This triggers send function in loop
-    Serial.println("Sending MPO#1 PV trip signal");
   }
   else if ( ! CCL_ENFORCED ) {
     CAN_TX_MPO1 = false;
@@ -391,8 +391,6 @@ void sunrise_detector() {
 
   // Send signal to mppt_delayer function
   mppt_delayer(mppt_delay);
-  Serial.print("DEBUG sunrise_detector sending mppt_delayer signal: ");
-  Serial.println(mppt_delay);
 }
 
 
@@ -650,7 +648,7 @@ void sensor_msgbox(lv_event_t *e) {
         lv_obj_add_event_cb(overlay, close_sensor_msgbox_event_handler, LV_EVENT_CLICKED, data);
 
         // Create timer to update data every 10 seconds
-        data->update_timer = true; //lv_timer_create(sensor_msgbox_update_timer, 10000, data);
+        data->update_timer = true;
     }
 }
 
@@ -681,12 +679,113 @@ void close_sensor_msgbox_event_handler(lv_event_t *e) {
 
 
 
+
+
+
+// POWER CHECK TIMER ///////////////////////////////////////////////////////////////////////
+void power_check(lv_timer_t *timer) {
+  user_data_t *data = (user_data_t *)timer->user_data;
+
+  // VARIABLE USED TO STOP INVERTER SLEEP MODE
+  bool on = false;
+
+  // SLEEP MODE VARIABLES
+  static uint32_t time_ms = 0;
+  static uint8_t minute_count = 0;
+  static bool delay_1min = false;
+  char plural[2] = "s";
+  char label[30];
+
+  // INVERTER CHECK
+  if ( data->relay_pin == RELAY1 ) {
+
+    // Remain ON if charging when SOC above 50%
+    if ( AVG_AMPS < -5 && SOC > 50 ) {
+      on = true;
+    }
+
+    // Remain ON if demand variable set
+    else if ( pwr_demand ) {
+      on = true;
+    }
+
+    // Remain ON if discharge exceeds inverter standby - considering prestart_p and canData.p are signed it should cover most charge/discharge scenarios
+    else if ( (inverter_standby_p + inverter_prestart_p) < abs(WATTS) ) {
+      on = true;
+    }
+  }
+  
+  // HOT WATER CHECK - REMAIN ON IF CHARGE
+  else if ( CCL < 10 && AVG_AMPS < 0 ) {
+    on = true;
+  }
+
+  // KEEP HOT WATER/INVERTER ON, OR RESTART INVERTER IF IN SLEEP MODE
+  if ( on ) {
+    // CHECK IF INVERTER IS IN PRE-SLEEP OR SLEEP MODE
+    if ( data->relay_pin == RELAY1 && time_ms ) {
+      if ( delay_1min ) { // INVERTER IN PRE-SLEEP MODE - STOP IT
+        delay_1min = false;
+        time_ms = 0;
+      }
+      else { // INVERTER IN SLEEP MODE - WAKE-UP
+        digitalWrite(data->relay_pin, HIGH);
+        lv_label_set_text(data->label_obj, "ON");
+        time_ms = 0; // RESET SLEEP TIMER
+      }
+    }
+    lv_timer_reset(data->timer);
+  }
+
+  // INVERTER SLEEP MODE
+  else if ( data->relay_pin == RELAY1 && data->on == true ) {
+
+    // INVERTER OFF AND LABEL UPDATER ALGORITHM
+    if ( ! time_ms ) {
+      time_ms = millis();
+      delay_1min = true;
+      lv_timer_reset(data->timer); // to prevent label being written once finished
+    }
+    // KEEP INVERTER ON FOR AT LEAST 30s + POWER_CHECK TIMER
+    else if ( (time_ms + 30 * 1000) < millis() && delay_1min ) {
+      time_ms = millis();
+      digitalWrite(data->relay_pin, LOW);
+      delay_1min = false;
+    }
+    else if ( (time_ms + (1 + minute_count) * 60 * 1000) < millis() && minute_count < off_interval_min && ! delay_1min ) {
+      minute_count++;
+      if ( minute_count == 2 ) {
+        strcpy(plural, "");
+      }
+    }
+    else if ( (minute_count + 1) == off_interval_min && ! delay_1min ) {
+      minute_count = 0;
+      time_ms = 0;
+      data->on = false; // to enable inverter startup check
+      lv_event_send(data->button, LV_EVENT_CLICKED, NULL);
+      lv_timer_reset(data->timer); // to prevent label being written once finished
+    }
+
+    if ( ! delay_1min ) {
+      snprintf(label, sizeof(label), "OFF - NO LOAD\nON in %d minute%s", (off_interval_min - minute_count), plural);
+      lv_label_set_text(data->label_obj, label);
+    }
+    lv_timer_reset(data->timer);
+  }
+
+  // HOT WATER OFF
+  else {
+    button_off(data);
+    pwr_demand--;
+    lv_timer_del(data->timer);
+    data->timer = NULL;
+  }
+}
+
 // HOT WATER AND INVERTER EVENT HANDLER ////////////////////////////////////////////////////
 void hot_water_inverter_event_handler(lv_event_t *e) {
   user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
   lv_event_code_t code = lv_event_get_code(e);
-
-  static lv_timer_t *lv_timer = NULL;
 
   if(code == LV_EVENT_CLICKED) {
 
@@ -729,13 +828,16 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
         digitalWrite(data->relay_pin, HIGH);
       }
 
-      // DELETE TIMER BEFORE RE-DECLARATION
-      if ( lv_timer ) {
-        lv_timer_del( lv_timer );
-        lv_timer = NULL;
+      // DELETE TIMER BEFORE RE-DECLARATION IF IT EXISTS E.G HOT WATER TURNED OFF BEFORE INTERVAL TIME EXPIRED
+      if ( data->timer ) {
+        lv_timer_del( data->timer );
+        data->timer = NULL;
       }
-      // CREATE COMBINED TIMER
-      lv_timer = lv_timer_create(power_check, data->timeout_ms, data);
+
+      // CREATE COMBINED TIMER THAT ONLY RUNS ONCE AND IS RESET IF NEEDED INSIDE power_check
+      data->timer = lv_timer_create(power_check, data->timeout_ms, data);
+      lv_timer_set_repeat_count(data->timer, 1);
+
       // SET BUTTON TO ON
       data->on = true;
     }
@@ -744,9 +846,9 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
     else {
       digitalWrite(data->relay_pin, LOW);
       data->on = false;
-      if ( lv_timer ) {
-        lv_timer_del( lv_timer );
-        lv_timer = NULL;
+      if ( data->timer ) {
+        lv_timer_del( data->timer );
+        data->timer = NULL;
       }
 
       // INVERTER MANIPULATES BUTTONS THAT ARE ON
@@ -772,108 +874,6 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
 }
 
 
-// POWER CHECK TIMER ///////////////////////////////////////////////////////////////////////
-void power_check(lv_timer_t * timer) {
-  user_data_t * data = (user_data_t *)timer->user_data;
-
-  // VARIABLE USED TO STOP INVERTER SLEEP MODE
-  bool on = false;
-
-  // SLEEP MODE VARIABLES
-  static uint32_t time_ms = 0;
-  static uint8_t minute_count = 0;
-  static bool delay_1min = false;
-  char plural[2] = "s";
-  char label[30];
-
-  // INVERTER CHECK
-  if ( data->relay_pin == RELAY1 ) {
-
-    // Remain ON if charging when SOC above 50%
-    if ( AVG_AMPS < -5 && SOC > 50 ) {
-      on = true;
-    }
-
-    // Remain ON if demand variable set
-    else if ( pwr_demand ) {
-      on = true;
-    }
-
-    // Remain ON if discharge exceeds inverter standby - considering prestart_p and canData.p are signed it should cover most charge/discharge scenarios
-    else if ( (inverter_standby_p + inverter_prestart_p) < abs(WATTS) ) {
-      on = true;
-    }
-  }
-  
-  // HOT WATER CHECK - REMAIN ON IF CHARGE
-  else if ( CCL < 10 && AVG_AMPS < 0 ) {
-    on = true;
-  }
-
-  // KEEP HOT WATER/INVERTER ON, OR RESTART INVERTER IF IN SLEEP MODE
-  if ( on ) {
-
-    // HOT WATER
-    if ( data->relay_pin == RELAY3 ) {
-      return;
-    }
-    // INVERTER PRE SLEEP 1 MIN DELAY
-    else if ( time_ms && delay_1min ) {
-      delay_1min = false;
-      time_ms = 0;
-      return;
-    }
-    // INVERTER IN SLEEP MODE
-    else if ( time_ms && ! delay_1min ) {
-      digitalWrite(data->relay_pin, HIGH);
-      lv_label_set_text(data->label_obj, "ON");
-      time_ms = 0; // RESET SLEEP TIMER
-      return;
-    }
-  }
-
-  // INVERTER SLEEP MODE
-  else if ( data->relay_pin == RELAY1 && data->on == true ) {
-
-    // INVERTER OFF AND LABEL UPDATER ALGORITHM
-    if ( ! time_ms ) {
-      time_ms = millis();
-      delay_1min = true;
-      return; // to prevent label being written
-    }
-    // KEEP INVERTER ON FOR AT LEAST 30s + POWER_CHECK TIMER
-    else if ( (time_ms + 30 * 1000) < millis() && delay_1min ) {
-      time_ms = millis();
-      digitalWrite(data->relay_pin, LOW);
-      delay_1min = false;
-    }
-    else if ( (time_ms + (1 + minute_count) * 60 * 1000) < millis() && minute_count < off_interval_min && ! delay_1min ) {
-      minute_count++;
-      if ( minute_count == 2 ) {
-        strcpy(plural, "");
-      }
-    }
-    else if ( (minute_count + 1) == off_interval_min && ! delay_1min ) {
-      minute_count = 0;
-      time_ms = 0;
-      data->on = false; // to enable inverter startup check
-      lv_event_send(data->button, LV_EVENT_CLICKED, NULL);
-      return; // to prevent label being written once finished
-    }
-
-    if ( ! delay_1min ) {
-      snprintf(label, sizeof(label), "OFF - NO LOAD\nON in %d minute%s", (off_interval_min - minute_count), plural);
-      lv_label_set_text(data->label_obj, label);
-    }
-  }
-
-  // HOT WATER OFF
-  else {
-    button_off(data);
-    lv_timer_del(timer);
-  }
-}
-
 
 
 
@@ -897,7 +897,7 @@ void power_check(lv_timer_t * timer) {
 
 
 // THERMOSTAT TIMER ////////////////////////////////////////////////////////////////
-void thermostat_checker(user_data_t * data) {
+void thermostat_checker(user_data_t *data) {
 
   static uint32_t thermostat_off_ms = 0;
   bool on = false;
@@ -953,8 +953,8 @@ void thermostat_checker(user_data_t * data) {
 }
 
 // THERMOSTAT EVENT HANDLER /////////////////////////////////////////////////////////
-void thermostat_event_handler(lv_event_t * e) {
-  user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
+void thermostat_event_handler(lv_event_t *e) {
+  user_data_t *data = (user_data_t *)lv_event_get_user_data(e);
   lv_event_code_t code = lv_event_get_code(e);
 
   if (code == LV_EVENT_CLICKED) {
@@ -973,7 +973,7 @@ void thermostat_event_handler(lv_event_t * e) {
         }
       }
       data->on = true;
-      data->update_timer = true; //lv_timer_create(thermostat_timer, 10000, data); // check temp diff every 10s
+      data->update_timer = true;
       pwr_demand++;
     }
 
@@ -1008,8 +1008,8 @@ void thermostat_event_handler(lv_event_t * e) {
 
 // TEMPERATURE DROP DOWN EVENT HANDLER ////////////////////////////////////////////////
 void dropdown_event_handler(lv_event_t *e) {
-    user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
-    lv_obj_t * dd = lv_event_get_target(e);
+    user_data_t *data = (user_data_t *)lv_event_get_user_data(e);
+    lv_obj_t *dd = lv_event_get_target(e);
 
     // get index of selected dropdown item
     uint8_t id_selected = lv_dropdown_get_selected(dd);
@@ -1040,7 +1040,7 @@ void dropdown_event_handler(lv_event_t *e) {
 }
 
 // CREATE TEMPERATURE SELECTION DROPDOWN MENU ///////////////////////////////////////
-void create_temperature_dropdown(lv_obj_t * parent, user_data_t *data) {
+void create_temperature_dropdown(lv_obj_t *parent, user_data_t *data) {
   lv_obj_t *dd = lv_dropdown_create(parent);
   lv_dropdown_set_options(dd,
     "5\u00B0C\n18\u00B0C\n19\u00B0C\n20\u00B0C\n21\u00B0C\n22\u00B0C\n23\u00B0C");
@@ -1216,7 +1216,7 @@ void update_temp(user_data_t *data) {
 
 
 // CLEAR BMS FLAG CAN MSG EVENT HANDLER ////////////////////////////////////////////////////////////////////
-void clear_bms_flag(lv_event_t * e) {
+void clear_bms_flag(lv_event_t *e) {
   lv_event_code_t code = lv_event_get_code(e);
 
   if(code == LV_EVENT_CLICKED) {
@@ -1259,6 +1259,10 @@ void clock_updater(clock_data_t *data) {
   char c[4] = {"hrs"};
   char state[17];
 
+  h = AH / abs(AVG_AMPS);
+  m = (AH / abs(AVG_AMPS) - h) * 60;
+
+
   // Zero
   if ( AVG_AMPS == 0 ) {
     strcpy(t, "");;
@@ -1266,15 +1270,11 @@ void clock_updater(clock_data_t *data) {
 
   // Discharge
   else if (AVG_AMPS > 0) {
-    h = SOC / AVG_AMPS;
-    m = (SOC / AVG_AMPS - h) * 60;
     strcpy(state, "Discharged in");
   }
 
   // Charge
   else if (AVG_AMPS < 0) {
-    h = (CAPACITY - SOC) / abs(AVG_AMPS);
-    m = ((CAPACITY - SOC) / abs(AVG_AMPS) - h) * 60;
     strcpy(state, "Fully Charged in");
   }
 
@@ -1331,7 +1331,7 @@ void sort_can() {
     if (canMsgData.rxId == 0x3B) {
         VOLT = ((CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1]) / 10.0;
         AMPS = (signValue((CAN_RX_BUF[2] << 8) + CAN_RX_BUF[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
-        CAPACITY = ((CAN_RX_BUF[4] << 8) + CAN_RX_BUF[5]) / 10.0;
+        //CAPACITY = ((CAN_RX_BUF[4] << 8) + CAN_RX_BUF[5]) / 10.0;
         SOC = CAN_RX_BUF[6] / 2;
     }
     if (canMsgData.rxId == 0x6B2) {
@@ -1899,7 +1899,7 @@ void setup() {
   // Create two columns on active screen, grid 2x1
   static lv_coord_t col_dsc[] = {370, 370, LV_GRID_TEMPLATE_LAST};
   static lv_coord_t row_dsc[] = {430, 430, LV_GRID_TEMPLATE_LAST};
-  lv_obj_t * parent = lv_obj_create(lv_scr_act());
+  lv_obj_t *parent = lv_obj_create(lv_scr_act());
   lv_obj_set_grid_dsc_array(parent, col_dsc, row_dsc);
   lv_obj_set_size(parent, Display.width(), Display.height());
   lv_obj_center(parent);
