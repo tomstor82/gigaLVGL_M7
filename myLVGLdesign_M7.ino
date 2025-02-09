@@ -53,7 +53,7 @@ struct CanData {
 
     float instU = 0;            // Voltage - multiplied by 10
     float instI = 0;            // Current - multiplied by 10 - negative value indicates charge
-    float avgI = 0;             // Average current for clock and sun symbol calculations
+    float avgI = 0;             // Average current for clock, arcs and sun symbol calculations
     float ah = 0;               // Amp hours
     float hC = 0;               // High Cell Voltage in 0,0001V
     float lC = 0;               // Low Cell Voltage in 0,0001V
@@ -1629,17 +1629,19 @@ void flash_icons(data_display_t *data) {
   else if ( SOC > 10 ) {
     lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_ORANGE), NULL);
   }
-  // RED FLASHING BATTERY ICON FROM SOC 10% AND LESS
-  else {
+  // RED BATTERY ICON FROM SOC 10% AND LESS WITH FLASHING BELOW 5% OR IF DISCHARGE DISABLED
+  else  {
     lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_RED), NULL);
-    flashing_battery = true;
+    if ( SOC < 5 || userData[3].disabled ) {
+      flashing_battery = true;
+    }
   }
 
   // MAKE BATTERY ICON VISIBLE IF PREVIOUSLY HIDDEN
   if ( lv_obj_has_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN) ) {
     lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
   }
-  // HIDE IT AGAIN IF MENT TO FLASH
+  // HIDE IT AGAIN IF MEANT TO FLASH
   else if ( flashing_battery ) {
     lv_obj_add_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
   }
@@ -1698,14 +1700,14 @@ void data_display_updater(lv_timer_t *timer) {
     strcpy(battery, LV_SYMBOL_BATTERY_EMPTY);
   }
 
-  // UPDATE SOC ARC VALUES AND CHANGE INDICATOR TO RED COLOUR FROM 10%
+  // UPDATE SOC ARC VALUES AND CHANGE INDICATOR TO RED COLOUR IF DISCHARGING BELOW 10%
   lv_arc_set_value(data->soc_arc, SOC);
   
-  if ( SOC > 10 ) {
-    lv_obj_set_style_arc_color(data->soc_arc, lv_palette_main(LV_PALETTE_LIGHT_BLUE), LV_PART_INDICATOR);
+  if ( SOC < 10 && AVG_AMPS > 0 ) {
+    lv_obj_set_style_arc_color(data->soc_arc, lv_palette_main(LV_PALETTE_RED), LV_PART_INDICATOR);
   }
   else {
-    lv_obj_set_style_arc_color(data->soc_arc, lv_palette_main(LV_PALETTE_RED), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(data->soc_arc, lv_palette_main(LV_PALETTE_LIGHT_BLUE), LV_PART_INDICATOR);
   }
 
 
