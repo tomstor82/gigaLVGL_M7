@@ -346,7 +346,7 @@ void mppt_delayer(bool mppt_delay) {
 }
 
 
-// SUNRISE DETECTOR ////////////////////////////////////////////////////////////////////////
+// SUNRISE DETECTOR - ONLY WHEN INVERTER IS OFF //////////////////////////////////////////////////////
 void sunrise_detector() {
 
   static bool mppt_delay = false;
@@ -361,7 +361,7 @@ void sunrise_detector() {
     }
 
     // IF MPPT DRAINS BATTERY WHILST INVERTER IS OFF AND PV HAS BEEN ENABLED FOR AT LEAST 30s
-    else if ( ! userData[3].on && WATTS > 10 && (time_ms + 30 * 1000) < millis() ) {
+    else if ( WATTS > 10 && (time_ms + 30 * 1000) < millis() ) {
       mppt_delay = true;
       strcpy(DYNAMIC_LABEL, "Solar OFF - MPPT drain");
     }
@@ -1832,10 +1832,12 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
 
 // INSTEAD OF INDIVIDUAL TIMERS I ADDED A HELPER FUNCTION TO CALL ALL 1s INTERVAL FUNCTIONS IN ONE GO - CURRENTLY 5 INDIVIDUAL TIMERS AND 11 COMBINED HERE ////////////////
 void combined_1s_updater(lv_timer_t *timer) {
-  sunrise_detector();
   ccl_check();
   clock_updater(&clockData);
   flash_icons(&dataDisplay);
+  if (userData[3].on == false) {
+    sunrise_detector();
+  }
   for (uint8_t i = 0; i < 4; i++) {
     dcl_check(&userData[i]);
   }
