@@ -156,6 +156,7 @@ typedef struct {
   lv_obj_t *car_battery_icon = NULL;
   lv_obj_t *charge_label = NULL;
   lv_obj_t *usage_label = NULL;
+  uint8_t watt_label_x_pos = 0;
 } data_display_t;
 
 //Initialise structures
@@ -1682,6 +1683,7 @@ void flash_icons(data_display_t *data) {
 void data_display_updater(lv_timer_t *timer) {
   data_display_t *data = (data_display_t*)timer->user_data;
   char battery[4];
+  uint8_t watt_label_xpos = 0;
   
   // BATTERY SYMBOL UPDATER
   if ( SOC >= 80 ) {
@@ -1731,6 +1733,15 @@ void data_display_updater(lv_timer_t *timer) {
   lv_label_set_text_fmt(data->volt_label, "%.2fV", VOLT);
   lv_label_set_text_fmt(data->amps_label, "%.1fA", AMPS);
   lv_label_set_text_fmt(data->watt_label, "%dW", WATTS);
+
+  // ADJUST WATT LABEL X POSITION AS LV_ALIGN DOESN'T DO THE TRICK
+  if ( WATTS > 999 ) {
+    watt_label_xpos = -12;
+  }
+  else if ( WATTS > 99 ) {
+    watt_label_xpos = -6;
+  }
+  lv_obj_align_to(data->watt_label, data->soc_arc, LV_ALIGN_OUT_BOTTOM_MID, watt_label_xpos, 15);
 }
 
 // CREATE DATA DISPLAY //////////////////////////////////////////////////////////////////
@@ -1816,7 +1827,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
   lv_obj_align_to(data->amps_label,         data->soc_arc,        LV_ALIGN_BOTTOM_MID,       30, -44);
   lv_obj_align_to(data->charge_icon,        data->soc_arc,        LV_ALIGN_OUT_LEFT_MID,     14,   5);
   lv_obj_align_to(data->car_battery_icon,   data->soc_arc,        LV_ALIGN_OUT_RIGHT_MID,    16,   5);
-  lv_obj_align_to(data->watt_label,         data->soc_arc,        LV_ALIGN_OUT_BOTTOM_MID,    0,  15);
+  //lv_obj_align_to(data->watt_label,         data->soc_arc,        LV_ALIGN_OUT_BOTTOM_MID,    0,  15); // ALLIGNED IN UPDATER DUE X_POS SHIFTING WITH VARYING WATT READINGS
     
   // CREATE LABEL UPDATE TIMER
   lv_timer_create(data_display_updater, 200, data);
