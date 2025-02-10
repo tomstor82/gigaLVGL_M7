@@ -155,7 +155,7 @@ typedef struct {
   lv_obj_t *charge_icon = NULL;
   lv_obj_t *car_battery_icon = NULL;
   lv_obj_t *charge_label = NULL;
-  lv_obj_t *load_label = NULL;
+  lv_obj_t *usage_label = NULL;
 } data_display_t;
 
 //Initialise structures
@@ -690,9 +690,9 @@ void power_check(lv_timer_t *timer) {
   bool on = false;
 
   // SLEEP MODE VARIABLES
-  static uint32_t time_ms = 0;
-  static uint8_t minute_count = 0;
-  static bool pre_sleep_delay = false;
+  uint32_t time_ms = 0;
+  uint8_t minute_count = 0;
+  bool pre_sleep_delay = false;
   char plural[2] = "s";
   char label[30];
 
@@ -734,7 +734,7 @@ void power_check(lv_timer_t *timer) {
         time_ms = 0; // RESET SLEEP TIMER
       }
     }
-    return; //lv_timer_reset(data->timer);
+    lv_timer_reset(data->timer);
   }
 
   // INVERTER SLEEP MODE
@@ -744,7 +744,7 @@ void power_check(lv_timer_t *timer) {
     if ( ! time_ms ) {
       time_ms = millis();
       pre_sleep_delay = true;
-      return; //lv_timer_reset(data->timer); // to prevent label being written once finished
+      lv_timer_reset(data->timer); // to prevent label being written once finished
     }
     // KEEP INVERTER ON FOR AT LEAST 30s + POWER_CHECK TIMER
     else if ( (time_ms + 30 * 1000) < millis() && pre_sleep_delay ) {
@@ -763,14 +763,14 @@ void power_check(lv_timer_t *timer) {
       time_ms = 0;
       data->on = false; // to enable inverter startup check
       lv_event_send(data->button, LV_EVENT_CLICKED, NULL);
-      return; //lv_timer_reset(data->timer); // to prevent label being written once finished
+      lv_timer_reset(data->timer); // to prevent label being written once finished
     }
 
     if ( ! pre_sleep_delay ) {
       snprintf(label, sizeof(label), "OFF - NO LOAD\nON in %d minute%s", (off_interval_min - minute_count), plural);
       lv_label_set_text(data->label_obj, label);
     }
-    return;//lv_timer_reset(data->timer);
+    lv_timer_reset(data->timer);
   }
 
   // HOT WATER OFF
@@ -836,7 +836,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
 
       // CREATE COMBINED TIMER THAT ONLY RUNS ONCE AND IS RESET IF NEEDED INSIDE power_check
       data->timer = lv_timer_create(power_check, data->timeout_ms, data);
-      //lv_timer_set_repeat_count(data->timer, 1);
+      lv_timer_set_repeat_count(data->timer, 1);
 
       // SET BUTTON TO ON
       data->on = true;
@@ -1778,9 +1778,9 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_label_set_text(data->charge_label, "CHARGE");
     //lv_obj_set_style_text_align(data->charge_label, LV_TEXT_ALIGN_CENTER, NULL);
   
-  data->load_label = lv_label_create(parent);
-    lv_label_set_text(data->load_label, "LOAD");
-    //lv_obj_set_style_text_align(data->load_label, LV_TEXT_ALIGN_CENTER, NULL); // was used when i added % below. but it clutters
+  data->usage_label = lv_label_create(parent);
+    lv_label_set_text(data->usage_label, "USAGE");
+    //lv_obj_set_style_text_align(data->usage_label, LV_TEXT_ALIGN_CENTER, NULL); // was used when i added % below. but it clutters
 
   data->battery_label = lv_label_create(parent);
 
@@ -1809,7 +1809,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
 
   // ALLIGN LABELS
   lv_obj_align_to(data->charge_label,       data->soc_arc,        LV_ALIGN_OUT_LEFT_BOTTOM,  -5,   8);
-  lv_obj_align_to(data->load_label,         data->soc_arc,        LV_ALIGN_OUT_RIGHT_BOTTOM, 12,   8);
+  lv_obj_align_to(data->usage_label,        data->soc_arc,        LV_ALIGN_OUT_RIGHT_BOTTOM,  9,   8);
   lv_obj_align_to(data->battery_label,      data->soc_arc,        LV_ALIGN_CENTER,          -18, -44);
   lv_obj_align_to(data->soc_label,          data->soc_arc,        LV_ALIGN_CENTER,            0,   0);
   lv_obj_align_to(data->volt_label,         data->soc_arc,        LV_ALIGN_BOTTOM_MID,      -40, -44);
