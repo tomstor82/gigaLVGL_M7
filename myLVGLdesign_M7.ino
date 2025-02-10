@@ -1622,7 +1622,7 @@ void flash_icons(data_display_t *data) {
     flashing_battery = true;
   }
   // WHITE ABOVE 20%
-  else if ( SOC > 20 ) {
+  else if ( SOC > 15 ) {
     lv_obj_set_style_text_color(data->car_battery_icon, lv_color_white(), NULL);
   }
   // ORANGE BELOW 20%
@@ -2018,6 +2018,7 @@ void loop() {
       digitalWrite(userData[3].relay_pin, HIGH);
       time_ms = 0;
       inverter_delay = false;
+      mppt_delayer(false);
     }
   }
   /*if (Serial) {
