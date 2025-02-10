@@ -1754,20 +1754,20 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_arc_set_rotation(data->charge_arc, 150);
     lv_arc_set_bg_angles(data->charge_arc, 0, 60);
     lv_obj_remove_style(data->charge_arc, NULL, LV_PART_KNOB); // remove arc knob
-    lv_obj_set_style_arc_color(data->charge_arc, lv_palette_main(LV_PALETTE_GREEN), LV_PART_INDICATOR);
+    //lv_obj_set_style_arc_color(data->charge_arc, lv_palette_main(LV_PALETTE_GREEN), LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(data->charge_arc, 10, LV_PART_MAIN);
     lv_obj_set_style_arc_width(data->charge_arc, 10, LV_PART_INDICATOR);
     lv_obj_clear_flag(data->charge_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
     lv_obj_align_to(data->charge_arc, parent, LV_ALIGN_TOP_LEFT, 0, -15);
 
-  // CREATE DISCHARGE
+  // CREATE DISCHARGE ARC
   data->discharge_arc = lv_arc_create(parent);
     lv_obj_set_size(data->discharge_arc, 300, 300);
     lv_arc_set_rotation(data->discharge_arc, 330);
     lv_arc_set_bg_angles(data->discharge_arc, 0, 60);
     lv_arc_set_mode(data->discharge_arc, LV_ARC_MODE_REVERSE);
     lv_obj_remove_style(data->discharge_arc, NULL, LV_PART_KNOB); // remove arc knob
-    lv_obj_set_style_arc_color(data->discharge_arc, lv_palette_main(LV_PALETTE_ORANGE), LV_PART_INDICATOR);
+    //lv_obj_set_style_arc_color(data->discharge_arc, lv_palette_main(LV_PALETTE_ORANGE), LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(data->discharge_arc, 10, LV_PART_MAIN);
     lv_obj_set_style_arc_width(data->discharge_arc, 10, LV_PART_INDICATOR);
     lv_obj_clear_flag(data->discharge_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
@@ -1809,7 +1809,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
 
   // ALLIGN LABELS
   lv_obj_align_to(data->charge_label,       data->soc_arc,        LV_ALIGN_OUT_LEFT_BOTTOM,  -5,   8);
-  lv_obj_align_to(data->usage_label,        data->soc_arc,        LV_ALIGN_OUT_RIGHT_BOTTOM,  9,   8);
+  lv_obj_align_to(data->usage_label,        data->soc_arc,        LV_ALIGN_OUT_RIGHT_BOTTOM,  6,   8);
   lv_obj_align_to(data->battery_label,      data->soc_arc,        LV_ALIGN_CENTER,          -18, -44);
   lv_obj_align_to(data->soc_label,          data->soc_arc,        LV_ALIGN_CENTER,            0,   0);
   lv_obj_align_to(data->volt_label,         data->soc_arc,        LV_ALIGN_BOTTOM_MID,      -40, -44);
@@ -1922,9 +1922,6 @@ void setup() {
 
   // Display bms messages arg2: y_pos
   create_bms_status_label(cont, 280, &bmsStatusData);
-
-  // Initialise click event for CANdata message box
-  //canMsgBoxData.parent = cont; // ****************** MAY WORK BETTER WITH SENSOR MSGBOX APPROACH AS NO SHINE THROUGH HAPPENS THERE **************
 
   // START COMBINED TIMERS FOR CALLING UPDATER FUNCTIONS
   lv_timer_create(combined_1s_updater, 1000, NULL);
