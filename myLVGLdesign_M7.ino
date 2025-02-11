@@ -1735,11 +1735,20 @@ void data_display_updater(lv_timer_t *timer) {
   lv_label_set_text_fmt(data->watt_label, "%dW", WATTS);
 
   // ADJUST WATT LABEL X POSITION AS LV_ALIGN DOESN'T DO THE TRICK
-  if ( WATTS > 999 ) {
-    watt_label_xpos = -12;
+  if ( WATTS > 1999 ) {
+    watt_label_xpos = 17;
   }
+  // RANGE 1000 - 1999
+  else if ( WATTS > 999 ) {
+    watt_label_xpos = 11;
+  }
+  // RANGE 200 - 999
+  else if ( WATTS > 199 ) {
+    watt_label_xpos = 8;
+  }
+  // RANGE 100 - 199
   else if ( WATTS > 99 ) {
-    watt_label_xpos = -6;
+    watt_label_xpos = 3;
   }
   lv_obj_align_to(data->watt_label, data->soc_arc, LV_ALIGN_OUT_BOTTOM_MID, watt_label_xpos, 15);
 }
@@ -1808,7 +1817,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
 
   data->watt_label = lv_label_create(parent);
     lv_obj_set_style_text_font(data->watt_label, &Montserrat20_0_9_W_minus, NULL);
-    lv_obj_set_style_text_align(data->watt_label, LV_TEXT_ALIGN_CENTER, NULL);
+    //lv_obj_set_style_text_align(data->watt_label, LV_TEXT_ALIGN_CENTER, NULL);
 
   data->charge_icon = lv_label_create(parent);
     lv_obj_set_style_text_font(data->charge_icon, &FontAwesomeIcons, NULL);
