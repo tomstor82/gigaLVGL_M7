@@ -1684,6 +1684,7 @@ void data_display_updater(lv_timer_t *timer) {
   data_display_t *data = (data_display_t*)timer->user_data;
   char battery[4];
   uint8_t watt_label_xpos = 0;
+  uint8_t amps_label_xpos = 30;
   
   // BATTERY SYMBOL UPDATER
   if ( SOC >= 80 ) {
@@ -1734,23 +1735,41 @@ void data_display_updater(lv_timer_t *timer) {
   lv_label_set_text_fmt(data->amps_label, "%.1fA", AMPS);
   lv_label_set_text_fmt(data->watt_label, "%dW", WATTS);
 
-  // ADJUST WATT LABEL X POSITION AS LV_ALIGN DOESN'T DO THE TRICK
+  // ADJUST AMPS LABEL X POSITION FOR NEGATIVE VALUES
+
+  if ( AMPS < 0 ) {
+    amps_label_xpos = 27;
+  }
+
+  // ADJUST WATT LABEL X POSITION
+
   if ( WATTS > 1999 ) {
-    watt_label_xpos = 17;
+    watt_label_xpos = 9;
   }
   // RANGE 1000 - 1999
   else if ( WATTS > 999 ) {
-    watt_label_xpos = 11;
+    watt_label_xpos = 7;
   }
   // RANGE 200 - 999
   else if ( WATTS > 199 ) {
-    watt_label_xpos = 8;
+    watt_label_xpos = 6;
   }
   // RANGE 100 - 199
   else if ( WATTS > 99 ) {
+    watt_label_xpos = 4;
+  }
+   // RANGE 20 - 99
+  else if ( WATTS > 19 ) {
     watt_label_xpos = 3;
   }
-  lv_obj_align_to(data->watt_label, data->soc_arc, LV_ALIGN_OUT_BOTTOM_MID, watt_label_xpos, 15);
+   // RANGE 10 - 19
+  else if ( WATTS > 9 ) {
+    watt_label_xpos = 1;
+  }
+
+  // UPDATE X POSITIONS DYNAMICALLY FOR AMPS AND WATTS
+  lv_obj_align_to(data->amps_label, data->soc_arc, LV_ALIGN_BOTTOM_MID,     amps_label_xpos, -44);
+  lv_obj_align_to(data->watt_label, data->soc_arc, LV_ALIGN_OUT_BOTTOM_MID, watt_label_xpos,  15);
 }
 
 // CREATE DATA DISPLAY //////////////////////////////////////////////////////////////////
@@ -1813,11 +1832,9 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
   data->volt_label = lv_label_create(parent);
 
   data->amps_label = lv_label_create(parent);
-    //lv_obj_set_style_text_align(data->amps_label, LV_TEXT_ALIGN_RIGHT, NULL); // DOESN'T WORK AS INTENDED
 
   data->watt_label = lv_label_create(parent);
     lv_obj_set_style_text_font(data->watt_label, &Montserrat20_0_9_W_minus, NULL);
-    //lv_obj_set_style_text_align(data->watt_label, LV_TEXT_ALIGN_CENTER, NULL);
 
   data->charge_icon = lv_label_create(parent);
     lv_obj_set_style_text_font(data->charge_icon, &FontAwesomeIcons, NULL);
@@ -1833,10 +1850,11 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
   lv_obj_align_to(data->battery_label,      data->soc_arc,        LV_ALIGN_CENTER,          -18, -44);
   lv_obj_align_to(data->soc_label,          data->soc_arc,        LV_ALIGN_CENTER,            0,   0);
   lv_obj_align_to(data->volt_label,         data->soc_arc,        LV_ALIGN_BOTTOM_MID,      -40, -44);
-  lv_obj_align_to(data->amps_label,         data->soc_arc,        LV_ALIGN_BOTTOM_MID,       30, -44);
+  //lv_obj_align_to(data->amps_label,         data->soc_arc,        LV_ALIGN_BOTTOM_MID,       30, -44);
   lv_obj_align_to(data->charge_icon,        data->soc_arc,        LV_ALIGN_OUT_LEFT_MID,     14,   5);
   lv_obj_align_to(data->car_battery_icon,   data->soc_arc,        LV_ALIGN_OUT_RIGHT_MID,    16,   5);
-  //lv_obj_align_to(data->watt_label,         data->soc_arc,        LV_ALIGN_OUT_BOTTOM_MID,    0,  15); // ALLIGNED IN UPDATER DUE X_POS SHIFTING WITH VARYING WATT READINGS
+
+  // AMPS AND WATT LABELS ARE DYNAMICALLY ALIGNED IN UPDATER DUE TO X_POS SHIFTING WITH VARYING READINGS
     
   // CREATE LABEL UPDATE TIMER
   lv_timer_create(data_display_updater, 200, data);
@@ -2072,5 +2090,23 @@ void loop() {
       finished = false;
     }
   }*/
+  /*// TESTING OF X POS ALIGNMENT
+  static bool increment = true;
+  if (AMPS < 166 && increment) {
+    AMPS++;
+  }
+  else if (AMPS > -166 && !increment) {
+    AMPS--;
+  }
+  else if (AMPS == 166) {
+    increment = false;
+  }
+  else if (AMPS == -166) {
+    increment = true;
+  }*/
+  
+  
+  
+  
   delay(4); // lvgl recommends 5ms delay for display (code takes up 1ms)
 }
