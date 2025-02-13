@@ -1622,11 +1622,11 @@ void flash_icons(data_display_t *data) {
     lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_GREEN), NULL);
     flashing_battery = true;
   }
-  // WHITE ABOVE 20%
+  // WHITE ABOVE 15%
   else if ( SOC > 15 ) {
     lv_obj_set_style_text_color(data->car_battery_icon, lv_color_white(), NULL);
   }
-  // ORANGE BELOW 20%
+  // ORANGE ABOVE 10%
   else if ( SOC > 10 ) {
     lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_ORANGE), NULL);
   }
@@ -1705,14 +1705,16 @@ void data_display_updater(lv_timer_t *timer) {
 
   // UPDATE SOC ARC VALUES AND CHANGE INDICATOR TO RED COLOUR IF DISCHARGING BELOW 10%
   lv_arc_set_value(data->soc_arc, SOC);
-  
-  if ( SOC <= 10 && AVG_AMPS > 0 ) {
-    lv_obj_set_style_arc_color(data->soc_arc, lv_palette_main(LV_PALETTE_RED), LV_PART_INDICATOR);
-  }
-  else {
+
+  if ( SOC > 15 || AVG_AMPS < 0 ) {
     lv_obj_set_style_arc_color(data->soc_arc, lv_palette_main(LV_PALETTE_LIGHT_BLUE), LV_PART_INDICATOR);
   }
-
+  else if ( SOC > 10 ) {
+    lv_obj_set_style_arc_color(data->soc_arc, lv_palette_main(LV_PALETTE_ORANGE), LV_PART_INDICATOR);
+  }
+  else {
+    lv_obj_set_style_arc_color(data->soc_arc, lv_palette_main(LV_PALETTE_RED), LV_PART_INDICATOR);
+  }
 
   // UPDATE CHG & DCH ARC RANGES DYNAMICALLY
   lv_arc_set_range(data->discharge_arc, 0, DCL);
