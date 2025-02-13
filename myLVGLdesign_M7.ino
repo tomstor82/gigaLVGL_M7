@@ -2006,7 +2006,7 @@ void loop() {
     canMsgData.len = msg.data_length;
 
     // PROCESS DATA IF RECEIVED
-    if ( canMsgData.len ) {
+    if (canMsgData.len > 0 && canMsgData.len <= sizeof(CAN_RX_BUF)) {
       memcpy(CAN_RX_BUF, msg.data, canMsgData.len);
       sort_can();
     }
@@ -2014,23 +2014,27 @@ void loop() {
     else {
       combinedData.canData = {};
     }
+  }
 
-    // send CAN if commanded
-    if ( CAN_TX_MPO1 || CAN_TX_MPO2 || CAN_TX_BLCG ) {
-      CanMsg send_msg(CanStandardId(canMsgData.CAN_ID), sizeof(CAN_MSG), CAN_MSG);
+  // send CAN if commanded
+  if (CAN_TX_MPO1 || CAN_TX_MPO2 || CAN_TX_BLCG) {
+    CanMsg send_msg(CanStandardId(canMsgData.CAN_ID), sizeof(CAN_MSG), CAN_MSG);
 
-      // retry if send failed for byte 0 - clear bms through mpo2
-      int const rc = CAN.write(send_msg);
-      if ( rc <= 0 && CAN_RETRIES < 3 ) { // if CAN.write returns 0 or lower errors have occured in transmission
-        Serial.print("CAN.write(...) failed with error code ");
-        Serial.println(rc);
-        CAN_RETRIES++;
-      }
-      // stop sending to mpo2 after 3 retries
-      else if ( CAN_TX_MPO2 ) {
-        CAN_MSG[0] = 0x00; // clear send data
-        CAN_TX_MPO2 = false;
-      }
+    // retry if send failed for byte 0 - clear bms through mpo2
+    int const rc = CAN.write(send_msg);
+    if (rc <= 0 && CAN_RETRIES < 3) { // if CAN.write returns 0 or lower errors have occurred in transmission
+      Serial.print("CAN.write(...) failed with error code ");
+      Serial.println(rc);
+      CAN_RETRIES++;
+    } else {
+      // Reset retries on successful transmission
+      CAN_RETRIES = 0;
+    }
+
+    // stop sending to mpo2 after 3 retries
+    if (CAN_TX_MPO2 && CAN_RETRIES >= 3) {
+      CAN_MSG[0] = 0x00; // clear send data
+      CAN_TX_MPO2 = false;
     }
   }
   if (RPC.available()) {
