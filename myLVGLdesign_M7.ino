@@ -73,7 +73,6 @@ struct CanData {
     uint16_t fu = 0;            // BMS Faults
     uint16_t st = 0;            // BMS Status
     int cc = 0;                 // Total pack cycles (int to avoid overrun issues with uint16_t)
-    //int cpcty = 0;              // Total pack capacity Ahr
 
     byte hs = 0;                // Internal Heatsink
     byte cu = 0;                // BMS custom flags: 0x01 = charge power enabled triggered by pv sense circuit, 0x02 = MPO#1 signal feedback to trip pv relay
@@ -209,7 +208,6 @@ static CombinedData combinedData;
 #define CYCLES          combinedData.canData.cc
 #define HEAT_SINK       combinedData.canData.hs
 #define CUSTOM_FLAGS    combinedData.canData.cu
-//#define CAPACITY        combinedData.canData.cpcty
 
 #define DYNAMIC_LABEL   bmsStatusData.dynamic_label
 #define CCL_ENFORCED    bmsStatusData.ccl_enforced
@@ -1483,8 +1481,8 @@ void refresh_bms_status_data(bms_status_data_t *data) {
         data->status_label[i] = NULL; // Set pointer to NULL
       }
     }
-    // CRITICAL CAN TRANSMIT FAILURE
-    if ( canMsgData.len == 0 ) { create_status_label("No CAN data from BMS", data); flag_index++; comparator_index++; }
+    // CRITICAL CAN RX FAILURE - LESS THAN 2 TO AVOID HAVING MPO#1 SIGNAL HIDE THIS MESSAGE
+    if ( canMsgData.len < 2 ) { create_status_label("Arduino - No BMS CAN data", data); flag_index++; comparator_index++; }
 
     // BMS flags 2 bytes
     if ((BMS_FAULTS & 0x0100) == 0x0100) { create_status_label("Internal Hardware Fault", data); flag_index++; }
@@ -1522,7 +1520,7 @@ void refresh_bms_status_data(bms_status_data_t *data) {
 
     // Custom status messages
     if ( CAN_TX_MPO1 ) { create_status_label(DYNAMIC_LABEL, data); flag_index++; comparator_index++;}
-    if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Discharge Disabled by Arduino", data); flag_index++; comparator_index++;} // If Inverter DCL CHECK triggered
+    if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Arduino - Discharge Disabled", data); flag_index++; comparator_index++;} // If Inverter DCL CHECK triggered
 
     // Cell balancing check at end ensures higher importance messages appear above
     if ((BMS_STATUS & 0x0008) == 0x0008) {
