@@ -59,6 +59,7 @@ struct CanData {
     float lC = 0;               // Low Cell Voltage in 0,0001V
     float minC = 0;             // Minimum Allowed cell voltage
     float maxC = 0;             // Maximum Allowed cell voltage
+    float cpcty = 0;            // Pack full capacity Ah
 
     byte soc = 0;               // State of charge - multiplied by 2
     byte hT = 0;                // Highest cell temperature
@@ -208,6 +209,7 @@ static CombinedData combinedData;
 #define CYCLES          combinedData.canData.cc
 #define HEAT_SINK       combinedData.canData.hs
 #define CUSTOM_FLAGS    combinedData.canData.cu
+#define CAPACITY        combinedData.canData.cpcty
 
 #define DYNAMIC_LABEL   bmsStatusData.dynamic_label
 #define CCL_ENFORCED    bmsStatusData.ccl_enforced
@@ -1258,8 +1260,8 @@ void clock_updater(clock_data_t *data) {
   char c[4] = {"hrs"};
   char state[17];
 
-  h = AH / abs(AVG_AMPS);
-  m = (AH / abs(AVG_AMPS) - h) * 60;
+  h = (CAPACITY * SOC / 100) / abs(AVG_AMPS);
+  m = ((CAPACITY * SOC / 100) / (abs(AVG_AMPS)) - h) * 60;
 
 
   // Zero
@@ -1330,7 +1332,7 @@ void sort_can() {
     if (canMsgData.rxId == 0x3B) {
         VOLT = ((CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1]) / 10.0;
         AMPS = (signValue((CAN_RX_BUF[2] << 8) + CAN_RX_BUF[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
-        //CAPACITY = ((CAN_RX_BUF[4] << 8) + CAN_RX_BUF[5]) / 10.0;
+        CAPACITY = ((CAN_RX_BUF[4] << 8) + CAN_RX_BUF[5]) / 10.0;
         SOC = CAN_RX_BUF[6] / 2;
     }
     if (canMsgData.rxId == 0x6B2) {
@@ -1704,7 +1706,7 @@ void data_display_updater(lv_timer_t *timer) {
   // UPDATE SOC ARC VALUES AND CHANGE INDICATOR TO RED COLOUR IF DISCHARGING BELOW 10%
   lv_arc_set_value(data->soc_arc, SOC);
   
-  if ( SOC < 10 && AVG_AMPS > 0 ) {
+  if ( SOC <= 10 && AVG_AMPS > 0 ) {
     lv_obj_set_style_arc_color(data->soc_arc, lv_palette_main(LV_PALETTE_RED), LV_PART_INDICATOR);
   }
   else {
@@ -2000,8 +2002,16 @@ void loop() {
     CanMsg const msg = CAN.read();
     canMsgData.rxId = msg.id;
     canMsgData.len = msg.data_length;
-    memcpy(CAN_RX_BUF, msg.data, canMsgData.len);
-    sort_can();
+
+    // PROCESS DATA IF RECEIVED
+    if ( canMsgData.len ) {
+      memcpy(CAN_RX_BUF, msg.data, canMsgData.len);
+      sort_can();
+    }
+    // ZERO CANDATA STRUCT IF RX FAILURE, TO PREVENT EXPIRED DATA DISPLAYED
+    else {
+      combinedData.canData = {};
+    }
 
     // send CAN if commanded
     if ( CAN_TX_MPO1 || CAN_TX_MPO2 || CAN_TX_BLCG ) {
