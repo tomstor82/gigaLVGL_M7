@@ -25,7 +25,7 @@ LV_FONT_DECLARE(FontAwesomeIcons);
 
 
 //  CANBUS data Identifier List
-//  ID 0x03B BYT0+1:INST_VOLT BYT2+3:INST_AMP BYT4+5:ABS_AMP BYT6:SOC **** ABS_AMP from OrionJr errendous ****
+//  ID 0x03B BYT0+1:INST_VOLT BYT2+3:INST_AMP BYT4+5:TOTAL_CAPACITY BYT6:SOC
 //  ID 0x6B2 BYT0+1:LOW_CELL BYT2+3:HIGH_CELL BYT4:HEALTH BYT5+6:CYCLES
 //  ID 0x0A9 BYT0:RELAY_STATE BYT1:CCL BYT2:DCL BYT3+4:PACK_AH BYT5+6:AVG_AMP
 //  ID 0x0BD BYT0+1:BMS_FAULTS BYT2:HI_TMP BYT3:LO_TMP BYT4:CUSTOM_FLAGS BYT5:BMS_STATUS
@@ -59,7 +59,7 @@ struct CanData {
     float lC = 0;               // Low Cell Voltage in 0,0001V
     float minC = 0;             // Minimum Allowed cell voltage
     float maxC = 0;             // Maximum Allowed cell voltage
-    float cpcty = 0;            // Pack full capacity Ah
+    float cpcty = 0;            // Pack total capacity Ah
 
     byte soc = 0;               // State of charge - multiplied by 2
     byte hT = 0;                // Highest cell temperature
@@ -1483,8 +1483,8 @@ void refresh_bms_status_data(bms_status_data_t *data) {
         data->status_label[i] = NULL; // Set pointer to NULL
       }
     }
-    // CRITICAL CAN RX FAILURE - LESS THAN 2 TO AVOID HAVING MPO#1 SIGNAL HIDE THIS MESSAGE
-    if ( canMsgData.len < 2 ) { create_status_label("Arduino - No BMS CAN data", data); flag_index++; comparator_index++; }
+    // CRITICAL CAN RX FAILURE - LESS THAN 3 TO AVOID HAVING TX SIGNALS HIDE THIS MESSAGE AS RX DATA IS 8-BYTE LONG
+    if ( canMsgData.len <= 3 ) { create_status_label("Arduino - No BMS CAN data", data); flag_index++; comparator_index++; }
 
     // BMS flags 2 bytes
     if ((BMS_FAULTS & 0x0100) == 0x0100) { create_status_label("Internal Hardware Fault", data); flag_index++; }
@@ -1846,17 +1846,14 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_obj_set_style_text_font(data->car_battery_icon, &FontAwesomeIcons, NULL);
     lv_label_set_text(data->car_battery_icon, "\uF5DF");
 
-  // ALLIGN LABELS
+  // ALLIGN LABELS, EXCEPT WATTS AND AMPS WHICH SHIFT X-POS WITH READINGS
   lv_obj_align_to(data->charge_label,       data->soc_arc,        LV_ALIGN_OUT_LEFT_BOTTOM,  -5,   8);
   lv_obj_align_to(data->usage_label,        data->soc_arc,        LV_ALIGN_OUT_RIGHT_BOTTOM,  6,   8);
   lv_obj_align_to(data->battery_label,      data->soc_arc,        LV_ALIGN_CENTER,          -18, -44);
   lv_obj_align_to(data->soc_label,          data->soc_arc,        LV_ALIGN_CENTER,            0,   0);
   lv_obj_align_to(data->volt_label,         data->soc_arc,        LV_ALIGN_BOTTOM_MID,      -40, -44);
-  //lv_obj_align_to(data->amps_label,         data->soc_arc,        LV_ALIGN_BOTTOM_MID,       30, -44);
   lv_obj_align_to(data->charge_icon,        data->soc_arc,        LV_ALIGN_OUT_LEFT_MID,     14,   5);
   lv_obj_align_to(data->car_battery_icon,   data->soc_arc,        LV_ALIGN_OUT_RIGHT_MID,    16,   5);
-
-  // AMPS AND WATT LABELS ARE DYNAMICALLY ALIGNED IN UPDATER DUE TO X_POS SHIFTING WITH VARYING READINGS
     
   // CREATE LABEL UPDATE TIMER
   lv_timer_create(data_display_updater, 200, data);
