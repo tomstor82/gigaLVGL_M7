@@ -1260,10 +1260,6 @@ void clock_updater(clock_data_t *data) {
   char c[4] = {"hrs"};
   char state[17];
 
-  h = (CAPACITY * SOC / 100) / abs(AVG_AMPS);
-  m = ((CAPACITY * SOC / 100) / (abs(AVG_AMPS)) - h) * 60;
-
-
   // Zero
   if ( AVG_AMPS == 0 ) {
     strcpy(t, "");;
@@ -1272,11 +1268,15 @@ void clock_updater(clock_data_t *data) {
   // Discharge
   else if (AVG_AMPS > 0) {
     strcpy(state, "Discharged in");
+    h = AH / AVG_AMPS;
+    m = ( AH / AVG_AMPS - h ) * 60;
   }
 
   // Charge
   else if (AVG_AMPS < 0) {
     strcpy(state, "Fully Charged in");
+    h = (CAPACITY * SOC / 100) / abs(AVG_AMPS);
+    m = ((CAPACITY * SOC / 100) / (abs(AVG_AMPS)) - h) * 60;
   }
 
   // Over-run prevention by showing days
