@@ -1783,7 +1783,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_arc_set_rotation(data->soc_arc, 270);
     lv_arc_set_bg_angles(data->soc_arc, 0, 360);
     lv_obj_remove_style(data->soc_arc, NULL, LV_PART_KNOB); // remove arc knob
-    //lv_obj_set_style_arc_rounded(data->soc_arc, false, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(data->soc_arc, false, LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(data->soc_arc, 10, LV_PART_MAIN);
     lv_obj_set_style_arc_width(data->soc_arc, 15, LV_PART_INDICATOR);
     lv_obj_clear_flag(data->soc_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
