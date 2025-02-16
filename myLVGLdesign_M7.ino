@@ -363,7 +363,7 @@ void sunrise_detector() {
     }
 
     // IF MPPT DRAINS BATTERY WHILST INVERTER IS OFF AND PV HAS BEEN ENABLED FOR AT LEAST 30s
-    else if ( WATTS > 10 && (time_ms + 30 * 1000) < millis() ) {
+    else if ( WATTS > 10 && (millis() - time_ms) > 30000 ) {
       mppt_delay = true;
       strcpy(DYNAMIC_LABEL, "Solar OFF - MPPT drain");
     }
@@ -373,7 +373,7 @@ void sunrise_detector() {
   else if ( ! (CUSTOM_FLAGS & 0x01) == 0x01 && time_ms && ! mppt_delay ) {
 
     // within 10 seconds lets trigger mppt delay as relay flap detected
-    if ( time_ms + 10000 > millis() ) {
+    if ( (millis() - time_ms) < 10000 ) {
       mppt_delay = true;
       strcpy(DYNAMIC_LABEL, "Solar OFF - Relay flapping");
     }
@@ -386,7 +386,7 @@ void sunrise_detector() {
   }
 
   // when mppt delay timer has expired - currently after 10 minutes
-  if ( mppt_delay && (time_ms + 10 * 60 * 1000) < millis() && ! CCL_ENFORCED ) {
+  if ( mppt_delay && (millis() - time_ms) > 600000 && ! CCL_ENFORCED ) {
     time_ms = 0;
     mppt_delay = false;
   }
@@ -453,6 +453,8 @@ void button_off(user_data_t *data) {
 // DCL AND LOW CELL VOLTAGE CHECK TIMER ////////////////////////////////////////////////////////////////////////////
 void dcl_check(user_data_t *data) {
 
+  static uint32_t start_time = 0;
+
   // THERMOSTAT BUTTONS MAY ALREADY BE DISABLED BY FAULTY DHT22 SENSORS
   if ( data->disabled ) {
     return;
@@ -475,6 +477,7 @@ void dcl_check(user_data_t *data) {
     }
     // SET INVERTER STATUS LABEL TEXT
     lv_label_set_text(userData[3].label_obj, "OFF");
+    start_time = millis();
   }
   // INDIVIDUAL BUTTON LIMITS IF NOT ALREADY DISABLED
   else if ( DCL < data->dcl_limit && ! lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
@@ -492,14 +495,16 @@ void dcl_check(user_data_t *data) {
     }
     // DISABLE BUTTON - TEST PERFORMED IN ELSE IF CONDITION
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
+    start_time = millis();
   }
 
-  // RE-ENABLE DISABLED BUTTON IF WITHIN DCL AND IF BMS DISCHARGE RELAY CLOSED
-  else if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) && (RELAYS & 0x01) == 0X01 ) {
+  // RE-ENABLE DISABLED BUTTON IF WITHIN DCL AND IF BMS DISCHARGE RELAY CLOSED AND BUTTON(S) HAVE BEEN DISABLED FOR AT LEAST 60s
+  else if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) && (RELAYS & 0x01) == 0X01 && (millis() - start_time) > 60000 ) {
     if ( ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
     }
     lv_obj_clear_state(data->button, LV_STATE_DISABLED);
+    start_time = 0;
   }
 }
 
@@ -749,12 +754,12 @@ void power_check(lv_timer_t *timer) {
       return; // to prevent label being written once finished
     }
     // KEEP INVERTER ON FOR AT LEAST 40s + POWER_CHECK TIMER = 1 min
-    else if ( (time_ms + 40 * 1000) < millis() && pre_sleep_delay ) {
+    else if ( (millis() - time_ms) > 40000 && pre_sleep_delay ) {
       time_ms = millis();
       digitalWrite(data->relay_pin, LOW);
       pre_sleep_delay = false;
     }
-    else if ( (time_ms + (1 + minute_count) * 60 * 1000) < millis() && minute_count < off_interval_min && ! pre_sleep_delay ) {
+    else if ( (millis() - time_ms) > ((1 + minute_count) * 60 * 1000) && minute_count < off_interval_min && ! pre_sleep_delay ) {
       minute_count++;
       if ( minute_count == 2 ) {
         strcpy(plural, "");
@@ -1275,8 +1280,8 @@ void clock_updater(clock_data_t *data) {
   // Charge
   else if (AVG_AMPS < 0) {
     strcpy(state, "Fully Charged in");
-    h = (CAPACITY - AH) / abs(AVG_AMPS); //(CAPACITY * SOC / 100) / abs(AVG_AMPS);
-    m = ((CAPACITY - AH) / abs(AVG_AMPS) - h) * 60; //((CAPACITY * SOC / 100) / (abs(AVG_AMPS)) - h) * 60;
+    h = (CAPACITY - AH) / abs(AVG_AMPS);
+    m = ((CAPACITY - AH) / abs(AVG_AMPS) - h) * 60;
   }
 
   // Over-run prevention by showing days
@@ -2053,7 +2058,7 @@ void loop() {
   }
 
   // IF NO TOUCH WITHIN TIMEOUT AND IF BRIGHTNESS IS ABOVE 0, DIM DISPLAY
-  if ( previous_touch_ms + touch_timeout_ms < millis() && brightness ) {
+  if ( (millis() - previous_touch_ms) > touch_timeout_ms && brightness ) {
     dim_display();
   }
 
@@ -2066,13 +2071,13 @@ void loop() {
     }
 
     // WAIT 20s BEFORE SENDING MPPT RESTART SIGNAL AS SUNRISE_DETECTOR IS DISABLED WITH INVERTER ON
-    if (20000 + time_ms < millis()) {
+    else if ( (millis() - time_ms) > 20000 ) {
       inverter_delay = false;
       mppt_delayer(false);
       time_ms = 0;
     }
     // ALLOW MPPT 2s TO LOOSE POWER TO AVOID POWER SURGE
-    else if (2000 + time_ms < millis()) {
+    else if ( (millis() - time_ms) > 2000 ) {
       digitalWrite(userData[3].relay_pin, HIGH);
     }
   }
@@ -2095,7 +2100,7 @@ void loop() {
       finished = true;
     }
     // start again at 30s intervals
-    else if ( finished && (start_time + 30000) < millis() ) {
+    else if ( finished && (millis() - start_time) > 30000 ) {
       i = 0;
       start_time = millis();
       finished = false;
