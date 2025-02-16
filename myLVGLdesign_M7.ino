@@ -28,7 +28,7 @@ LV_FONT_DECLARE(FontAwesomeIcons);
 //  ID 0x03B BYT0+1:INST_VOLT BYT2+3:INST_AMP BYT4+5:TOTAL_CAPACITY BYT6:SOC
 //  ID 0x6B2 BYT0+1:LOW_CELL BYT2+3:HIGH_CELL BYT4:HEALTH BYT5+6:CYCLES
 //  ID 0x0A9 BYT0:RELAY_STATE BYT1:CCL BYT2:DCL BYT3+4:PACK_AH BYT5+6:AVG_AMP
-//  ID 0x0BD BYT0+1:BMS_FAULTS BYT2:HI_TMP BYT3:LO_TMP BYT4:CUSTOM_FLAGS BYT5:BMS_STATUS
+//  ID 0x0BD BYT0+1:BMS_FAULTcS BYT2:HI_TMP BYT3:LO_TMP BYT4:CUSTOM_FLAGS BYT5:BMS_STATUS
 //  ID 0x0BE BYT0:HI_CL_ID BYT1:LO_CL_ID BYT2:INT_HEATSINK BYT3+4:MIN_CELL BYT5+6:MAX_CELL
 
 // Temp and rhdity data struct from M4
@@ -1269,14 +1269,14 @@ void clock_updater(clock_data_t *data) {
   else if (AVG_AMPS > 0) {
     strcpy(state, "Discharged in");
     h = AH / AVG_AMPS;
-    m = ( AH / AVG_AMPS - h ) * 60;
+    m = (AH / AVG_AMPS - h) * 60;
   }
 
   // Charge
   else if (AVG_AMPS < 0) {
     strcpy(state, "Fully Charged in");
-    h = (CAPACITY * SOC / 100) / abs(AVG_AMPS);
-    m = ((CAPACITY * SOC / 100) / (abs(AVG_AMPS)) - h) * 60;
+    h = (CAPACITY - AH) / abs(AVG_AMPS); //(CAPACITY * SOC / 100) / abs(AVG_AMPS);
+    m = ((CAPACITY - AH) / abs(AVG_AMPS) - h) * 60; //((CAPACITY * SOC / 100) / (abs(AVG_AMPS)) - h) * 60;
   }
 
   // Over-run prevention by showing days
