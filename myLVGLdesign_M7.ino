@@ -536,13 +536,13 @@ const char* set_can_msgbox_text() {
                  "High Cell          %.2fV           #%2d\n"
                  "Low Cell           %.2fV           #%2d\n\n"
                  "Charge Limit                     %3d A\n"
-                 "Discharge Limit               %3d A\n\n"
+                 "Discharge Limit                %3d A\n\n"
                  "Charge                                    %s\n"
                  "Discharge                               %s\n\n"
                  "Cycles                                    %3d\n"
-                 "Health                                %3d%%\n\n"
-                 "BMS Heatsink                   %2d\u00B0C\n"
-                 "Energy                          %3.2f kW",
+                 "Health                                 %3d%%\n\n"
+                 "BMS Heatsink                    %2d\u00B0C\n"
+                 "Energy                         %3.2f kW",
                  HI_CELL_V, HI_CELL_ID,
                  LO_CELL_V, LO_CELL_ID,
                  CCL,
@@ -622,10 +622,10 @@ const char* set_sensor_msgbox_text() {
   static char msgbox_text[327]; // Static buffer to retain the value
 
   snprintf(msgbox_text, sizeof(msgbox_text),
-                 "Temperature 1:            %3.1f°C\nRelative Humidity 1:   %3.1f%%\n\n"
-                 "Temperature 2:            %3.1f°C\nRelative Humidity 2:   %3.1f%%\n\n"
-                 "Temperature 3:            %3.1f°C\nRelative Humidity 3:   %3.1f%%\n\n"
-                 "Temperature 4:            %3.1f°C\nRelative Humidity 4:   %3.1f%%",
+                 "Temperature 1: %16.1f°C\nRelative Humidity 1: %8.1f%%\n\n"
+                 "Temperature 2: %16.1f°C\nRelative Humidity 2: %8.1f%%\n\n"
+                 "Temperature 3: %16.1f°C\nRelative Humidity 3: %8.1f%%\n\n"
+                 "Temperature 4: %16.1f°C\nRelative Humidity 4: %8.1f%%",
                  TEMP1, RH1,
                  TEMP2, RH2,
                  TEMP3, RH3,
