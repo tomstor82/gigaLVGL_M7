@@ -533,16 +533,16 @@ const char* set_can_msgbox_text() {
   static char msgbox_text[512]; // Static buffer to retain the value
 
   snprintf(msgbox_text, sizeof(msgbox_text),
-                 "High Cell          %.2fV           #%d\n"
-                 "Low Cell           %.2fV           #%d\n\n"
-                 "Charge Limit                     %d A\n"
-                 "Discharge Limit               %d A\n\n"
+                 "High Cell          %.2fV           #%2d\n"
+                 "Low Cell           %.2fV           #%2d\n\n"
+                 "Charge Limit                     %3d A\n"
+                 "Discharge Limit               %3d A\n\n"
                  "Charge                                    %s\n"
                  "Discharge                               %s\n\n"
-                 "Cycles                                     %d\n"
-                 "Health                                %d%%\n\n"
-                 "BMS Heatsink                   %d\u00B0C\n"
-                 "Energy                          %.2f kW",
+                 "Cycles                                    %3d\n"
+                 "Health                                %3d%%\n\n"
+                 "BMS Heatsink                   %2d\u00B0C\n"
+                 "Energy                          %3.2f kW",
                  HI_CELL_V, HI_CELL_ID,
                  LO_CELL_V, LO_CELL_ID,
                  CCL,
@@ -2065,6 +2065,7 @@ void loop() {
   // 2s INVERTER DELAY AFTER MPPT DISABLED WITH 20s PAUSE BEFORE SENDING RE-ENABLE SIGNAL
   if (inverter_delay) {
     static uint32_t time_ms = 0;
+    static bool pin_high = false; // prevents inverter from being turned on over and over for 20s
 
     if (time_ms == 0) {
       time_ms = millis();
@@ -2075,10 +2076,12 @@ void loop() {
       inverter_delay = false;
       mppt_delayer(false);
       time_ms = 0;
+      pin_high = false;
     }
     // ALLOW MPPT 2s TO LOOSE POWER TO AVOID POWER SURGE
-    else if ( (millis() - time_ms) > 2000 ) {
+    else if ( (millis() - time_ms) > 2000 && !pin_high ) {
       digitalWrite(userData[3].relay_pin, HIGH);
+      pin_high = true;
     }
   }
   /*if (Serial) {
