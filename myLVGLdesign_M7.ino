@@ -622,10 +622,10 @@ const char* set_sensor_msgbox_text() {
   static char msgbox_text[327]; // Static buffer to retain the value
 
   snprintf(msgbox_text, sizeof(msgbox_text),
-                 "Temperature 1:            %.1f°C\nRelative Humidity 1:   %.1f%%\n\n"
-                 "Temperature 2:            %.1f°C\nRelative Humidity 2:   %.1f%%\n\n"
-                 "Temperature 3:            %.1f°C\nRelative Humidity 3:   %.1f%%\n\n"
-                 "Temperature 4:            %.1f°C\nRelative Humidity 4:   %.1f%%",
+                 "Temperature 1:            %3.1f°C\nRelative Humidity 1:   %3.1f%%\n\n"
+                 "Temperature 2:            %3.1f°C\nRelative Humidity 2:   %3.1f%%\n\n"
+                 "Temperature 3:            %3.1f°C\nRelative Humidity 3:   %3.1f%%\n\n"
+                 "Temperature 4:            %3.1f°C\nRelative Humidity 4:   %3.1f%%",
                  TEMP1, RH1,
                  TEMP2, RH2,
                  TEMP3, RH3,
