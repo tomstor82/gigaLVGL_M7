@@ -1228,7 +1228,6 @@ void clear_bms_flag(lv_event_t *e) {
   if(code == LV_EVENT_CLICKED) {
     CAN_TX_MPO2 = true;
     CAN_MSG[0] = 0x01;
-    CAN_RETRIES = 0; // reset the retry count
   }
   Serial.println("Sending CAN msg to clear BMS flags");
 }
@@ -2029,7 +2028,7 @@ void loop() {
       Serial.println(rc);
       CAN_RETRIES++;
     }
-    // Stop MPO#2 signal if successful
+    // Stop MPO#2 signal if successful or after 3 retries
     else if ( CAN_TX_MPO2 ) {
       CAN_MSG[0] = 0x00; // clear send data
       CAN_TX_MPO2 = false;
