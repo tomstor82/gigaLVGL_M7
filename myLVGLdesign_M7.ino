@@ -2028,15 +2028,16 @@ void loop() {
       Serial.print("CAN.write(...) failed with error code ");
       Serial.println(rc);
       CAN_RETRIES++;
-    } else {
-      // Reset retries on successful transmission
-      CAN_RETRIES = 0;
     }
-
-    // stop sending to mpo2 after 3 retries
-    if (CAN_TX_MPO2 && CAN_RETRIES >= 3) {
+    // Stop MPO#2 signal if successful
+    else if ( CAN_TX_MPO2 ) {
       CAN_MSG[0] = 0x00; // clear send data
       CAN_TX_MPO2 = false;
+      CAN_RETRIES = 0;
+    }
+    // MPO#1 and BLCG are initiated and stopped by timers
+    else {
+      CAN_RETRIES = 0;
     }
   }
   if (RPC.available()) {
