@@ -233,6 +233,8 @@ static String buffer = "";
 //************************************************************************************************************
 //  BUG#1:  DCL TRIPPED INVERTER WITHOUT WARNING AND BUTTON STILL ON?!
 //  BUG#2:  SOLAR OFF - INVERTER STARTING REMAINS ON WITH PV TRIPPED AFTER SUCCESSFUL START - MPPT DELAY TIMING ISSUE
+//  BUG#3:  INVERTER DOES NOT START IF SOLAR IS NOT DETECTED BUT MPPT IS STRUGGLING
+//  BUG#4:  THERMOSTAT RELAY DOES NOT OPEN IF INVERTER IS TURNED OFF
 //************************************************************************************************************
 
 // CREATE BUTTONS /// TWO TIMERS CREATED HERE: TEMP UPDATER AND DCL CHECK
@@ -328,7 +330,7 @@ void mppt_delayer(bool mppt_delay) {
   }
 
   // CHECK THAT MPPT DELAY LAST FOR AT LEAST 20s TO AVOID FLAPPING CONDITION
-  else if ( ! mppt_delay && start_time_ms && 20000 + start_time_ms > millis() ) {
+  else if ( ! mppt_delay && start_time_ms && millis() - start_time_ms > 20000 ) {
     mppt_delay = true;
   }
   else {
@@ -437,6 +439,7 @@ void button_off(user_data_t *data) {
   lv_obj_clear_state(data->button, LV_STATE_CHECKED);
   digitalWrite(data->relay_pin, LOW);
   data->on = false;
+  data->update_timer = false; // thermostat checker
 }
 
 
@@ -802,8 +805,8 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
       // INVERTER
       if ( data->relay_pin == RELAY1 ) {
         inverter_prestart_p = WATTS;
-        // TURN OFF MPPT IF SOLAR DETECTED BUT NO CHARGE TO AVOID START-UP POWER SURGE
-        if ( WATTS >= 0 && (CUSTOM_FLAGS & 0x01) == 0x01 ) {
+        // TURN OFF MPPT IF NO CHARGE AS SOMETIMES MPPT CAUSES ISSUE DESPITE NO SOLAR DETECTED. THIS IS TO AVOID START-UP POWER SURGE
+        if ( WATTS >= 0 ) { //&& (CUSTOM_FLAGS & 0x01) == 0x01 ) {
           mppt_delayer(true);
           strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter starting");
           inverter_delay = true;
@@ -909,7 +912,7 @@ void thermostat_checker(user_data_t *data) {
   bool on = false;
 
   // Off cycle time checker (2 min set)
-  if ( thermostat_off_ms && (thermostat_off_ms + 120000) > millis() ) {
+  if ( thermostat_off_ms && millis() - thermostat_off_ms < 120000 ) {
     return;
   }
 
