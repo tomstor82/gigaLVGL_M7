@@ -722,6 +722,7 @@ void power_check(lv_timer_t *timer) {
     // Remain ON if discharge exceeds inverter standby - considering prestart_p and canData.p are signed it should cover most charge/discharge scenarios
     else if ( (inverter_standby_p + inverter_prestart_p) < abs(WATTS) ) {
       on = true;
+      //Serial.println("DEBUG power check inverter load sustained, keep alive mode");
     }
   }
   
@@ -807,7 +808,9 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
         inverter_prestart_p = WATTS;
         // TURN OFF MPPT IF NO CHARGE AS SOMETIMES MPPT CAUSES ISSUE DESPITE NO SOLAR DETECTED. THIS IS TO AVOID START-UP POWER SURGE
         if ( WATTS >= 0 ) { //&& (CUSTOM_FLAGS & 0x01) == 0x01 ) {
-          mppt_delayer(true);
+          //mppt_delayer(true);
+          CAN_TX_MPO1 = true;
+          CAN_MSG[1] = 0x01;
           strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter starting");
           inverter_delay = true;
         }
@@ -2075,14 +2078,15 @@ void loop() {
     }
 
     // WAIT 20s BEFORE SENDING MPPT RESTART SIGNAL AS SUNRISE_DETECTOR IS DISABLED WITH INVERTER ON
-    else if ( (millis() - time_ms) > 20000 ) {
-      inverter_delay = false;
-      mppt_delayer(false);
+    else if ( (millis() - time_ms) > 20000 && pin_high ) {
+      CAN_MSG[1] = 0x00;
+      CAN_TX_MPO1 = false;
       time_ms = 0;
-      pin_high = false;
+      pin_high = false; // reset for next start delay
+      inverter_delay = false; // stop this function executing
     }
-    // ALLOW MPPT 2s TO LOOSE POWER TO AVOID POWER SURGE
-    else if ( (millis() - time_ms) > 2000 && !pin_high ) {
+    // ALLOW MPPT 2s TO LOOSE POWER TO AVOID POWER SURGE BEFORE STARTING INVERTER
+    else if ( (millis() - time_ms) > 2000 && ! pin_high ) {
       digitalWrite(userData[3].relay_pin, HIGH);
       pin_high = true;
     }
