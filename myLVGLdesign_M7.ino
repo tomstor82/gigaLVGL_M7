@@ -216,7 +216,7 @@ static CombinedData combinedData;
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size) int/float = 4 bytes
 int16_t inverter_prestart_p = 0; // must be signed
-const uint8_t inverter_standby_p = 85; // takes around 4 minutes to settle down after start (75W from documentation)
+const uint8_t inverter_standby_p = 80; // takes around 4 minutes to settle down after start (75W from documentation)
 uint8_t pwr_demand = 0;
 bool inverter_delay = false;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
