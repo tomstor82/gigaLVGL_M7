@@ -31,7 +31,7 @@ LV_FONT_DECLARE(FontAwesomeIcons);
 //  ID 0x0BD BYT0+1:BMS_FAULTcS BYT2:HI_TMP BYT3:LO_TMP BYT4:CUSTOM_FLAGS BYT5:BMS_STATUS
 //  ID 0x0BE BYT0:HI_CL_ID BYT1:LO_CL_ID BYT2:INT_HEATSINK BYT3+4:MIN_CELL BYT5+6:MAX_CELL
 
-// Temp and rhdity data struct from M4
+// Temp and Relative Humidity data struct from M4
 struct SensorData {
     float temp1;
     float temp2;
@@ -101,7 +101,6 @@ struct CanMsgData {
   bool can_tx_mpo1 = false;
   bool can_tx_mpo2 = false;
   bool can_tx_balancing = false;
-
 };
 
 // Type defined structure for bms status messages allowing it to be passed to function
@@ -170,6 +169,7 @@ static CombinedData combinedData;
 
 // Macro short-hands that are free
 #define CAN_RX_BUF      canMsgData.rxBuf
+#define CAN_RX_ID       canMsgData.rxId
 #define CAN_MSG         canMsgData.msg_data
 #define CAN_TX_MPO1     canMsgData.can_tx_mpo1
 #define CAN_TX_MPO2     canMsgData.can_tx_mpo2
@@ -1339,33 +1339,33 @@ int16_t signValue(uint16_t canValue) {
 // Sort CAN bus data
 void sort_can() {
 
-    if (canMsgData.rxId == 0x3B) {
+    if (CAN_RX_ID == 0x3B) {
         VOLT = ((CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1]) / 10.0;
         AMPS = (signValue((CAN_RX_BUF[2] << 8) + CAN_RX_BUF[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
         CAPACITY = ((CAN_RX_BUF[4] << 8) + CAN_RX_BUF[5]) / 10.0;
         SOC = CAN_RX_BUF[6] / 2;
     }
-    if (canMsgData.rxId == 0x6B2) {
+    if (CAN_RX_ID == 0x6B2) {
         LO_CELL_V = ((CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1]) / 10000.00;
         HI_CELL_V = ((CAN_RX_BUF[2] << 8) + CAN_RX_BUF[3]) / 10000.00;
         HEALTH = CAN_RX_BUF[4];
         CYCLES = (CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6];
     }
-    if (canMsgData.rxId == 0x0A9) {
+    if (CAN_RX_ID == 0x0A9) {
         RELAYS = CAN_RX_BUF[0];
         CCL = CAN_RX_BUF[1];
         DCL = CAN_RX_BUF[2];
         AH = ((CAN_RX_BUF[3] << 8) + CAN_RX_BUF[4]) / 10.0;
         AVG_AMPS = (signValue((CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
     }
-    if (canMsgData.rxId == 0x0BD) {
+    if (CAN_RX_ID == 0x0BD) {
         BMS_FAULTS = (CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1];
         HI_TEMP = CAN_RX_BUF[2];
         LO_TEMP = CAN_RX_BUF[3];
         CUSTOM_FLAGS = CAN_RX_BUF[4];
         BMS_STATUS = (CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6];
     }
-    if (canMsgData.rxId == 0x0BE) {
+    if (CAN_RX_ID == 0x0BE) {
         HI_CELL_ID = CAN_RX_BUF[0];
         LO_CELL_ID = CAN_RX_BUF[1];
         HEAT_SINK = CAN_RX_BUF[2];
@@ -1589,7 +1589,7 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
     // Create title label with underline style (hidden initially)
     data->title_label = lv_label_create(parent);
       lv_obj_set_style_text_decor(data->title_label, LV_TEXT_DECOR_UNDERLINE, NULL);
-      lv_label_set_text(data->title_label, "BMS Status Messages");
+      lv_label_set_text(data->title_label, "System Messages");
       lv_obj_align(data->title_label, LV_ALIGN_TOP_MID, 0, y);
       lv_obj_add_flag(data->title_label, LV_OBJ_FLAG_HIDDEN);
 
@@ -2009,12 +2009,20 @@ void loop() {
   // CANBUS READ AND WRITE
   if (CAN.available()) {
     CanMsg const msg = CAN.read();
-    canMsgData.rxId = msg.id;
+    CAN_RX_ID = msg.id;
     canMsgData.len = msg.data_length;
+
+    //****************************************************************************************************************
+    // READ ADDITIONAL CAN MSG AND OUTPUT TO SERIAL - DAXTROMN INVERTER
+
+   /* if (CAN_RX_ID != 0x0BE || CAN_RX_ID != 0x0BD || CAN_RX_ID != 0x0A9 || CAN_RX_ID != 0x6B2 || CAN_RX_ID != 0x3B) {
+      Serial.println(msg);
+    }*/
+    //****************************************************************************************************************
 
     // PROCESS DATA IF RECEIVED
     if (canMsgData.len > 0 && canMsgData.len <= sizeof(CAN_RX_BUF)) {
-      memcpy(CAN_RX_BUF, msg.data, canMsgData.len);
+      memcpy(CAN_RX_BUF, msg.data, canMsgData.len); // copy to memory block from another location a set number of bytes (data type doesn't matter)
       sort_can();
     }
     // ZERO CANDATA STRUCT IF RX FAILURE, TO PREVENT EXPIRED DATA DISPLAYED
