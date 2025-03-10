@@ -1877,7 +1877,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
 
 
 
-// INSTEAD OF INDIVIDUAL TIMERS I ADDED A HELPER FUNCTION TO CALL ALL 1s INTERVAL FUNCTIONS IN ONE GO - CURRENTLY 5 INDIVIDUAL TIMERS AND 11 COMBINED HERE ////////////////
+// INSTEAD OF INDIVIDUAL TIMERS I ADDED A HELPER FUNCTION TO CALL ALL 1s INTERVAL FUNCTIONS IN ONE GO - CURRENTLY 5 INDIVIDUAL TIMERS AND 15 COMBINED HERE ////////////////
 void combined_1s_updater(lv_timer_t *timer) {
   ccl_check();
   clock_updater(&clockData);
