@@ -1624,7 +1624,7 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
 
 
 // DATA SCREEN FLASHING CHARGE SYMBOLS ////////////////////////////////////////////////
-void flash_icons(data_display_t *data) {
+void charge_icons_updater(data_display_t *data) {
   bool flashing_battery = false;
 
   // FLASHING GREEN WHILST CHARGING
@@ -1881,7 +1881,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
 void combined_1s_updater(lv_timer_t *timer) {
   ccl_check();
   clock_updater(&clockData);
-  flash_icons(&dataDisplay);
+  charge_icons_updater(&dataDisplay);
   if (userData[3].on == false) {
     sunrise_detector();
   }
