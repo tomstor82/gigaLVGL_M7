@@ -51,7 +51,7 @@ struct CanData {
 
     int p = 0;                  // watt calculated by script
 
-    float instU = 0;            // Voltage - multiplied by 10
+    float packU = 0;            // Voltage - multiplied by 10
     float instI = 0;            // Current - multiplied by 10 - negative value indicates charge
     float avgI = 0;             // Average current for clock, arcs and sun symbol calculations
     float ah = 0;               // Amp hours
@@ -187,7 +187,7 @@ static CombinedData combinedData;
 #define RH4             combinedData.sensorData.rh4
 
 #define WATTS           combinedData.canData.p
-#define VOLT            combinedData.canData.instU
+#define VOLT            combinedData.canData.packU
 #define AMPS            combinedData.canData.instI
 #define AVG_AMPS        combinedData.canData.avgI
 #define AH              combinedData.canData.ah
@@ -545,7 +545,7 @@ const char* set_can_msgbox_text() {
                  "Cycles                                    %3d\n"
                  "Health                                 %3d%%\n\n"
                  "BMS Heatsink                    %2d\u00B0C\n"
-                 "Energy                         %3.2f kW",
+                 "Energy                        %3.2f kW",
                  HI_CELL_V, HI_CELL_ID,
                  LO_CELL_V, LO_CELL_ID,
                  CCL,
@@ -1340,14 +1340,14 @@ int16_t signValue(uint16_t canValue) {
 void sort_can() {
 
     if (CAN_RX_ID == 0x3B) {
-        VOLT = ((CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1]) / 10.0;
+        VOLT = ((CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1]) / 100.0;
         AMPS = (signValue((CAN_RX_BUF[2] << 8) + CAN_RX_BUF[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
         CAPACITY = ((CAN_RX_BUF[4] << 8) + CAN_RX_BUF[5]) / 10.0;
         SOC = CAN_RX_BUF[6] / 2;
     }
     if (CAN_RX_ID == 0x6B2) {
-        LO_CELL_V = ((CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1]) / 10000.00;
-        HI_CELL_V = ((CAN_RX_BUF[2] << 8) + CAN_RX_BUF[3]) / 10000.00;
+        LO_CELL_V = ((CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1]) / 1000.00;
+        HI_CELL_V = ((CAN_RX_BUF[2] << 8) + CAN_RX_BUF[3]) / 1000.00;
         HEALTH = CAN_RX_BUF[4];
         CYCLES = (CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6];
     }
@@ -1369,8 +1369,8 @@ void sort_can() {
         HI_CELL_ID = CAN_RX_BUF[0];
         LO_CELL_ID = CAN_RX_BUF[1];
         HEAT_SINK = CAN_RX_BUF[2];
-        MIN_CELL_V = ((CAN_RX_BUF[3] << 8) + CAN_RX_BUF[4]) / 10000.00;
-        MAX_CELL_V = ((CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6]) / 10000.00;
+        MIN_CELL_V = ((CAN_RX_BUF[3] << 8) + CAN_RX_BUF[4]) / 1000.00;
+        MAX_CELL_V = ((CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6]) / 1000.00;
     }
     WATTS = AVG_AMPS * VOLT;
 }
