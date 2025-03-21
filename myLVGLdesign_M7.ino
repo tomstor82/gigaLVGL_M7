@@ -1346,8 +1346,8 @@ void sort_can() {
         SOC = CAN_RX_BUF[6] / 2;
     }
     if (CAN_RX_ID == 0x6B2) {
-        LO_CELL_V = ((CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1]) / 100.00;
-        HI_CELL_V = ((CAN_RX_BUF[2] << 8) + CAN_RX_BUF[3]) / 100.00;
+        LO_CELL_V = ((CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1]) / 100.0;
+        HI_CELL_V = ((CAN_RX_BUF[2] << 8) + CAN_RX_BUF[3]) / 100.0;
         HEALTH = CAN_RX_BUF[4];
         CYCLES = (CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6];
     }
@@ -1369,8 +1369,8 @@ void sort_can() {
         HI_CELL_ID = CAN_RX_BUF[0];
         LO_CELL_ID = CAN_RX_BUF[1];
         HEAT_SINK = CAN_RX_BUF[2];
-        MIN_CELL_V = ((CAN_RX_BUF[3] << 8) + CAN_RX_BUF[4]) / 100.00;
-        MAX_CELL_V = ((CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6]) / 100.00;
+        MIN_CELL_V = ((CAN_RX_BUF[3] << 8) + CAN_RX_BUF[4]) / 100.0;
+        MAX_CELL_V = ((CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6]) / 100.0;
     }
     WATTS = AVG_AMPS * VOLT;
 }
