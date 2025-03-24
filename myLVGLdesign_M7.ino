@@ -55,8 +55,8 @@ struct CanData {
     float instI = 0;            // Current - multiplied by 10 - negative value indicates charge
     float avgI = 0;             // Average current for clock, arcs and sun symbol calculations
     float ah = 0;               // Amp hours
-    float hC = 0;               // High Cell Voltage in 0,0001V
-    float lC = 0;               // Low Cell Voltage in 0,0001V
+    float hC = 0;               // High Cell Voltage in 0,001V
+    float lC = 0;               // Low Cell Voltage in 0,001V
     float minC = 0;             // Minimum Allowed cell voltage
     float maxC = 0;             // Maximum Allowed cell voltage
     float cpcty = 0;            // Pack total capacity Ah
