@@ -21,7 +21,7 @@ GigaDisplayBacklight backlight;
 // ADDING 4-BIT FONTS WITH ONLY NEEDED CHARACTERS FROM MONTSERRAT 34 & 20 AND FONTAWESOME_SVG_SOLID 20 (https://lvgl.io/tools/fontconverter)
 LV_FONT_DECLARE(Montserrat34_0_9_percent);
 LV_FONT_DECLARE(Montserrat20_0_9_W_minus);
-LV_FONT_DECLARE(FontAwesomeIcons);
+LV_FONT_DECLARE(FontAwesomeIcons); // 0xF185, 0xF1E6, 0xF0E7, 0xF5DF = sun, two-pin, lightening and car battery
 
 
 //  CANBUS data Identifier List
@@ -51,7 +51,7 @@ struct CanData {
 
     int p = 0;                  // watt calculated by script
 
-    float packU = 0;            // Voltage - multiplied by 10
+    float packU = 0;            // Voltage - multiplied by 100
     float instI = 0;            // Current - multiplied by 10 - negative value indicates charge
     float avgI = 0;             // Average current for clock, arcs and sun symbol calculations
     float ah = 0;               // Amp hours
@@ -95,7 +95,7 @@ struct CanMsgData {
 
   // TX
   static const uint8_t CAN_ID = 0x02; // CAN id for the message (constant)
-  uint8_t msg_data[3] = {0x00, 0x00, 0x00}; // 3 bytes used in BMS for MPO#2, MPO#1 and balancing allowed signals uint8_t indicates each byte is 1 byte
+  uint8_t msg_data[3] = {0x00, 0x00, 0x00}; // 3 bytes used in BMS for MPO#2, MPO#1 and balancing allowed signals uint8_t indicates each index is 1 byte
   uint8_t msg_cnt = 0;
 
   bool can_tx_mpo1 = false;
@@ -1625,12 +1625,11 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
 
 // DATA SCREEN FLASHING CHARGE SYMBOLS ////////////////////////////////////////////////
 void charge_icons_updater(data_display_t *data) {
-  bool flashing_battery = false;
 
-  // FLASHING GREEN WHILST CHARGING
+  // GREEN WHILST CHARGING
   if ( AVG_AMPS < 0 ) {
     lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_GREEN), NULL);
-    flashing_battery = true;
+    //flashing_battery_icon = true;
   }
   // WHITE ABOVE 15%
   else if ( SOC > 15 ) {
@@ -1643,49 +1642,54 @@ void charge_icons_updater(data_display_t *data) {
   // RED BATTERY ICON FROM SOC 10% AND LESS WITH FLASHING BELOW 5% OR IF DISCHARGE DISABLED
   else  {
     lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_RED), NULL);
+    // FLASH BATTERY ICON BELOW 5% SOC OR IF INVERTER DISABLED
     if ( SOC < 5 || userData[3].disabled ) {
-      flashing_battery = true;
+      if ( lv_obj_has_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN) ) {
+        lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
+      }
+      else {
+        lv_obj_add_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
+      }
     }
   }
 
-  // MAKE BATTERY ICON VISIBLE IF PREVIOUSLY HIDDEN
-  if ( lv_obj_has_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN) ) {
-    lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
-  }
-  // HIDE IT AGAIN IF MEANT TO FLASH
-  else if ( flashing_battery ) {
-    lv_obj_add_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
-  }
-
-  // SHOW SUN ICON IF SOLAR DETECTED THROUGH CHARGE ENABLED SIGNAL TRANSMITTED FROM BMS
-  if ( (CUSTOM_FLAGS & 0x01) == 0x01 ) {
+  // SHOW SUN ICON IF SOLAR DETECTED WITH NO CHARGE
+  if ( (CUSTOM_FLAGS & 0x01) == 0x01 && AVG_AMPS >= 0 ) {
     lv_label_set_text(data->charge_icon, "\uF185"); // sun icon
+
+    // FLASH SUN IF INVERTER IS OFF OR MPPT HAS BEEN DISABLED
+    if ( userData[3].on == false || CAN_TX_MPO1 ) {
+      if ( lv_obj_has_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN) ) {
+        lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
+      }
+      else {
+        lv_obj_add_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
+      }
+    }
   }
-  // SHOW GRID ICON
-  else if ( AVG_AMPS < 0 ) {
+  // SHOW TWO-PIN ICON IF CHARGE BUT NO SOLAR DETECTED
+  else if ( (CUSTOM_FLAGS & 0x01) != 0x01 && AVG_AMPS < 0 ) {
     lv_label_set_text(data->charge_icon, "\uF1E6"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
-    // SEND BALANCING ALLOWED SIGNAL TO BMS
-    CAN_MSG[2] = 0x01;
-    CAN_TX_BLCG = true;
-    return; // no need to continue as this will not be flashing
+  }
+  // SHOW LIGHTENING ICON IF CHARGE
+  else if ( AVG_AMPS < 0 ) {
+    lv_label_set_text(data->charge_icon, "\uF0E7"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
   }
   // NO CHARGE NO ICON
   else {
     lv_label_set_text(data->charge_icon, "");
+  }
+
+   // SEND BALANCING SIGNAL
+  if ( AVG_AMPS < 0 ) {
+    // SEND BALANCING ALLOWED SIGNAL TO BMS
+    CAN_MSG[2] = 0x01;
+    CAN_TX_BLCG = true;
+  }
+  else {
     // SEND BALANCING NOT ALLOWED SIGNAL TO BMS
     CAN_TX_BLCG = false;
     CAN_MSG[2] = 0x00;
-    return; // same for this
-  }
-  
-  // FLASH SUN IF THERE IS CHARGE SIGNAL FROM SOLAR BUT NO CHARGING OR MPPT HAS BEEN DISABLED
-  if ( AVG_AMPS >= 0 && userData[3].on == false && (CUSTOM_FLAGS & 0x01) == 0x01 || CAN_TX_MPO1 ) {
-    if ( lv_obj_has_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
-    }
-    else {
-      lv_obj_add_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
-    }
   }
 }
 
