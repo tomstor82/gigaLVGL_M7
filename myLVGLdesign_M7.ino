@@ -1625,15 +1625,15 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
 
 // DATA SCREEN FLASHING CHARGE SYMBOLS ////////////////////////////////////////////////
 void charge_icons_updater(data_display_t *data) {
+  bool flashing_battery = false;
 
-  // GREEN WHILST CHARGING
-  if ( AVG_AMPS < 0 ) {
-    lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_GREEN), NULL);
-    //flashing_battery_icon = true;
-  }
-  // WHITE ABOVE 15%
-  else if ( SOC > 15 ) {
+  // WHITE ABOVE 15% OR IF CHARGING
+  if ( SOC > 15 || AVG_AMPS < 0 ) {
     lv_obj_set_style_text_color(data->car_battery_icon, lv_color_white(), NULL);
+    // FLASHING WHILST CHARGING
+    if ( AVG_AMPS < 0 ) {
+      flashing_battery = true;
+    }
   }
   // ORANGE ABOVE 10%
   else if ( SOC > 10 ) {
@@ -1642,14 +1642,8 @@ void charge_icons_updater(data_display_t *data) {
   // RED BATTERY ICON FROM SOC 10% AND LESS WITH FLASHING BELOW 5% OR IF DISCHARGE DISABLED
   else  {
     lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_RED), NULL);
-    // FLASH BATTERY ICON BELOW 5% SOC OR IF INVERTER DISABLED
     if ( SOC < 5 || userData[3].disabled ) {
-      if ( lv_obj_has_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN) ) {
-        lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
-      }
-      else {
-        lv_obj_add_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
-      }
+      flashing_battery = true;
     }
   }
 
