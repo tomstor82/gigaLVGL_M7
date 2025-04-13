@@ -1647,12 +1647,24 @@ void charge_icons_updater(data_display_t *data) {
     }
   }
 
-  // SHOW SUN ICON IF SOLAR DETECTED WITH NO CHARGE
-  if ( (CUSTOM_FLAGS & 0x01) == 0x01 && AVG_AMPS >= 0 ) {
-    lv_label_set_text(data->charge_icon, "\uF185"); // sun icon
+  // SHOW TWO-PIN ICON IF CHARGE BUT NO SOLAR DETECTED AND LIGHTENING BOLT OTHERWISE
+  if ( AVG_AMPS < 0 ) {
+    if ( (CUSTOM_FLAGS & 0x01) == 0x01 ) {
+      lv_label_set_text(data->charge_icon, "\uF0E7"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
+    }
+    else {
+      lv_label_set_text(data->charge_icon, "\uF1E6"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
+    }
+    // SEND BALANCING ALLOWED SIGNAL
+    CAN_MSG[2] = 0x01;
+    CAN_TX_BLCG = true;
+  }
 
-    // FLASH SUN IF INVERTER IS OFF OR MPPT HAS BEEN DISABLED
-    if ( userData[3].on == false || CAN_TX_MPO1 ) {
+  // IF NO CHARGE
+  else {
+    // SHOW FLASHING SUN ICON IF SOLAR DETECTED
+    if ( (CUSTOM_FLAGS & 0x01) == 0x01 ) {
+      lv_label_set_text(data->charge_icon, "\uF185"); // sun icon
       if ( lv_obj_has_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN) ) {
         lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
       }
@@ -1660,27 +1672,10 @@ void charge_icons_updater(data_display_t *data) {
         lv_obj_add_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
       }
     }
-  }
-  // SHOW TWO-PIN ICON IF CHARGE BUT NO SOLAR DETECTED
-  else if ( (CUSTOM_FLAGS & 0x01) != 0x01 && AVG_AMPS < 0 ) {
-    lv_label_set_text(data->charge_icon, "\uF1E6"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
-  }
-  // SHOW LIGHTENING ICON IF CHARGE
-  else if ( AVG_AMPS < 0 ) {
-    lv_label_set_text(data->charge_icon, "\uF0E7"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
-  }
-  // NO CHARGE NO ICON
-  else {
-    lv_label_set_text(data->charge_icon, "");
-  }
-
-   // SEND BALANCING SIGNAL
-  if ( AVG_AMPS < 0 ) {
-    // SEND BALANCING ALLOWED SIGNAL TO BMS
-    CAN_MSG[2] = 0x01;
-    CAN_TX_BLCG = true;
-  }
-  else {
+    // NO SOLAR DETECTED = NO ICON
+    else {
+      lv_label_set_text(data->charge_icon, "");
+    }
     // SEND BALANCING NOT ALLOWED SIGNAL TO BMS
     CAN_TX_BLCG = false;
     CAN_MSG[2] = 0x00;
