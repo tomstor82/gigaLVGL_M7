@@ -625,10 +625,10 @@ const char* set_sensor_msgbox_text() {
   static char msgbox_text[327]; // Static buffer to retain the value
 
   snprintf(msgbox_text, sizeof(msgbox_text),
-                 "Temperature 1: %16.1f°C\nRelative Humidity 1: %8.1f%%\n\n"
-                 "Temperature 2: %16.1f°C\nRelative Humidity 2: %8.1f%%\n\n"
-                 "Temperature 3: %16.1f°C\nRelative Humidity 3: %8.1f%%\n\n"
-                 "Temperature 4: %16.1f°C\nRelative Humidity 4: %8.1f%%",
+                 "Living Room Right: %10.1f°C\nRelative Humidity: %11.1f%%\n\n"
+                 "Living Room Left: %13.1f°C\nRelative Humidity: %11.1f%%\n\n"
+                 "Shower Room: %18.1f°C\nRelative Humidity: %11.1f%%\n\n"
+                 "Loft Ceiling: %23.1f°C\nRelative Humidity: %11.1f%%",
                  TEMP1, RH1,
                  TEMP2, RH2,
                  TEMP3, RH3,
@@ -647,7 +647,7 @@ void sensor_msgbox(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
 
     if (code == LV_EVENT_CLICKED) {
-        data->msgbox = lv_msgbox_create(lv_obj_get_parent(userData[0].label_obj), "               Sensor Data", set_sensor_msgbox_text(), NULL, false);
+        data->msgbox = lv_msgbox_create(lv_obj_get_parent(userData[0].label_obj), "               Humidity and Temperature Sensors", set_sensor_msgbox_text(), NULL, false);
         lv_obj_set_width(data->msgbox, LV_PCT(80)); // Set width to 80% of the screen
         lv_obj_align(data->msgbox, LV_ALIGN_CENTER, 0, 0); // Center the message box on the screen
 
@@ -1656,8 +1656,8 @@ void charge_icons_updater(data_display_t *data) {
       lv_label_set_text(data->charge_icon, "\uF1E6"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
     }
     // SEND BALANCING ALLOWED SIGNAL
-    CAN_MSG[2] = 0x01;
-    CAN_TX_BLCG = true;
+    CAN_MSG[2] = 0x00;
+    CAN_TX_BLCG = false;
   }
 
   // IF NO CHARGE
@@ -1677,8 +1677,8 @@ void charge_icons_updater(data_display_t *data) {
       lv_label_set_text(data->charge_icon, "");
     }
     // SEND BALANCING NOT ALLOWED SIGNAL TO BMS
-    CAN_TX_BLCG = false;
-    CAN_MSG[2] = 0x00;
+    CAN_TX_BLCG = true;
+    CAN_MSG[2] = 0x01;
   }
 }
 
