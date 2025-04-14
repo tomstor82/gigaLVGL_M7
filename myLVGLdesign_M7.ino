@@ -97,10 +97,6 @@ struct CanMsgData {
   static const uint8_t CAN_ID = 0x02; // CAN id for the message (constant)
   uint8_t msg_data[3] = {0x00, 0x00, 0x00}; // 3 bytes used in BMS for MPO#2, MPO#1 and balancing allowed signals uint8_t indicates each index is 1 byte
   uint8_t msg_cnt = 0;
-
-  bool can_tx_mpo1 = false;
-  bool can_tx_mpo2 = false;
-  bool can_tx_balancing = false;
 };
 
 // Type defined structure for bms status messages allowing it to be passed to function
@@ -171,10 +167,10 @@ static CombinedData combinedData;
 #define CAN_RX_BUF      canMsgData.rxBuf
 #define CAN_RX_ID       canMsgData.rxId
 #define CAN_MSG         canMsgData.msg_data
-#define CAN_TX_MPO1     canMsgData.can_tx_mpo1
-#define CAN_TX_MPO2     canMsgData.can_tx_mpo2
-#define CAN_TX_BLCG     canMsgData.can_tx_balancing
 #define CAN_RETRIES     canMsgData.msg_cnt
+#define CLEAR_BMS       canMsgData.msg_data[0]
+#define TRIP_PV         canMsgData.msg_data[1]
+#define BALANCING       canMsgData.msg_data[2]
 
 #define AVG_TEMP        combinedData.sensorData.avg_temp
 #define TEMP1           combinedData.sensorData.temp1
@@ -339,13 +335,11 @@ void mppt_delayer(bool mppt_delay) {
 
   // SET CAN MESSAGE AND ENABLE TX
   if ( mppt_delay ) {
-    CAN_MSG[1] = 0x01;
-    CAN_TX_MPO1 = true; // This triggers send function in loop
+    TRIP_PV = 0x01;
   }
   // REMOVE MESSAGE AND DISABLE TX IF CCL IS NOT ENFORCED
   else if ( ! CCL_ENFORCED ) {
-    CAN_TX_MPO1 = false;
-    CAN_MSG[1] = 0x00;
+    TRIP_PV = 0x00;
   }
 }
 
@@ -414,8 +408,7 @@ void ccl_check() {
 
   // ONLY TRIP RELAY, SUNRISE FUNCTION WILL RE-ENABLE IT
   if ( CCL == 0 || HI_CELL_V > (MAX_CELL_V - 0.1) ) {
-    CAN_MSG[1] = 0x01;
-    CAN_TX_MPO1 = true; // trip pv charge relay by sending MPO#1 signal which is active LOW
+    TRIP_PV = 0x01;
     strcpy(DYNAMIC_LABEL, "Solar OFF - CCL enforced");
     CCL_ENFORCED = true;
   }
@@ -808,9 +801,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
         inverter_prestart_p = WATTS;
         // TURN OFF MPPT IF NO CHARGE AS SOMETIMES MPPT CAUSES ISSUE DESPITE NO SOLAR DETECTED. THIS IS TO AVOID START-UP POWER SURGE
         if ( WATTS >= 0 ) { //&& (CUSTOM_FLAGS & 0x01) == 0x01 ) {
-          //mppt_delayer(true);
-          CAN_TX_MPO1 = true;
-          CAN_MSG[1] = 0x01;
+          TRIP_PV = 0x01;
           strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter starting");
           inverter_delay = true;
         }
@@ -1232,8 +1223,7 @@ void clear_bms_flag(lv_event_t *e) {
   lv_event_code_t code = lv_event_get_code(e);
 
   if(code == LV_EVENT_CLICKED) {
-    CAN_TX_MPO2 = true;
-    CAN_MSG[0] = 0x01;
+    CLEAR_BMS = 0x01;
   }
   Serial.println("Sending CAN msg to clear BMS flags");
 }
@@ -1531,7 +1521,7 @@ void refresh_bms_status_data(bms_status_data_t *data) {
     // CONTROLLED BY ARDUINO AND DISABLED IN BMS if ((RELAYS & 0x0002) == 0x0000) { create_status_label("Charge Relay Opened", data); flag_index++; }
 
     // Custom status messages
-    if ( CAN_TX_MPO1 ) { create_status_label(DYNAMIC_LABEL, data); flag_index++; comparator_index++;}
+    if ( TRIP_PV ) { create_status_label(DYNAMIC_LABEL, data); flag_index++; comparator_index++;}
     if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Arduino - Discharge Disabled", data); flag_index++; comparator_index++;} // If Inverter DCL CHECK triggered
 
     // Cell balancing check at end ensures higher importance messages appear above
@@ -1655,9 +1645,6 @@ void charge_icons_updater(data_display_t *data) {
     else {
       lv_label_set_text(data->charge_icon, "\uF1E6"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
     }
-    // SEND BALANCING ALLOWED SIGNAL
-    CAN_MSG[2] = 0x00;
-    CAN_TX_BLCG = false;
   }
 
   // IF NO CHARGE
@@ -1676,9 +1663,6 @@ void charge_icons_updater(data_display_t *data) {
     else {
       lv_label_set_text(data->charge_icon, "");
     }
-    // SEND BALANCING NOT ALLOWED SIGNAL TO BMS
-    CAN_TX_BLCG = true;
-    CAN_MSG[2] = 0x01;
   }
 }
 
@@ -1855,7 +1839,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
   lv_obj_align_to(data->battery_label,      data->soc_arc,        LV_ALIGN_CENTER,          -18, -44);
   lv_obj_align_to(data->soc_label,          data->soc_arc,        LV_ALIGN_CENTER,            0,   0);
   lv_obj_align_to(data->volt_label,         data->soc_arc,        LV_ALIGN_BOTTOM_MID,      -40, -44);
-  lv_obj_align_to(data->charge_icon,        data->soc_arc,        LV_ALIGN_OUT_LEFT_MID,     14,   5);
+  lv_obj_align_to(data->charge_icon,        data->soc_arc,        LV_ALIGN_OUT_LEFT_MID,     15,   5);
   lv_obj_align_to(data->car_battery_icon,   data->soc_arc,        LV_ALIGN_OUT_RIGHT_MID,    16,   5);
     
   // CREATE LABEL UPDATE TIMER
@@ -2025,7 +2009,7 @@ void loop() {
   }
 
   // send CAN if commanded
-  if (CAN_TX_MPO1 || CAN_TX_MPO2 || CAN_TX_BLCG) {
+  if ( CLEAR_BMS || TRIP_PV || BALANCING ) {
     CanMsg send_msg(CanStandardId(canMsgData.CAN_ID), sizeof(CAN_MSG), CAN_MSG);
 
     // retry if send failed for byte 0 - clear bms through mpo2
@@ -2036,12 +2020,11 @@ void loop() {
       CAN_RETRIES++;
     }
     // Stop MPO#2 signal if successful or after 3 retries
-    else if ( CAN_TX_MPO2 ) {
-      CAN_MSG[0] = 0x00; // clear send data
-      CAN_TX_MPO2 = false;
+    else if ( CLEAR_BMS ) {
+      CLEAR_BMS = 0x00; // clear send data
       CAN_RETRIES = 0;
     }
-    // MPO#1 and BLCG are initiated and stopped by timers
+    // Trip PV and Balancing are initiated and stopped by timers or loop
     else {
       CAN_RETRIES = 0;
     }
@@ -2080,8 +2063,7 @@ void loop() {
 
     // WAIT 20s BEFORE SENDING MPPT RESTART SIGNAL AS SUNRISE_DETECTOR IS DISABLED WITH INVERTER ON
     else if ( (millis() - time_ms) > 20000 && pin_high ) {
-      CAN_MSG[1] = 0x00;
-      CAN_TX_MPO1 = false;
+      TRIP_PV = 0x00;
       time_ms = 0;
       pin_high = false; // reset for next start delay
       inverter_delay = false; // stop this function executing
@@ -2091,6 +2073,16 @@ void loop() {
       digitalWrite(userData[3].relay_pin, HIGH);
       pin_high = true;
     }
+  }
+
+  // BMS CELL BALANCING SIGNALS IF CHARGING OR CELLS ABOVE 3.3V IF DELTA GREATER THAN 0,01V
+
+  if ( BALANCING && AVG_AMPS >= 0 && LO_CELL_V < 3.3 && (HI_CELL_V - LO_CELL_V) > 0.01 ) {
+    BALANCING = 0x00; // NO BALANCING
+  }
+
+  else if ( ! BALANCING && AVG_AMPS < 0 ) {
+    BALANCING = 0x01; // BALANCING
   }
   /*if (Serial) {
     // Average loop lap time of 256 iterations - reflects the lvgl delay at end of loop
