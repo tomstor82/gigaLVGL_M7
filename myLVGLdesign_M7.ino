@@ -170,7 +170,7 @@ static CombinedData combinedData;
 #define CAN_RETRIES     canMsgData.msg_cnt
 #define CLEAR_BMS       canMsgData.msg_data[0]
 #define TRIP_PV         canMsgData.msg_data[1]
-#define BALANCING       canMsgData.msg_data[2]
+#define BLCG_ALLOWED    canMsgData.msg_data[2]
 
 #define AVG_TEMP        combinedData.sensorData.avg_temp
 #define TEMP1           combinedData.sensorData.temp1
@@ -202,6 +202,7 @@ static CombinedData combinedData;
 #define LO_CELL_ID      combinedData.canData.lCid
 #define BMS_FAULTS      combinedData.canData.fu
 #define BMS_STATUS      combinedData.canData.st
+#define BLCG_ACTIVE     (combinedData.canData.st & 0x0008) == 0x0008
 #define CYCLES          combinedData.canData.cc
 #define HEAT_SINK       combinedData.canData.hs
 #define CUSTOM_FLAGS    combinedData.canData.cu
@@ -543,7 +544,7 @@ const char* set_can_msgbox_text() {
                  LO_CELL_V, LO_CELL_ID,
                  CCL,
                  DCL,
-                 (CUSTOM_FLAGS & 0x02) == 0x02 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using MPO#1 feedback from BMS which controls both charge FETs
+                 (CUSTOM_FLAGS & 0x02) == 0x02 ? LV_SYMBOL_CLOSE : LV_SYMBOL_OK, // using MPO#1 feedback from BMS which controls both charge FETs reversed polarity
                  (RELAYS & 0x0001) == 0x0001 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using BMS relay state
                  CYCLES,
                  HEALTH,
@@ -1525,7 +1526,7 @@ void refresh_bms_status_data(bms_status_data_t *data) {
     if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Arduino - Discharge Disabled", data); flag_index++; comparator_index++;} // If Inverter DCL CHECK triggered
 
     // Cell balancing check at end ensures higher importance messages appear above
-    if ((BMS_STATUS & 0x0008) == 0x0008) {
+    if (BLCG_ACTIVE == 0x0008) {
       if ( balancing_label_showing ) {
         create_status_label("", data); // create blank label
         balancing_label_showing = false;
@@ -2009,7 +2010,7 @@ void loop() {
   }
 
   // send CAN if commanded
-  if ( CLEAR_BMS || TRIP_PV || BALANCING ) {
+  if ( CLEAR_BMS || TRIP_PV || BLCG_ALLOWED ) {
     CanMsg send_msg(CanStandardId(canMsgData.CAN_ID), sizeof(CAN_MSG), CAN_MSG);
 
     // retry if send failed for byte 0 - clear bms through mpo2
@@ -2075,14 +2076,14 @@ void loop() {
     }
   }
 
-  // BMS CELL BALANCING SIGNALS IF CHARGING OR CELLS ABOVE 3.3V IF DELTA GREATER THAN 0,01V
+  // SEND BMS CELL BALANCING ALLOWED SIGNAL IF CHARGING OR CELLS ABOVE 3.3V IF DELTA GREATER THAN 0,01V AND BALANCING NOT DETECTED
 
-  if ( BALANCING && AVG_AMPS >= 0 && LO_CELL_V < 3.3 && (HI_CELL_V - LO_CELL_V) > 0.01 ) {
-    BALANCING = 0x00; // NO BALANCING
+  if ( BLCG_ALLOWED && AVG_AMPS >= 0 && LO_CELL_V < 3.3 ) {
+    BLCG_ALLOWED = 0x00; // Balancing NOT Allowed
   }
 
-  else if ( ! BALANCING && AVG_AMPS < 0 ) {
-    BALANCING = 0x01; // BALANCING
+  else if ( !BLCG_ACTIVE && !BLCG_ALLOWED && AVG_AMPS < 0 ) {
+    BLCG_ALLOWED = 0x01; // Balancing Allowed
   }
   /*if (Serial) {
     // Average loop lap time of 256 iterations - reflects the lvgl delay at end of loop
