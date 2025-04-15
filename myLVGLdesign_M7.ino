@@ -534,7 +534,7 @@ const char* set_can_msgbox_text() {
                  "Low Cell           %.2fV           #%2d\n\n"
                  "Charge Limit                     %3d A\n"
                  "Discharge Limit                %3d A\n\n"
-                 "Charge                                    %s\n"
+                 "Solar Charge                          %s\n"
                  "Discharge                               %s\n\n"
                  "Cycles                                    %3d\n"
                  "Health                                 %3d%%\n\n"
@@ -544,7 +544,7 @@ const char* set_can_msgbox_text() {
                  LO_CELL_V, LO_CELL_ID,
                  CCL,
                  DCL,
-                 (CUSTOM_FLAGS & 0x02) == 0x02 ? LV_SYMBOL_CLOSE : LV_SYMBOL_OK, // using MPO#1 feedback from BMS which controls both charge FETs reversed polarity
+                 (CUSTOM_FLAGS & 0x02) == 0x02 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using MPO#1 feedback from BMS which controls both charge FETs reversed polarity
                  (RELAYS & 0x0001) == 0x0001 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using BMS relay state
                  CYCLES,
                  HEALTH,
@@ -1526,7 +1526,7 @@ void refresh_bms_status_data(bms_status_data_t *data) {
     if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Arduino - Discharge Disabled", data); flag_index++; comparator_index++;} // If Inverter DCL CHECK triggered
 
     // Cell balancing check at end ensures higher importance messages appear above
-    if (BLCG_ACTIVE == 0x0008) {
+    if (BLCG_ACTIVE) {
       if ( balancing_label_showing ) {
         create_status_label("", data); // create blank label
         balancing_label_showing = false;
