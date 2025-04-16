@@ -206,6 +206,7 @@ static CombinedData combinedData;
 #define CYCLES          combinedData.canData.cc
 #define HEAT_SINK       combinedData.canData.hs
 #define CUSTOM_FLAGS    combinedData.canData.cu
+#define CHG_ENABLED     (combinedData.canData.cu & 0x01) == 0x01
 #define CAPACITY        combinedData.canData.cpcty
 
 #define DYNAMIC_LABEL   bmsStatusData.dynamic_label
@@ -352,7 +353,7 @@ void sunrise_detector() {
   static uint32_t time_ms = 0;
 
   // IS SOLAR CHARGE SIGNAL AVAILABLE THROUGH CUSTOM FLAG AND MPPT DELAY VARIABLE FALSE
-  if ( (CUSTOM_FLAGS & 0x01) == 0x01 && ! mppt_delay ) {
+  if ( CHG_ENABLED && ! mppt_delay ) {
 
     // START TIME TO CHECK WHEN SOLAR SIGNAL IS LOST
     if ( ! time_ms ) {
@@ -367,7 +368,7 @@ void sunrise_detector() {
   }
 
   // IF SOLAR CHARGE SIGNAL IS LOST
-  else if ( ! (CUSTOM_FLAGS & 0x01) == 0x01 && time_ms && ! mppt_delay ) {
+  else if ( ! CHG_ENABLED && time_ms && ! mppt_delay ) {
 
     // within 10 seconds lets trigger mppt delay as relay flap detected
     if ( (millis() - time_ms) < 10000 ) {
@@ -641,7 +642,7 @@ void sensor_msgbox(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
 
     if (code == LV_EVENT_CLICKED) {
-        data->msgbox = lv_msgbox_create(lv_obj_get_parent(userData[0].label_obj), "               Humidity and Temperature Sensors", set_sensor_msgbox_text(), NULL, false);
+        data->msgbox = lv_msgbox_create(lv_obj_get_parent(userData[0].label_obj), "            DHT22 sensors", set_sensor_msgbox_text(), NULL, false);
         lv_obj_set_width(data->msgbox, LV_PCT(80)); // Set width to 80% of the screen
         lv_obj_align(data->msgbox, LV_ALIGN_CENTER, 0, 0); // Center the message box on the screen
 
@@ -801,7 +802,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
       if ( data->relay_pin == RELAY1 ) {
         inverter_prestart_p = WATTS;
         // TURN OFF MPPT IF NO CHARGE AS SOMETIMES MPPT CAUSES ISSUE DESPITE NO SOLAR DETECTED. THIS IS TO AVOID START-UP POWER SURGE
-        if ( WATTS >= 0 ) { //&& (CUSTOM_FLAGS & 0x01) == 0x01 ) {
+        if ( WATTS >= 0 ) { //&& CHG_ENABLED ) {
           TRIP_PV = 0x01;
           strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter starting");
           inverter_delay = true;
@@ -914,16 +915,16 @@ void thermostat_checker(user_data_t *data) {
   // Ceiling heater thermostat ( uses 3 or 1 sensors )
   else if ( data->relay_pin == RELAY2 ) {
     // need to check which sensor is working ( if none the temp updater will disable button )
-    if ( AVG_TEMP != 999.0f && AVG_TEMP < data->set_temp ) {
+    if ( AVG_TEMP != 999.9f && AVG_TEMP < data->set_temp ) {
       on = true;
     }
-    else if ( TEMP1 != 999.0f && TEMP1 < data->set_temp ) {
+    else if ( TEMP1 != 999.9f && TEMP1 < data->set_temp ) {
       on = true;
     }
-    else if ( TEMP2 != 999.0f && TEMP2 < data->set_temp ) {
+    else if ( TEMP2 != 999.9f && TEMP2 < data->set_temp ) {
       on = true;
     }
-    else if ( TEMP3 != 999.0f && TEMP4 < data->set_temp ) {
+    else if ( TEMP3 != 999.9f && TEMP4 < data->set_temp ) {
       on = true;
     }
 
@@ -1094,15 +1095,15 @@ void fault_label_maker(lv_timer_t *timer) {
   uint8_t index = 0;
   char faultMsg[20];
 
-  if (TEMP1 == 999.0f) {
+  if (TEMP1 == 999.9f) {
     faultArr[index] = 1;
     index++;
   }
-  if (TEMP2 == 999.0f) {
+  if (TEMP2 == 999.9f) {
     faultArr[index] = 2;
     index++;
   }
-  if (TEMP4 == 999.0f) {
+  if (TEMP4 == 999.9f) {
     faultArr[index] = 4;
     index++;
   }
@@ -1144,18 +1145,18 @@ void update_temp(user_data_t *data) {
 
   // LIVING ROOM CHECKING EACH SENSOR AND USING SINGLE WORKING SENSOR IF NO AVERAGE TEMPERATURE
   if (data->relay_pin == RELAY2) {
-    if (AVG_TEMP != 999.0f) {
+    if (AVG_TEMP != 999.9f) {
       snprintf(buf, sizeof(buf), "%.1f\u00B0C", AVG_TEMP);
     }
-    else if (TEMP1 != 999.0f) {
+    else if (TEMP1 != 999.9f) {
       snprintf(buf, sizeof(buf), "%.1f\u00B0C", TEMP1);
       sensor_fault = true;
     }
-    else if (TEMP2 != 999.0f) {
+    else if (TEMP2 != 999.9f) {
       snprintf(buf, sizeof(buf), "%.1f\u00B0C", TEMP2);
       sensor_fault = true;
     }
-    else if (TEMP4 != 999.0f) {
+    else if (TEMP4 != 999.9f) {
       snprintf(buf, sizeof(buf), "%.1f\u00B0C", TEMP4);
       sensor_fault = true;
     }
@@ -1179,7 +1180,7 @@ void update_temp(user_data_t *data) {
 
   // CHECK SINGLE SENSOR FOR SHOWER ROOM
   else {
-    if (TEMP3 != 999.0f) {
+    if (TEMP3 != 999.9f) {
       snprintf(buf, sizeof(buf), "%.1f\u00B0C", TEMP3);
     }
     else {
@@ -1614,7 +1615,7 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
 
 
 
-// DATA SCREEN FLASHING CHARGE SYMBOLS ////////////////////////////////////////////////
+// DATA SCREEN STATE OF CHARGE SYMBOLS ////////////////////////////////////////////////
 void charge_icons_updater(data_display_t *data) {
   bool flashing_battery = false;
 
@@ -1638,20 +1639,22 @@ void charge_icons_updater(data_display_t *data) {
     }
   }
 
-  // SHOW TWO-PIN ICON IF CHARGE BUT NO SOLAR DETECTED AND LIGHTENING BOLT OTHERWISE
+  // CHARGE SYMBOLS
   if ( AVG_AMPS < 0 ) {
-    if ( (CUSTOM_FLAGS & 0x01) == 0x01 ) {
+    // SHOW LIGHTENING BOLT IF PV DETECTED
+    if ( CHG_ENABLED ) {
       lv_label_set_text(data->charge_icon, "\uF0E7"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
     }
+    // SHOW TWO-PIN ICON OTHERWISE
     else {
       lv_label_set_text(data->charge_icon, "\uF1E6"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
     }
   }
 
-  // IF NO CHARGE
+  // NO CHARGE
   else {
-    // SHOW FLASHING SUN ICON IF SOLAR DETECTED
-    if ( (CUSTOM_FLAGS & 0x01) == 0x01 ) {
+    // SHOW FLASHING SUN ICON IF PV DETECTED
+    if ( CHG_ENABLED ) {
       lv_label_set_text(data->charge_icon, "\uF185"); // sun icon
       if ( lv_obj_has_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN) ) {
         lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
@@ -1660,7 +1663,7 @@ void charge_icons_updater(data_display_t *data) {
         lv_obj_add_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
       }
     }
-    // NO SOLAR DETECTED = NO ICON
+    // NO PV DETECTED, NO ICON
     else {
       lv_label_set_text(data->charge_icon, "");
     }
@@ -1772,6 +1775,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_arc_set_bg_angles(data->soc_arc, 0, 360);
     lv_obj_remove_style(data->soc_arc, NULL, LV_PART_KNOB); // remove arc knob
     lv_obj_set_style_arc_rounded(data->soc_arc, false, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(data->soc_arc, lv_color_hex(0x555555), LV_PART_MAIN);
     lv_obj_set_style_arc_width(data->soc_arc, 10, LV_PART_MAIN);
     lv_obj_set_style_arc_width(data->soc_arc, 15, LV_PART_INDICATOR);
     lv_obj_clear_flag(data->soc_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
@@ -1783,7 +1787,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_arc_set_rotation(data->charge_arc, 150);
     lv_arc_set_bg_angles(data->charge_arc, 0, 60);
     lv_obj_remove_style(data->charge_arc, NULL, LV_PART_KNOB); // remove arc knob
-    //lv_obj_set_style_arc_color(data->charge_arc, lv_palette_main(LV_PALETTE_GREEN), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(data->charge_arc, lv_color_hex(0x555555), LV_PART_MAIN);
     lv_obj_set_style_arc_width(data->charge_arc, 10, LV_PART_MAIN);
     lv_obj_set_style_arc_width(data->charge_arc, 10, LV_PART_INDICATOR);
     lv_obj_clear_flag(data->charge_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
@@ -1796,7 +1800,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_arc_set_bg_angles(data->discharge_arc, 0, 60);
     lv_arc_set_mode(data->discharge_arc, LV_ARC_MODE_REVERSE);
     lv_obj_remove_style(data->discharge_arc, NULL, LV_PART_KNOB); // remove arc knob
-    //lv_obj_set_style_arc_color(data->discharge_arc, lv_palette_main(LV_PALETTE_ORANGE), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(data->discharge_arc, lv_color_hex(0x555555), LV_PART_MAIN);
     lv_obj_set_style_arc_width(data->discharge_arc, 10, LV_PART_MAIN);
     lv_obj_set_style_arc_width(data->discharge_arc, 10, LV_PART_INDICATOR);
     lv_obj_clear_flag(data->discharge_arc, LV_OBJ_FLAG_CLICKABLE); // remove clickable feature
