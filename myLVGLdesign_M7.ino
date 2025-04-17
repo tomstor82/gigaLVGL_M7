@@ -794,7 +794,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
   lv_event_code_t code = lv_event_get_code(e);
 
   static uint32_t press_timer_ms = 0;
-  uint16_t min_press_interval_ms = 2000;
+  uint16_t min_press_interval_ms = 200;
 
   // BUTTON ON IF IT WAS OFF FOR AT LEAST MINIMUM PRESS INTERVAL
   if ( code == LV_EVENT_CLICKED && (millis() - min_press_interval_ms) > press_timer_ms ) {
@@ -968,7 +968,7 @@ void thermostat_event_handler(lv_event_t *e) {
   lv_event_code_t code = lv_event_get_code(e);
 
   static uint32_t press_timer_ms = 0;
-  uint16_t min_press_interval_ms = 500;
+  uint16_t min_press_interval_ms = 200;
 
   // BUTTON ON IF IT WAS OFF FOR AT LEAST MINIMUM PRESS INTERVAL
   if ( code == LV_EVENT_CLICKED && (millis() - min_press_interval_ms) > press_timer_ms ) {
