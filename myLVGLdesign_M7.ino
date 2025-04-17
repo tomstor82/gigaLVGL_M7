@@ -266,7 +266,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 
   // ADD EVENT HANDLER, LABELS AND UPDATE TIMER TO THERMOSTATIC HEATER BUTTONS
   if ( ! timeout_ms ) {
-    lv_obj_add_event_cb(data->button, thermostat_event_handler, LV_EVENT_ALL, data);
+    lv_obj_add_event_cb(data->button, thermostat_event_handler, LV_EVENT_CLICKED, data);
     data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
       lv_obj_set_width(data->label_obj, 80);
       lv_obj_set_pos(data->label_obj, 160, data->y_offset + 13);
@@ -285,7 +285,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
      
   // ADD EVENT HANDLER FOR HOT WATER AND INVERTER BUTTONS
   else {
-    lv_obj_add_event_cb(data->button, hot_water_inverter_event_handler, LV_EVENT_ALL, data);
+    lv_obj_add_event_cb(data->button, hot_water_inverter_event_handler, LV_EVENT_CLICKED, data);
 
     // INVERTER LABEL
     if ( relay_pin == RELAY1 ) {
@@ -791,94 +791,86 @@ void power_check(lv_timer_t *timer) {
 // HOT WATER AND INVERTER EVENT HANDLER ////////////////////////////////////////////////////
 void hot_water_inverter_event_handler(lv_event_t *e) {
   user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
-  lv_event_code_t code = lv_event_get_code(e);
-
-  static uint32_t press_timer_ms = 0;
-  uint16_t min_press_interval_ms = 200;
 
   // BUTTON ON IF IT WAS OFF FOR AT LEAST MINIMUM PRESS INTERVAL
-  if ( code == LV_EVENT_CLICKED && (millis() - min_press_interval_ms) > press_timer_ms ) {
+  if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
 
-    if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
-
-      // INVERTER
-      if ( data->relay_pin == RELAY1 ) {
-        inverter_prestart_p = WATTS;
-        // TURN OFF MPPT IF NO CHARGE AS SOMETIMES MPPT CAUSES ISSUE DESPITE NO SOLAR DETECTED. THIS IS TO AVOID START-UP POWER SURGE
-        if ( WATTS >= 0 ) { //&& CHG_ENABLED ) {
-          TRIP_PV = 0x01;
-          strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter starting");
-          inverter_delay = true;
-        }
-        lv_label_set_text(data->label_obj, "Inverter ON");
+    // INVERTER
+    if ( data->relay_pin == RELAY1 ) {
+      inverter_prestart_p = WATTS;
+      // TURN OFF MPPT IF NO CHARGE AS SOMETIMES MPPT CAUSES ISSUE DESPITE NO SOLAR DETECTED. THIS IS TO AVOID START-UP POWER SURGE
+      if ( WATTS >= 0 ) { //&& CHG_ENABLED ) {
+        TRIP_PV = 0x01;
+        strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter starting");
+        inverter_delay = true;
       }
-
-      // HOT WATER - TRY TO START INVERTER IF OFF
-      else if ( userData[3].on == false ) {
-        lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL); // Have to include all 3 of these to make it work
-        lv_event_send(userData[3].button, LV_EVENT_RELEASED, NULL);
-        lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL);
-
-        // IF INVERTER DOESN'T START TRIP HOT WATER BUTTON OFF
-        if ( userData[3].on == false ) {
-          lv_obj_clear_state(data->button, LV_STATE_CHECKED);
-          return; // exit function if inverter doesn't start
-        }
-        // IF INVERTER STARTED SUCCESSFULLY INCREMENT PWR_DEMAND
-        else pwr_demand++;
-      }
-      // WITH INVERTER ALREADY ON, ONLY INCREMENT PWR_DEMAND
-      else {
-        pwr_demand++; // only for hot water
-      }
-
-      // TURN ON RELAY UNLESS MPPT DELAYER IS RUNNING
-      if ( ! inverter_delay || data->relay_pin == RELAY3 ) {
-        digitalWrite(data->relay_pin, HIGH);
-      }
-
-      // DELETE TIMER BEFORE RE-DECLARATION IF IT EXISTS E.G HOT WATER TURNED OFF BEFORE INTERVAL TIME EXPIRED
-      if ( data->timer ) {
-        lv_timer_del( data->timer );
-        data->timer = NULL;
-      }
-
-      // CREATE COMBINED TIMER THAT ONLY RUNS ONCE AND IS RESET IF NEEDED INSIDE power_check
-      data->timer = lv_timer_create(power_check, data->timeout_ms, data);
-
-      // SET BUTTON TO ON
-      data->on = true;
-      press_timer_ms = millis();
+      lv_label_set_text(data->label_obj, "Inverter ON");
     }
 
-    // BUTTON OFF
-    else if (millis() - min_press_interval_ms > press_timer_ms) {
-      digitalWrite(data->relay_pin, LOW);
-      data->on = false;
-      press_timer_ms = millis();
-      if ( data->timer ) {
-        lv_timer_del( data->timer );
-        data->timer = NULL;
+    // HOT WATER - TRY TO START INVERTER IF OFF
+    else if ( userData[3].on == false ) {
+      lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL); // Have to include all 3 of these to make it work
+      lv_event_send(userData[3].button, LV_EVENT_RELEASED, NULL);
+      lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL);
+
+      // IF INVERTER DOESN'T START TRIP HOT WATER BUTTON OFF
+      if ( userData[3].on == false ) {
+        lv_obj_clear_state(data->button, LV_STATE_CHECKED);
+        return; // exit function if inverter doesn't start
       }
+      // IF INVERTER STARTED SUCCESSFULLY INCREMENT PWR_DEMAND
+      else pwr_demand++;
+    }
+    // WITH INVERTER ALREADY ON, ONLY INCREMENT PWR_DEMAND
+    else {
+      pwr_demand++; // only for hot water
+    }
 
-      // INVERTER MANIPULATES BUTTONS THAT ARE ON
-      if ( data->relay_pin == RELAY1 ) {
-        lv_label_set_text(data->label_obj, "OFF");
+    // TURN ON RELAY UNLESS MPPT DELAYER IS RUNNING
+    if ( ! inverter_delay || data->relay_pin == RELAY3 ) {
+      digitalWrite(data->relay_pin, HIGH);
+    }
 
-        // TURN OFF BUTTONS THAT ARE ON
-        for ( uint8_t i = 0; i < 3; i++ ) {
-          if ( userData[i].on == true ) {
-            button_off(&userData[i]);
-          }
+    // DELETE TIMER BEFORE RE-DECLARATION IF IT EXISTS E.G HOT WATER TURNED OFF BEFORE INTERVAL TIME EXPIRED
+    if ( data->timer ) {
+      lv_timer_del( data->timer );
+      data->timer = NULL;
+    }
+
+    // CREATE COMBINED TIMER THAT ONLY RUNS ONCE AND IS RESET IF NEEDED INSIDE power_check
+    data->timer = lv_timer_create(power_check, data->timeout_ms, data);
+
+    // SET BUTTON TO ON
+    data->on = true;
+  }
+
+  // BUTTON OFF
+  else {
+    digitalWrite(data->relay_pin, LOW);
+    data->on = false;
+
+    if ( data->timer ) {
+      lv_timer_del( data->timer );
+      data->timer = NULL;
+    }
+
+    // INVERTER MANIPULATES BUTTONS THAT ARE ON
+    if ( data->relay_pin == RELAY1 ) {
+      lv_label_set_text(data->label_obj, "OFF");
+
+      // TURN OFF BUTTONS THAT ARE ON
+      for ( uint8_t i = 0; i < 3; i++ ) {
+        if ( userData[i].on == true ) {
+          button_off(&userData[i]);
         }
-        pwr_demand = 0;
-        inverter_prestart_p = 0;
       }
+      pwr_demand = 0;
+      inverter_prestart_p = 0;
+    }
 
-      // HOT WATER
-      else {
-        pwr_demand ? pwr_demand-- : NULL;
-      }
+    // HOT WATER
+    else {
+      pwr_demand ? pwr_demand-- : NULL;
     }
   }
 }
@@ -965,41 +957,32 @@ void thermostat_checker(user_data_t *data) {
 // THERMOSTAT EVENT HANDLER /////////////////////////////////////////////////////////
 void thermostat_event_handler(lv_event_t *e) {
   user_data_t *data = (user_data_t *)lv_event_get_user_data(e);
-  lv_event_code_t code = lv_event_get_code(e);
 
-  static uint32_t press_timer_ms = 0;
-  uint16_t min_press_interval_ms = 200;
+  // Button ON
+  if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
 
-  // BUTTON ON IF IT WAS OFF FOR AT LEAST MINIMUM PRESS INTERVAL
-  if ( code == LV_EVENT_CLICKED && (millis() - min_press_interval_ms) > press_timer_ms ) {
-
-    // Button ON
-    if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
-      // check if inverter is on
+    // check if inverter is on
+    if ( userData[3].on == false ) {
+      lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL);
+      lv_event_send(userData[3].button, LV_EVENT_RELEASED, NULL);
+      lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL);
+      // DEBUG if inverter is still off disable change flag
       if ( userData[3].on == false ) {
-        lv_event_send(userData[3].button, LV_EVENT_PRESSED, NULL);
-        lv_event_send(userData[3].button, LV_EVENT_RELEASED, NULL);
-        lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL);
-        // DEBUG if inverter is still off disable change flag
-        if ( userData[3].on == false ) {
-          lv_obj_clear_state(data->button, LV_STATE_CHECKED);
-          return; // exit function if inverter is off
-        }
+        lv_obj_clear_state(data->button, LV_STATE_CHECKED);
+        return; // exit function if inverter is off
       }
-      data->on = true;
-      data->update_timer = true;
-      pwr_demand++;
-      press_timer_ms = millis();
     }
+    data->on = true;
+    data->update_timer = true;
+    pwr_demand++;
+  }
 
-    // Button OFF
-    else if ( (millis() - min_press_interval_ms) > press_timer_ms ) {
-      data->on = false;
-      digitalWrite(data->relay_pin, LOW);
-      press_timer_ms = millis();
-      data->update_timer = false;
-      pwr_demand ? pwr_demand-- : NULL;
-    }
+  // Button OFF
+  else {
+    data->on = false;
+    digitalWrite(data->relay_pin, LOW);
+    data->update_timer = false;
+    pwr_demand ? pwr_demand-- : NULL;
   }
 }
 
