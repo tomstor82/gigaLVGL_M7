@@ -793,9 +793,12 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
   user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
   lv_event_code_t code = lv_event_get_code(e);
 
-  if(code == LV_EVENT_CLICKED) {
+  static uint32_t press_timer_ms = 0;
+  uint16_t min_press_interval_ms = 2000;
 
-    // BUTTON ON
+  // BUTTON ON IF IT WAS OFF FOR AT LEAST MINIMUM PRESS INTERVAL
+  if ( code == LV_EVENT_CLICKED && (millis() - min_press_interval_ms) > press_timer_ms ) {
+
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
 
       // INVERTER
@@ -845,12 +848,14 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
 
       // SET BUTTON TO ON
       data->on = true;
+      press_timer_ms = millis();
     }
 
     // BUTTON OFF
-    else {
+    else if (millis() - min_press_interval_ms > press_timer_ms) {
       digitalWrite(data->relay_pin, LOW);
       data->on = false;
+      press_timer_ms = millis();
       if ( data->timer ) {
         lv_timer_del( data->timer );
         data->timer = NULL;
@@ -962,7 +967,11 @@ void thermostat_event_handler(lv_event_t *e) {
   user_data_t *data = (user_data_t *)lv_event_get_user_data(e);
   lv_event_code_t code = lv_event_get_code(e);
 
-  if (code == LV_EVENT_CLICKED) {
+  static uint32_t press_timer_ms = 0;
+  uint16_t min_press_interval_ms = 500;
+
+  // BUTTON ON IF IT WAS OFF FOR AT LEAST MINIMUM PRESS INTERVAL
+  if ( code == LV_EVENT_CLICKED && (millis() - min_press_interval_ms) > press_timer_ms ) {
 
     // Button ON
     if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
@@ -980,12 +989,14 @@ void thermostat_event_handler(lv_event_t *e) {
       data->on = true;
       data->update_timer = true;
       pwr_demand++;
+      press_timer_ms = millis();
     }
 
     // Button OFF
-    else {
+    else if ( (millis() - min_press_interval_ms) > press_timer_ms ) {
       data->on = false;
       digitalWrite(data->relay_pin, LOW);
+      press_timer_ms = millis();
       data->update_timer = false;
       pwr_demand ? pwr_demand-- : NULL;
     }
