@@ -361,7 +361,7 @@ void sunrise_detector() {
     }
 
     // IF MPPT DRAINS BATTERY WHILST INVERTER IS OFF AND PV HAS BEEN ENABLED FOR AT LEAST 30s
-    else if ( WATTS > 10 && (millis() - time_ms) > 30000 ) {
+    else if ( WATTS > 30 && (millis() - time_ms) > 30000 ) { // OVER 30 WATTS TO AVOID LIGHTS TRIPPING PV
       mppt_delay = true;
       strcpy(DYNAMIC_LABEL, "Solar OFF - MPPT drain");
     }
@@ -642,7 +642,7 @@ void sensor_msgbox(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
 
     if (code == LV_EVENT_CLICKED) {
-        data->msgbox = lv_msgbox_create(lv_obj_get_parent(userData[0].label_obj), "            DHT22 sensors", set_sensor_msgbox_text(), NULL, false);
+        data->msgbox = lv_msgbox_create(lv_obj_get_parent(userData[0].label_obj), "             DHT22 sensors", set_sensor_msgbox_text(), NULL, false);
         lv_obj_set_width(data->msgbox, LV_PCT(80)); // Set width to 80% of the screen
         lv_obj_align(data->msgbox, LV_ALIGN_CENTER, 0, 0); // Center the message box on the screen
 
