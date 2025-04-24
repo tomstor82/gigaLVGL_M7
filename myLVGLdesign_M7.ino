@@ -101,14 +101,14 @@ struct CanMsgData {
 
 // Type defined structure for bms status messages allowing it to be passed to function
 typedef struct {
-    lv_obj_t *parent = NULL;
-    lv_obj_t *title_label = NULL;
-    lv_obj_t *button = NULL;
-    lv_obj_t *status_label[33] = {};
-    bool update_timer = true;
-    bool ccl_enforced = false;
-    char dynamic_label[30] = {};
-    uint8_t y = NULL;
+  lv_obj_t *parent = NULL;
+  lv_obj_t *title_label = NULL;
+  lv_obj_t *button = NULL;
+  lv_obj_t *status_label[33] = {};
+  bool update_timer = true;
+  bool ccl_enforced = false;
+  char dynamic_label[30] = {};
+  uint8_t y = NULL;
 } bms_status_data_t;
 
 // define struct for function user-data
@@ -561,27 +561,27 @@ void can_msgbox_update_timer(msgbox_data_t *data) {
 }
 
 void can_msgbox(lv_event_t *e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    msgbox_data_t *data = (msgbox_data_t*)lv_event_get_user_data(e);
-    lv_obj_t *parent = lv_obj_get_parent(dataDisplay.soc_label);
-    
-    if (code == LV_EVENT_CLICKED) {
-        data->msgbox = lv_msgbox_create(parent, "     Battery Monitoring Data", set_can_msgbox_text(), NULL, false);
-        lv_obj_set_width(data->msgbox, LV_PCT(80)); // Set width to 80% of the screen
-        lv_obj_align(data->msgbox, LV_ALIGN_CENTER, 0, 0); // Center the message box on the screen
+  lv_event_code_t code = lv_event_get_code(e);
+  msgbox_data_t *data = (msgbox_data_t*)lv_event_get_user_data(e);
+  lv_obj_t *parent = lv_obj_get_parent(dataDisplay.soc_label);
 
-        // Create a full-screen overlay to detect clicks for closing the message box
-        lv_obj_t *overlay = lv_obj_create(lv_scr_act());
-        lv_obj_set_size(overlay, LV_HOR_RES, LV_VER_RES);
-        lv_obj_set_style_opa(overlay, LV_OPA_TRANSP, 0); // Transparent overlay
-        lv_obj_add_event_cb(overlay, close_can_msgbox_event_handler, LV_EVENT_CLICKED, data);
+  if (code == LV_EVENT_CLICKED) {
+    data->msgbox = lv_msgbox_create(parent, "     Battery Monitoring Data", set_can_msgbox_text(), NULL, false);
+    lv_obj_set_width(data->msgbox, LV_PCT(80)); // Set width to 80% of the screen
+    lv_obj_align(data->msgbox, LV_ALIGN_CENTER, 0, 0); // Center the message box on the screen
 
-        // Create timer to update data every 10 seconds
-        data->update_timer = true;
+    // Create a full-screen overlay to detect clicks for closing the message box
+    lv_obj_t *overlay = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(overlay, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_style_opa(overlay, LV_OPA_TRANSP, 0); // Transparent overlay
+    lv_obj_add_event_cb(overlay, close_can_msgbox_event_handler, LV_EVENT_CLICKED, data);
 
-        // Pause BMS status data label timer as they show through msgbox
-        bmsStatusData.update_timer = false;
-    }
+    // Create timer to update data every 10 seconds
+    data->update_timer = true;
+
+    // Pause BMS status data label timer as they show through msgbox
+    bmsStatusData.update_timer = false;
+  }
 }
 
 void close_can_msgbox_event_handler(lv_event_t *e) {
@@ -633,28 +633,28 @@ const char* set_sensor_msgbox_text() {
 }
 
 void sensor_msgbox_update_timer(msgbox_data_t *data) {
-    lv_obj_t *label = lv_msgbox_get_text(data->msgbox); // get msgBox text string object excluding title
-    lv_label_set_text(label, set_sensor_msgbox_text()); // Update the text object in the msgBox
+  lv_obj_t *label = lv_msgbox_get_text(data->msgbox); // get msgBox text string object excluding title
+  lv_label_set_text(label, set_sensor_msgbox_text()); // Update the text object in the msgBox
 }
 
 void sensor_msgbox(lv_event_t *e) {
-    msgbox_data_t *data = (msgbox_data_t*)lv_event_get_user_data(e);
-    lv_event_code_t code = lv_event_get_code(e);
+  msgbox_data_t *data = (msgbox_data_t*)lv_event_get_user_data(e);
+  lv_event_code_t code = lv_event_get_code(e);
 
-    if (code == LV_EVENT_CLICKED) {
-        data->msgbox = lv_msgbox_create(lv_obj_get_parent(userData[0].label_obj), "             DHT22 sensors", set_sensor_msgbox_text(), NULL, false);
-        lv_obj_set_width(data->msgbox, LV_PCT(80)); // Set width to 80% of the screen
-        lv_obj_align(data->msgbox, LV_ALIGN_CENTER, 0, 0); // Center the message box on the screen
+  if (code == LV_EVENT_CLICKED) {
+    data->msgbox = lv_msgbox_create(lv_obj_get_parent(userData[0].label_obj), "             DHT22 sensors", set_sensor_msgbox_text(), NULL, false);
+    lv_obj_set_width(data->msgbox, LV_PCT(80)); // Set width to 80% of the screen
+    lv_obj_align(data->msgbox, LV_ALIGN_CENTER, 0, 0); // Center the message box on the screen
 
-        // Create a full-screen overlay to detect clicks for closing the message box
-        lv_obj_t *overlay = lv_obj_create(lv_scr_act());
-        lv_obj_set_size(overlay, LV_HOR_RES, LV_VER_RES);
-        lv_obj_set_style_opa(overlay, LV_OPA_TRANSP, 0); // Transparent overlay
-        lv_obj_add_event_cb(overlay, close_sensor_msgbox_event_handler, LV_EVENT_CLICKED, data);
+    // Create a full-screen overlay to detect clicks for closing the message box
+    lv_obj_t *overlay = lv_obj_create(lv_scr_act());
+    lv_obj_set_size(overlay, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_style_opa(overlay, LV_OPA_TRANSP, 0); // Transparent overlay
+    lv_obj_add_event_cb(overlay, close_sensor_msgbox_event_handler, LV_EVENT_CLICKED, data);
 
-        // Create timer to update data every 10 seconds
-        data->update_timer = true;
-    }
+    // Create timer to update data every 10 seconds
+    data->update_timer = true;
+  }
 }
 
 void close_sensor_msgbox_event_handler(lv_event_t *e) {
@@ -912,16 +912,16 @@ void thermostat_checker(user_data_t *data) {
   // Ceiling heater thermostat ( uses 3 or 1 sensors )
   else if ( data->relay_pin == RELAY2 ) {
     // need to check which sensor is working ( if none the temp updater will disable button )
-    if ( AVG_TEMP != 999.9f && AVG_TEMP < data->set_temp ) {
+    if ( AVG_TEMP != 99.9f && AVG_TEMP < data->set_temp ) {
       on = true;
     }
-    else if ( TEMP1 != 999.9f && TEMP1 < data->set_temp ) {
+    else if ( TEMP1 != 99.9f && TEMP1 < data->set_temp ) {
       on = true;
     }
-    else if ( TEMP2 != 999.9f && TEMP2 < data->set_temp ) {
+    else if ( TEMP2 != 99.9f && TEMP2 < data->set_temp ) {
       on = true;
     }
-    else if ( TEMP3 != 999.9f && TEMP4 < data->set_temp ) {
+    else if ( TEMP3 != 99.9f && TEMP4 < data->set_temp ) {
       on = true;
     }
 
@@ -1007,35 +1007,35 @@ void thermostat_event_handler(lv_event_t *e) {
 
 // TEMPERATURE DROP DOWN EVENT HANDLER ////////////////////////////////////////////////
 void dropdown_event_handler(lv_event_t *e) {
-    user_data_t *data = (user_data_t *)lv_event_get_user_data(e);
-    lv_obj_t *dd = lv_event_get_target(e);
+  user_data_t *data = (user_data_t *)lv_event_get_user_data(e);
+  lv_obj_t *dd = lv_event_get_target(e);
 
-    // get index of selected dropdown item
-    uint8_t id_selected = lv_dropdown_get_selected(dd);
+  // get index of selected dropdown item
+  uint8_t id_selected = lv_dropdown_get_selected(dd);
 
-    // link index to selection
-    switch (id_selected) {
-      case 0:
-        data->set_temp = 5;
-        break;
-      case 1:
-        data->set_temp = 18;
-        break;
-      case 2:
-        data->set_temp = 19;
-        break;
-      case 3:
-        data->set_temp = 20;
-        break;
-      case 4:
-        data->set_temp = 21;
-        break;
-      case 5:
-        data->set_temp = 22;
-        break;
-      default:
-        data->set_temp = 23;
-    }
+  // link index to selection
+  switch (id_selected) {
+    case 0:
+      data->set_temp = 5;
+      break;
+    case 1:
+      data->set_temp = 18;
+      break;
+    case 2:
+      data->set_temp = 19;
+      break;
+    case 3:
+      data->set_temp = 20;
+      break;
+    case 4:
+      data->set_temp = 21;
+      break;
+    case 5:
+      data->set_temp = 22;
+      break;
+    default:
+      data->set_temp = 23;
+  }
 }
 
 // CREATE TEMPERATURE SELECTION DROPDOWN MENU ///////////////////////////////////////
@@ -1089,15 +1089,15 @@ void fault_label_maker(lv_timer_t *timer) {
   uint8_t index = 0;
   char faultMsg[20];
 
-  if (TEMP1 == 999.9f) {
+  if (TEMP1 == 99.9f) {
     faultArr[index] = 1;
     index++;
   }
-  if (TEMP2 == 999.9f) {
+  if (TEMP2 == 99.9f) {
     faultArr[index] = 2;
     index++;
   }
-  if (TEMP4 == 999.9f) {
+  if (TEMP4 == 99.9f) {
     faultArr[index] = 4;
     index++;
   }
@@ -1139,18 +1139,18 @@ void update_temp(user_data_t *data) {
 
   // LIVING ROOM CHECKING EACH SENSOR AND USING SINGLE WORKING SENSOR IF NO AVERAGE TEMPERATURE
   if (data->relay_pin == RELAY2) {
-    if (AVG_TEMP != 999.9f) {
+    if (AVG_TEMP != 99.9f) {
       snprintf(buf, sizeof(buf), "%.1f\u00B0C", AVG_TEMP);
     }
-    else if (TEMP1 != 999.9f) {
+    else if (TEMP1 != 99.9f) {
       snprintf(buf, sizeof(buf), "%.1f\u00B0C", TEMP1);
       sensor_fault = true;
     }
-    else if (TEMP2 != 999.9f) {
+    else if (TEMP2 != 99.9f) {
       snprintf(buf, sizeof(buf), "%.1f\u00B0C", TEMP2);
       sensor_fault = true;
     }
-    else if (TEMP4 != 999.9f) {
+    else if (TEMP4 != 99.9f) {
       snprintf(buf, sizeof(buf), "%.1f\u00B0C", TEMP4);
       sensor_fault = true;
     }
@@ -1174,7 +1174,7 @@ void update_temp(user_data_t *data) {
 
   // CHECK SINGLE SENSOR FOR SHOWER ROOM
   else {
-    if (TEMP3 != 999.9f) {
+    if (TEMP3 != 99.9f) {
       snprintf(buf, sizeof(buf), "%.1f\u00B0C", TEMP3);
     }
     else {
@@ -1216,11 +1216,7 @@ void update_temp(user_data_t *data) {
 
 // CLEAR BMS FLAG CAN MSG EVENT HANDLER ////////////////////////////////////////////////////////////////////
 void clear_bms_flag(lv_event_t *e) {
-  lv_event_code_t code = lv_event_get_code(e);
-
-  if(code == LV_EVENT_CLICKED) {
-    CLEAR_BMS = 0x01;
-  }
+  CLEAR_BMS = 0x01;
   Serial.println("Sending CAN msg to clear BMS flags");
 }
 
@@ -1262,25 +1258,25 @@ void clock_updater(clock_data_t *data) {
   }
 
   // Discharge
-  else if (AVG_AMPS > 0) {
+  else if ( AVG_AMPS > 0 ) {
     strcpy(state, "Discharged in");
     h = AH / AVG_AMPS;
     m = (AH / AVG_AMPS - h) * 60;
   }
 
   // Charge
-  else if (AVG_AMPS < 0) {
+  else if ( AVG_AMPS < 0 ) {
     strcpy(state, "Fully Charged in");
     h = (CAPACITY - AH) / abs(AVG_AMPS);
     m = ((CAPACITY - AH) / abs(AVG_AMPS) - h) * 60;
   }
 
   // Over-run prevention by showing days
-  if (h > 120) {
+  if ( h > 120 ) {
     uint8_t d = h / 24;
     sprintf(t, "%s %d days", state, d);
   }
-  else if (m || h) {
+  else if ( m || h ) {
     // Plural adjustment
     if (h == 1) strcpy(c, "hr");
 
@@ -1318,47 +1314,47 @@ void clock_updater(clock_data_t *data) {
 
 // Function to sign value
 int16_t signValue(uint16_t canValue) {
-    int16_t signedValue = (canValue > 32767) ? canValue - 65536 : canValue;
-    return signedValue;
+  int16_t signedValue = (canValue > 32767) ? canValue - 65536 : canValue;
+  return signedValue;
 }
 
 // Sort CAN bus data
 void sort_can() {
 
-    if (CAN_RX_ID == 0x3B) {
-        VOLT = ((CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1]) / 100.0;
-        AMPS = (signValue((CAN_RX_BUF[2] << 8) + CAN_RX_BUF[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
-        CAPACITY = ((CAN_RX_BUF[4] << 8) + CAN_RX_BUF[5]) / 10.0;
-        SOC = CAN_RX_BUF[6] / 2;
-    }
-    if (CAN_RX_ID == 0x6B2) {
-        LO_CELL_V = ((CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1]) / 100.0;
-        HI_CELL_V = ((CAN_RX_BUF[2] << 8) + CAN_RX_BUF[3]) / 100.0;
-        HEALTH = CAN_RX_BUF[4];
-        CYCLES = (CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6];
-    }
-    if (CAN_RX_ID == 0x0A9) {
-        RELAYS = CAN_RX_BUF[0];
-        CCL = CAN_RX_BUF[1];
-        DCL = CAN_RX_BUF[2];
-        AH = ((CAN_RX_BUF[3] << 8) + CAN_RX_BUF[4]) / 10.0;
-        AVG_AMPS = (signValue((CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
-    }
-    if (CAN_RX_ID == 0x0BD) {
-        BMS_FAULTS = (CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1];
-        HI_TEMP = CAN_RX_BUF[2];
-        LO_TEMP = CAN_RX_BUF[3];
-        CUSTOM_FLAGS = CAN_RX_BUF[4];
-        BMS_STATUS = (CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6];
-    }
-    if (CAN_RX_ID == 0x0BE) {
-        HI_CELL_ID = CAN_RX_BUF[0];
-        LO_CELL_ID = CAN_RX_BUF[1];
-        HEAT_SINK = CAN_RX_BUF[2];
-        MIN_CELL_V = ((CAN_RX_BUF[3] << 8) + CAN_RX_BUF[4]) / 100.0;
-        MAX_CELL_V = ((CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6]) / 100.0;
-    }
-    WATTS = AVG_AMPS * VOLT;
+  if ( CAN_RX_ID == 0x3B ) {
+    VOLT = ((CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1]) / 100.0;
+    AMPS = (signValue((CAN_RX_BUF[2] << 8) + CAN_RX_BUF[3])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
+    CAPACITY = ((CAN_RX_BUF[4] << 8) + CAN_RX_BUF[5]) / 10.0;
+    SOC = CAN_RX_BUF[6] / 2;
+  }
+  if ( CAN_RX_ID == 0x6B2 ) {
+    LO_CELL_V = ((CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1]) / 100.0;
+    HI_CELL_V = ((CAN_RX_BUF[2] << 8) + CAN_RX_BUF[3]) / 100.0;
+    HEALTH = CAN_RX_BUF[4];
+    CYCLES = (CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6];
+  }
+  if ( CAN_RX_ID == 0x0A9 ) {
+    RELAYS = CAN_RX_BUF[0];
+    CCL = CAN_RX_BUF[1];
+    DCL = CAN_RX_BUF[2];
+    AH = ((CAN_RX_BUF[3] << 8) + CAN_RX_BUF[4]) / 10.0;
+    AVG_AMPS = (signValue((CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6])) / 10.0; // orion2jr issue: unsigned value despite ticket as signed
+  }
+  if ( CAN_RX_ID == 0x0BD ) {
+    BMS_FAULTS = (CAN_RX_BUF[0] << 8) + CAN_RX_BUF[1];
+    HI_TEMP = CAN_RX_BUF[2];
+    LO_TEMP = CAN_RX_BUF[3];
+    CUSTOM_FLAGS = CAN_RX_BUF[4];
+    BMS_STATUS = (CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6];
+  }
+  if ( CAN_RX_ID == 0x0BE ) {
+    HI_CELL_ID = CAN_RX_BUF[0];
+    LO_CELL_ID = CAN_RX_BUF[1];
+    HEAT_SINK = CAN_RX_BUF[2];
+    MIN_CELL_V = ((CAN_RX_BUF[3] << 8) + CAN_RX_BUF[4]) / 100.0;
+    MAX_CELL_V = ((CAN_RX_BUF[5] << 8) + CAN_RX_BUF[6]) / 100.0;
+  }
+  WATTS = AVG_AMPS * VOLT;
 }
 
 
@@ -1467,77 +1463,77 @@ void create_status_label(const char* label_text, bms_status_data_t *data, bool f
 // REFRESH BMS STATUS DATA ////////////////////////////////////////////////////////////////////
 void refresh_bms_status_data(bms_status_data_t *data) {
 
-    static bool balancing_label_showing = false; // Controlling the flashing feature
+  static bool balancing_label_showing = false; // Controlling the flashing feature
 
-    int8_t flag_index = -1; // initialise as -1 as this is for indexing array
-    int8_t comparator_index = -1; // controls button visibility for certain messages
+  int8_t flag_index = -1; // initialise as -1 as this is for indexing array
+  int8_t comparator_index = -1; // controls button visibility for certain messages
 
-    // Clear all status labels initially
-    for (uint8_t i = 0; i < (sizeof(data->status_label) / sizeof(data->status_label[0])); i++) {
-      if (data->status_label[i]) {
-        lv_obj_del(data->status_label[i]); // Properly delete label
-        data->status_label[i] = NULL; // Set pointer to NULL
-      }
+  // Clear all status labels initially
+  for (uint8_t i = 0; i < (sizeof(data->status_label) / sizeof(data->status_label[0])); i++) {
+    if (data->status_label[i]) {
+      lv_obj_del(data->status_label[i]); // Properly delete label
+      data->status_label[i] = NULL; // Set pointer to NULL
     }
-    // CRITICAL CAN RX FAILURE - LESS THAN 3 TO AVOID HAVING TX SIGNALS HIDE THIS MESSAGE AS RX DATA IS 8-BYTE LONG
-    if ( canMsgData.len <= 3 ) { create_status_label("Arduino - No BMS CAN data", data); flag_index++; comparator_index++; }
+  }
+  // CRITICAL CAN RX FAILURE - LESS THAN 3 TO AVOID HAVING TX SIGNALS HIDE THIS MESSAGE AS RX DATA IS 8-BYTE LONG
+  if ( canMsgData.len <= 3 ) { create_status_label("Arduino - No BMS CAN data", data); flag_index++; comparator_index++; }
 
-    // BMS flags 2 bytes
-    if ((BMS_FAULTS & 0x0100) == 0x0100) { create_status_label("Internal Hardware Fault", data); flag_index++; }
-    if ((BMS_FAULTS & 0x0200) == 0x0200) { create_status_label("Internal Cell Comm Fault", data); flag_index++; }
-    if ((BMS_FAULTS & 0x0400) == 0x0400) { create_status_label("Weak Cell Fault", data); flag_index++; }
-    if ((BMS_FAULTS & 0x0800) == 0x0800) { create_status_label("Low Cell Voltage", data); flag_index++; }
-    if ((BMS_FAULTS & 0x1000) == 0x1000) { create_status_label("Open Wire Fault", data); flag_index++; }
-    if ((BMS_FAULTS & 0x2000) == 0x2000) { create_status_label("Current Sensor Fault", data); flag_index++; }
-    if ((BMS_FAULTS & 0x4000) == 0x4000) { create_status_label("Abnormal SOC Behavior", data); flag_index++; }
-    if ((BMS_FAULTS & 0x8000) == 0x8000) { create_status_label("Pack Too Hot Fault", data); flag_index++; }
-    if ((BMS_FAULTS & 0x0001) == 0x0001) { create_status_label("Weak Pack Fault", data); flag_index++; }
-    if ((BMS_FAULTS & 0x0002) == 0x0002) { create_status_label("External Thermistor Fault", data); flag_index++; }
-    if ((BMS_FAULTS & 0x0004) == 0x0004) { create_status_label("Charge Relay Failure", data); flag_index++; }
-    if ((BMS_FAULTS & 0x0008) == 0x0008) { create_status_label("Discharge Relay Fault", data); flag_index++; }
-    if ((BMS_FAULTS & 0x0010) == 0x0010) { create_status_label("Safety Relay Fault", data); flag_index++; }
-    if ((BMS_FAULTS & 0x0020) == 0x0020) { create_status_label("CAN communication Fault", data); flag_index++; }
-    if ((BMS_FAULTS & 0x0040) == 0x0040) { create_status_label("Internal Thermistor Fault", data); flag_index++; }
-    if ((BMS_FAULTS & 0x0080) == 0x0080) { create_status_label("Internal Logic Fault", data); flag_index++; }
+  // BMS flags 2 bytes
+  if ( (BMS_FAULTS & 0x0100) == 0x0100 ) { create_status_label("Internal Hardware Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0200) == 0x0200 ) { create_status_label("Internal Cell Comm Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0400) == 0x0400 ) { create_status_label("Weak Cell Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0800) == 0x0800 ) { create_status_label("Low Cell Voltage", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x1000) == 0x1000 ) { create_status_label("Open Wire Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x2000) == 0x2000 ) { create_status_label("Current Sensor Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x4000) == 0x4000 ) { create_status_label("Abnormal SOC Behavior", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x8000) == 0x8000 ) { create_status_label("Pack Too Hot Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0001) == 0x0001 ) { create_status_label("Weak Pack Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0002) == 0x0002 ) { create_status_label("External Thermistor Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0004) == 0x0004 ) { create_status_label("Charge Relay Failure", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0008) == 0x0008 ) { create_status_label("Discharge Relay Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0010) == 0x0010 ) { create_status_label("Safety Relay Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0020) == 0x0020 ) { create_status_label("CAN communication Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0040) == 0x0040 ) { create_status_label("Internal Thermistor Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0080) == 0x0080 ) { create_status_label("Internal Logic Fault", data); flag_index++; }
 
-    // Failsafe status 2 bytes
-    if ((BMS_STATUS & 0x0001) == 0x0001) { create_status_label("Voltage Failsafe", data); flag_index++; }
-    if ((BMS_STATUS & 0x0002) == 0x0002) { create_status_label("Current Failsafe", data); flag_index++; }
-    if ((BMS_STATUS & 0x0004) == 0x0004) { create_status_label("Relay Failsafe", data); flag_index++; }
-    if ((BMS_STATUS & 0x0010) == 0x0010) { create_status_label("Charge Interlock Failsafe", data); flag_index++; }
-    if ((BMS_STATUS & 0x0020) == 0x0020) { create_status_label("Thermistor B-value Table Invalid", data); flag_index++; }
-    if ((BMS_STATUS & 0x0040) == 0x0040) { create_status_label("Input Power Supply Failsafe", data); flag_index++; }
-    if ((BMS_STATUS & 0x0100) == 0x0100) { create_status_label("Relays Opened under Load Failsafe", data); flag_index++; }
-    if ((BMS_STATUS & 0x1000) == 0x1000) { create_status_label("Polarization Model 1 Active", data); flag_index++; }
-    if ((BMS_STATUS & 0x2000) == 0x2000) { create_status_label("Polarization Model 2 Active", data); flag_index++; }
-    if ((BMS_STATUS & 0x8000) == 0x8000) { create_status_label("Charge Mode Activated over CANBUS", data); flag_index++; }
+  // Failsafe status 2 bytes
+  if ( (BMS_STATUS & 0x0001) == 0x0001 ) { create_status_label("Voltage Failsafe", data); flag_index++; }
+  if ( (BMS_STATUS & 0x0002) == 0x0002 ) { create_status_label("Current Failsafe", data); flag_index++; }
+  if ( (BMS_STATUS & 0x0004) == 0x0004 ) { create_status_label("Relay Failsafe", data); flag_index++; }
+  if ( (BMS_STATUS & 0x0010) == 0x0010 ) { create_status_label("Charge Interlock Failsafe", data); flag_index++; }
+  if ( (BMS_STATUS & 0x0020) == 0x0020 ) { create_status_label("Thermistor B-value Table Invalid", data); flag_index++; }
+  if ( (BMS_STATUS & 0x0040) == 0x0040 ) { create_status_label("Input Power Supply Failsafe", data); flag_index++; }
+  if ( (BMS_STATUS & 0x0100) == 0x0100 ) { create_status_label("Relays Opened under Load Failsafe", data); flag_index++; }
+  if ( (BMS_STATUS & 0x1000) == 0x1000 ) { create_status_label("Polarization Model 1 Active", data); flag_index++; }
+  if ( (BMS_STATUS & 0x2000) == 0x2000 ) { create_status_label("Polarization Model 2 Active", data); flag_index++; }
+  if ( (BMS_STATUS & 0x8000) == 0x8000 ) { create_status_label("Charge Mode Activated over CANBUS", data); flag_index++; }
 
-    // Relay status 1 byte ( 2 bytes available includes mpo/mpi and charge statuses )
-    if ((RELAYS & 0x01) != 0x01) { create_status_label("Discharge Relay Opened", data); flag_index++; }
-    // CONTROLLED BY ARDUINO AND DISABLED IN BMS if ((RELAYS & 0x0002) == 0x0000) { create_status_label("Charge Relay Opened", data); flag_index++; }
+  // Relay status 1 byte ( 2 bytes available includes mpo/mpi and charge statuses )
+  if ( (RELAYS & 0x01) != 0x01 ) { create_status_label("Discharge Relay Opened", data); flag_index++; }
+  // CONTROLLED BY ARDUINO AND DISABLED IN BMS if ((RELAYS & 0x0002) == 0x0000) { create_status_label("Charge Relay Opened", data); flag_index++; }
 
-    // Custom status messages
-    if ( TRIP_PV ) { create_status_label(DYNAMIC_LABEL, data); flag_index++; comparator_index++;}
-    if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Arduino - Discharge Disabled", data); flag_index++; comparator_index++;} // If Inverter DCL CHECK triggered
+  // Custom status messages
+  if ( TRIP_PV ) { create_status_label(DYNAMIC_LABEL, data); flag_index++; comparator_index++;}
+  if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Arduino - Discharge Disabled", data); flag_index++; comparator_index++;} // If Inverter DCL CHECK triggered
 
-    // Cell balancing check at end ensures higher importance messages appear above
-    if (BLCG_ACTIVE) {
-      if ( balancing_label_showing ) {
-        create_status_label("", data); // create blank label
-        balancing_label_showing = false;
-      }
-      else {
-        create_status_label("Cell Balancing Active", data);
-        balancing_label_showing = true;
-      }
-
-      flag_index++;
-      comparator_index++;
+  // Cell balancing check at end ensures higher importance messages appear above
+  if ( BLCG_ACTIVE ) {
+    if ( balancing_label_showing ) {
+      create_status_label("", data); // create blank label
+      balancing_label_showing = false;
     }
+    else {
+      create_status_label("Cell Balancing Active", data);
+      balancing_label_showing = true;
+    }
+
+    flag_index++;
+    comparator_index++;
+  }
 
   // Show title and button
   if ( flag_index > -1 ) {
- 
+
     // SHOW TITLE
     if ( lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(data->title_label, LV_OBJ_FLAG_HIDDEN);
