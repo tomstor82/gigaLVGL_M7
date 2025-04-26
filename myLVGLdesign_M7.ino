@@ -858,7 +858,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
     if ( data->relay_pin == RELAY1 ) {
       lv_label_set_text(data->label_obj, "OFF");
 
-      // TURN OFF BUTTONS THAT ARE ON
+      // TURN OFF THE 3 BUTTONS THAT MAY BE ON
       for ( uint8_t i = 0; i < 3; i++ ) {
         if ( userData[i].on == true ) {
           button_off(&userData[i]);
@@ -2050,23 +2050,23 @@ void loop() {
   // 2s INVERTER DELAY AFTER MPPT DISABLED WITH 20s PAUSE BEFORE SENDING RE-ENABLE SIGNAL
   if (inverter_delay) {
     static uint32_t time_ms = 0;
-    static bool pin_high = false; // prevents inverter from being turned on over and over for 20s
+    static bool inverter_on = false; // prevents inverter from being turned on over and over for 20s
 
     if (time_ms == 0) {
       time_ms = millis();
     }
 
-    // WAIT 20s BEFORE SENDING MPPT RESTART SIGNAL AS SUNRISE_DETECTOR IS DISABLED WITH INVERTER ON
-    else if ( (millis() - time_ms) > 20000 && pin_high ) {
+    // WAIT 20s BEFORE SENDING MPPT RESTART SIGNAL AS SUNRISE_DETECTOR IS DISABLED WITH INVERTER ON OR IF INVERTER HAS BEEN SWITCH OFF
+    else if ( millis() - time_ms > 20000 && (inverter_on || userData[3].on == false) ) {
       TRIP_PV = 0x00;
       time_ms = 0;
-      pin_high = false; // reset for next start delay
+      inverter_on = false; // reset for next start delay
       inverter_delay = false; // stop this function executing
     }
     // ALLOW MPPT 2s TO LOOSE POWER TO AVOID POWER SURGE BEFORE STARTING INVERTER
-    else if ( (millis() - time_ms) > 2000 && ! pin_high ) {
+    else if ( (millis() - time_ms) > 2000 && inverter_on == false && userData[3].on ) {
       digitalWrite(userData[3].relay_pin, HIGH);
-      pin_high = true;
+      inverter_on = true;
     }
   }
 
