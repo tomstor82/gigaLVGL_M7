@@ -231,7 +231,7 @@ static String buffer = "";
 //************************************************************************************************************
 //  BUG#1:  DCL TRIPPED INVERTER WITHOUT WARNING AND BUTTON STILL ON?!
 //  BUG#2:  SOLAR OFF - INVERTER STARTING REMAINS ON WITH PV TRIPPED AFTER SUCCESSFUL START - MPPT DELAY TIMING ISSUE
-//  BUG#3:  INVERTER DOES NOT START IF SOLAR IS NOT DETECTED BUT MPPT IS STRUGGLING
+//  BUG#3:  DELAY MPPT DELAYER FUNCTION START AFTER INVERTER IS TURNED OFF FOR 20s
 //  BUG#4:  THERMOSTAT RELAY DOES NOT OPEN IF INVERTER IS TURNED OFF
 //************************************************************************************************************
 
@@ -1854,7 +1854,7 @@ void combined_1s_updater(lv_timer_t *timer) {
   ccl_check();
   clock_updater(&clockData);
   charge_icons_updater(&dataDisplay);
-  if (userData[3].on == false) {
+  if (userData[3].on == false && inverter_delay == false) {
     sunrise_detector();
   }
   for (uint8_t i = 0; i < 4; i++) {
