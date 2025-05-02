@@ -214,7 +214,6 @@ static CombinedData combinedData;
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size) int/float = 4 bytes
 int16_t inverter_prestart_p = 0; // must be signed
-const uint8_t inverter_standby_p = 80; // takes around 4 minutes to settle down after start (75W from documentation)
 uint8_t pwr_demand = 0;
 bool inverter_delay = false;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
@@ -228,12 +227,7 @@ const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 // for M4 messages
 static String buffer = "";
 
-//************************************************************************************************************
-//  BUG#1:  DCL TRIPPED INVERTER WITHOUT WARNING AND BUTTON STILL ON?!
-//  BUG#2:  SOLAR OFF - INVERTER STARTING REMAINS ON WITH PV TRIPPED AFTER SUCCESSFUL START - MPPT DELAY TIMING ISSUE
-//  BUG#3:  DELAY MPPT DELAYER FUNCTION START AFTER INVERTER IS TURNED OFF FOR 20s
-//  BUG#4:  THERMOSTAT RELAY DOES NOT OPEN IF INVERTER IS TURNED OFF
-//************************************************************************************************************
+
 
 // CREATE BUTTONS /// TWO TIMERS CREATED HERE: TEMP UPDATER AND DCL CHECK
 void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms, user_data_t *data) {
@@ -714,10 +708,9 @@ void power_check(lv_timer_t *timer) {
       on = true;
     }
 
-    // Remain ON if discharge exceeds inverter standby - considering prestart_p and canData.p are signed it should cover most charge/discharge scenarios
-    else if ( (inverter_standby_p + inverter_prestart_p) < abs(WATTS) ) {
+    // Remain ON if discharge is outside goldilocks 80-100W (inverter standby) and solar available // Remain ON if discharge exceeds inverter standby - considering prestart_p and canData.p are signed it should cover most charge/discharge scenarios
+    else if ( (WATTS < 80 || WATTS > 100) && CHG_ENABLED ) { //(inverter_standby_p + inverter_prestart_p) < abs(WATTS) ) {
       on = true;
-      //Serial.println("DEBUG power check inverter load sustained, keep alive mode");
     }
   }
   
