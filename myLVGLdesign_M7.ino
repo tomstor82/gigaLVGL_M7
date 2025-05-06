@@ -213,7 +213,7 @@ static CombinedData combinedData;
 #define CCL_ENFORCED    bmsStatusData.ccl_enforced
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size) int/float = 4 bytes
-int16_t inverter_prestart_p = 0; // must be signed
+//int16_t inverter_prestart_p = 0; // must be signed
 uint8_t pwr_demand = 0;
 bool inverter_delay = false;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
@@ -790,7 +790,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
 
     // INVERTER
     if ( data->relay_pin == RELAY1 ) {
-      inverter_prestart_p = WATTS;
+      //inverter_prestart_p = WATTS;
       // TURN OFF MPPT IF NO CHARGE AS SOMETIMES MPPT CAUSES ISSUE DESPITE NO SOLAR DETECTED. THIS IS TO AVOID START-UP POWER SURGE
       if ( WATTS >= 0 ) { //&& CHG_ENABLED ) {
         TRIP_PV = 0x01;
@@ -858,7 +858,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
         }
       }
       pwr_demand = 0;
-      inverter_prestart_p = 0;
+      //inverter_prestart_p = 0;
     }
 
     // HOT WATER
