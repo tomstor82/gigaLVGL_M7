@@ -674,6 +674,18 @@ void close_sensor_msgbox_event_handler(lv_event_t *e) {
 
 
 
+// TRIP PV ////////////////////////////////////////////////////////////////////////////////
+void trip_pv(user_data_t* data) {
+  if ( WATTS >= 0 ) {
+    TRIP_PV = 0x01;
+    strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter starting");
+    inverter_delay = true;
+  }
+  lv_label_set_text(data->label_obj, "Inverter ON");
+}
+
+
+
 
 
 
@@ -709,7 +721,7 @@ void power_check(lv_timer_t *timer) {
     }
 
     // Remain ON if discharge is outside goldilocks 80-100W (inverter standby) and solar available // Remain ON if discharge exceeds inverter standby - considering prestart_p and canData.p are signed it should cover most charge/discharge scenarios
-    else if ( (WATTS < 80 || WATTS > 100) && CHG_ENABLED ) { //(inverter_standby_p + inverter_prestart_p) < abs(WATTS) ) {
+    else if ( (WATTS < 80 || WATTS > 100) || (CHG_ENABLED && WATTS < 100) ) { //(inverter_standby_p + inverter_prestart_p) < abs(WATTS) ) {
       on = true;
     }
   }
@@ -751,20 +763,26 @@ void power_check(lv_timer_t *timer) {
       digitalWrite(data->relay_pin, LOW);
       pre_sleep_delay = false;
     }
+    // INCREMENT MINUTE COUNTER
     else if ( (millis() - time_ms) > ((1 + minute_count) * 60 * 1000) && minute_count < off_interval_min && ! pre_sleep_delay ) {
       minute_count++;
       if ( minute_count == 2 ) {
         strcpy(plural, "");
       }
     }
+    // TRIP PV RELAY 2s BEFORE STARTING INVERTER
+    else if ( (millis() - time_ms) > (off_interval_min * 60 * 1000 - 2000) && data->on ) {
+      trip_pv(data);
+      data->on = false; // to enable inverter startup check
+    }
     else if ( (minute_count + 1) == off_interval_min && ! pre_sleep_delay ) {
       minute_count = 0;
       time_ms = 0;
-      data->on = false; // to enable inverter startup check
       lv_event_send(data->button, LV_EVENT_CLICKED, NULL);
       return; // to prevent label being written once finished
     }
 
+    // PRINT THE INCREMENTED MINUTES IN DECREMENTS
     if ( ! pre_sleep_delay ) {
       snprintf(label, sizeof(label), "OFF - NO LOAD\nON in %d minute%s", (off_interval_min - minute_count), plural);
       lv_label_set_text(data->label_obj, label);
@@ -785,19 +803,13 @@ void power_check(lv_timer_t *timer) {
 void hot_water_inverter_event_handler(lv_event_t *e) {
   user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
 
-  // BUTTON ON IF IT WAS OFF FOR AT LEAST MINIMUM PRESS INTERVAL
+  // IF BUTTON IS ON
   if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
 
     // INVERTER
     if ( data->relay_pin == RELAY1 ) {
-      //inverter_prestart_p = WATTS;
       // TURN OFF MPPT IF NO CHARGE AS SOMETIMES MPPT CAUSES ISSUE DESPITE NO SOLAR DETECTED. THIS IS TO AVOID START-UP POWER SURGE
-      if ( WATTS >= 0 ) { //&& CHG_ENABLED ) {
-        TRIP_PV = 0x01;
-        strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter starting");
-        inverter_delay = true;
-      }
-      lv_label_set_text(data->label_obj, "Inverter ON");
+      trip_pv(data);
     }
 
     // HOT WATER - TRY TO START INVERTER IF OFF
