@@ -213,9 +213,9 @@ static CombinedData combinedData;
 #define CCL_ENFORCED    bmsStatusData.ccl_enforced
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size) int/float = 4 bytes
-//int16_t inverter_prestart_p = 0; // must be signed
 uint8_t pwr_demand = 0;
 bool inverter_delay = false;
+bool eco_mode = false;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
 const uint16_t inverter_startup_delay_ms = 25000; // 25s startup required before comparing current flow for soft start appliances
 const uint8_t off_interval_min = 3; // 3 minute off interval reduces standby consumption from 85Wh to around 12,5Wh -84%
@@ -226,8 +226,6 @@ const uint16_t touch_timeout_ms = 30000; // 30s before screen dimming
 
 // for M4 messages
 static String buffer = "";
-
-
 
 // CREATE BUTTONS /// TWO TIMERS CREATED HERE: TEMP UPDATER AND DCL CHECK
 void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms, user_data_t *data) {
@@ -284,8 +282,8 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     // INVERTER LABEL
     if ( relay_pin == RELAY1 ) {
       data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
-      lv_obj_set_width(data->label_obj, 120);
-      lv_obj_align_to(data->label_obj, data->button, LV_ALIGN_OUT_RIGHT_MID, 80, 0);
+      lv_obj_set_width(data->label_obj, 300);
+      lv_obj_align_to(data->label_obj, data->button, LV_ALIGN_OUT_BOTTOM_MID, 115, 12);
 
       // INITIALISE LABEL TEXT
       lv_label_set_text(data->label_obj, "OFF");
@@ -355,7 +353,7 @@ void sunrise_detector() {
     }
 
     // IF MPPT DRAINS BATTERY WHILST INVERTER IS OFF AND PV HAS BEEN ENABLED FOR AT LEAST 30s
-    else if ( WATTS > 30 && (millis() - time_ms) > 30000 ) { // OVER 30 WATTS TO AVOID LIGHTS TRIPPING PV
+    else if ( WATTS > 20 && (millis() - time_ms) > 30000 ) { // OVER 30 WATTS TO AVOID LIGHTS TRIPPING PV
       mppt_delay = true;
       strcpy(DYNAMIC_LABEL, "Solar OFF - MPPT drain");
     }
@@ -674,18 +672,6 @@ void close_sensor_msgbox_event_handler(lv_event_t *e) {
 
 
 
-// TRIP PV ////////////////////////////////////////////////////////////////////////////////
-void trip_pv(user_data_t* data) {
-  if ( WATTS >= 0 ) {
-    TRIP_PV = 0x01;
-    strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter starting");
-    inverter_delay = true;
-  }
-  lv_label_set_text(data->label_obj, "Inverter ON");
-}
-
-
-
 
 
 
@@ -720,9 +706,10 @@ void power_check(lv_timer_t *timer) {
       on = true;
     }
 
-    // Remain ON if discharge is outside goldilocks 80-100W (inverter standby) and solar available // Remain ON if discharge exceeds inverter standby - considering prestart_p and canData.p are signed it should cover most charge/discharge scenarios
-    else if ( (WATTS < 80 || WATTS > 100) || (CHG_ENABLED && WATTS < 100) ) { //(inverter_standby_p + inverter_prestart_p) < abs(WATTS) ) {
+    // Remain ON if discharge exceeds inverter standby - considering prestart_p and canData.p are signed it should cover most charge/discharge scenarios
+    else if ( WATTS > 100 || WATTS < 80 || !eco_mode ) {
       on = true;
+      //Serial.println("DEBUG power check inverter load sustained, keep alive mode");
     }
   }
   
@@ -763,26 +750,20 @@ void power_check(lv_timer_t *timer) {
       digitalWrite(data->relay_pin, LOW);
       pre_sleep_delay = false;
     }
-    // INCREMENT MINUTE COUNTER
     else if ( (millis() - time_ms) > ((1 + minute_count) * 60 * 1000) && minute_count < off_interval_min && ! pre_sleep_delay ) {
       minute_count++;
       if ( minute_count == 2 ) {
         strcpy(plural, "");
       }
     }
-    // TRIP PV RELAY 2s BEFORE STARTING INVERTER
-    else if ( (millis() - time_ms) > (off_interval_min * 60 * 1000 - 2000) && data->on ) {
-      trip_pv(data);
-      data->on = false; // to enable inverter startup check
-    }
     else if ( (minute_count + 1) == off_interval_min && ! pre_sleep_delay ) {
       minute_count = 0;
       time_ms = 0;
+      data->on = false; // to enable inverter startup check
       lv_event_send(data->button, LV_EVENT_CLICKED, NULL);
       return; // to prevent label being written once finished
     }
 
-    // PRINT THE INCREMENTED MINUTES IN DECREMENTS
     if ( ! pre_sleep_delay ) {
       snprintf(label, sizeof(label), "OFF - NO LOAD\nON in %d minute%s", (off_interval_min - minute_count), plural);
       lv_label_set_text(data->label_obj, label);
@@ -803,13 +784,18 @@ void power_check(lv_timer_t *timer) {
 void hot_water_inverter_event_handler(lv_event_t *e) {
   user_data_t * data = (user_data_t *)lv_event_get_user_data(e);
 
-  // IF BUTTON IS ON
+  // BUTTON ON IF IT WAS OFF FOR AT LEAST MINIMUM PRESS INTERVAL
   if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
 
     // INVERTER
     if ( data->relay_pin == RELAY1 ) {
       // TURN OFF MPPT IF NO CHARGE AS SOMETIMES MPPT CAUSES ISSUE DESPITE NO SOLAR DETECTED. THIS IS TO AVOID START-UP POWER SURGE
-      trip_pv(data);
+      if ( WATTS >= 0 ) { //&& CHG_ENABLED ) {
+        TRIP_PV = 0x01;
+        strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter starting");
+        inverter_delay = true;
+      }
+      lv_label_set_text(data->label_obj, "Inverter ON");
     }
 
     // HOT WATER - TRY TO START INVERTER IF OFF
@@ -870,7 +856,6 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
         }
       }
       pwr_demand = 0;
-      //inverter_prestart_p = 0;
     }
 
     // HOT WATER
@@ -1889,7 +1874,15 @@ void combined_10s_updater(lv_timer_t *timer) {
 
 
 
-
+void eco_switch_event_handler(lv_event_t* e) {
+  lv_event_code_t code = lv_event_get_code(e);
+  if ( code == LV_STATE_CHECKED ) {
+    eco_mode = true;
+  }
+  else {
+    eco_mode = false;
+  }
+}
 
 
 
@@ -1966,13 +1959,21 @@ void setup() {
   create_button(cont, "Ceiling Heater", RELAY2, 20, 70, 0, &userData[0]); // dcl for test max 255 uint8_t
 
   // Create Button 2 - SHOWER HEATER
-  create_button(cont, "Shower Heater",  RELAY4, 120, 10, 0, &userData[1]);
+  create_button(cont, "Shower Heater",  RELAY4, 115, 10, 0, &userData[1]);
 
   // Create Button 3 - HOT WATER
-  create_button(cont, "Hot Water",      RELAY3, 220, 60, hot_water_interval_ms, &userData[2]);
+  create_button(cont, "Hot Water",      RELAY3, 210, 60, hot_water_interval_ms, &userData[2]);
 
   // Create Button 4 - INVERTER
-  create_button(cont, "Inverter",       RELAY1, 320, 5, inverter_startup_delay_ms, &userData[3]);
+  create_button(cont, "Inverter",       RELAY1, 305, 5, inverter_startup_delay_ms, &userData[3]);
+
+  // Create Switch - Eco Mode
+  lv_obj_t* eco_switch = lv_switch_create(cont);
+  lv_obj_t* eco_switch_label = lv_label_create(cont);
+  lv_label_set_text(eco_switch_label, "ECO mode");
+  lv_obj_align(eco_switch_label, LV_ALIGN_RIGHT_MID, -15, 95);
+  lv_obj_align(eco_switch, LV_ALIGN_BOTTOM_RIGHT, -25, -45);
+  lv_obj_add_event_cb(eco_switch, eco_switch_event_handler, LV_EVENT_CLICKED, NULL);
 
 }
 
