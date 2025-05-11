@@ -284,6 +284,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
       data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
       lv_obj_set_width(data->label_obj, 300);
       lv_obj_align_to(data->label_obj, data->button, LV_ALIGN_OUT_BOTTOM_MID, 115, 12);
+      lv_obj_set_style_text_align(data->label_obj, LV_TEXT_ALIGN_LEFT, 0);
 
       // INITIALISE LABEL TEXT
       lv_label_set_text(data->label_obj, "OFF");
@@ -666,7 +667,11 @@ void close_sensor_msgbox_event_handler(lv_event_t *e) {
 
 
 
-
+void inverter_start() {
+  TRIP_PV = 0x01;
+  strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter starting");
+  inverter_delay = true;
+}
 
 
 
@@ -727,7 +732,8 @@ void power_check(lv_timer_t *timer) {
         time_ms = 0;
       }
       else { // INVERTER IN SLEEP MODE - WAKE-UP
-        digitalWrite(data->relay_pin, HIGH);
+        inverter_start();
+        //digitalWrite(data->relay_pin, HIGH);
         lv_label_set_text(data->label_obj, "ON");
         time_ms = 0; // RESET SLEEP TIMER
       }
@@ -791,9 +797,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
     if ( data->relay_pin == RELAY1 ) {
       // TURN OFF MPPT IF NO CHARGE AS SOMETIMES MPPT CAUSES ISSUE DESPITE NO SOLAR DETECTED. THIS IS TO AVOID START-UP POWER SURGE
       if ( WATTS >= 0 ) { //&& CHG_ENABLED ) {
-        TRIP_PV = 0x01;
-        strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter starting");
-        inverter_delay = true;
+        inverter_start();
       }
       lv_label_set_text(data->label_obj, "Inverter ON");
     }
@@ -1969,12 +1973,13 @@ void setup() {
 
   // Create Switch - Eco Mode
   lv_obj_t* eco_switch = lv_switch_create(cont);
+  lv_obj_align(eco_switch, LV_ALIGN_BOTTOM_RIGHT, -25, -45);
+  lv_obj_set_style_bg_color(eco_switch, lv_color_hex(0x555555), LV_PART_MAIN);
+  lv_obj_add_event_cb(eco_switch, eco_switch_event_handler, LV_EVENT_CLICKED, NULL);
+
   lv_obj_t* eco_switch_label = lv_label_create(cont);
   lv_label_set_text(eco_switch_label, "ECO mode");
   lv_obj_align(eco_switch_label, LV_ALIGN_RIGHT_MID, -15, 95);
-  lv_obj_align(eco_switch, LV_ALIGN_BOTTOM_RIGHT, -25, -45);
-  lv_obj_add_event_cb(eco_switch, eco_switch_event_handler, LV_EVENT_CLICKED, NULL);
-
 }
 
 // LOOP ///////////////////////////////////////////////////////////////////////////////////
