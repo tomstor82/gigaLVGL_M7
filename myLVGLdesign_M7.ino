@@ -18,10 +18,11 @@ GigaDisplayBacklight backlight;
 #define RELAY3 12   // water heater
 #define RELAY4 13   // shower room
 
-// ADDING 4-BIT FONTS WITH ONLY NEEDED CHARACTERS FROM MONTSERRAT 34 & 20 AND FONTAWESOME_SVG_SOLID 20 (https://lvgl.io/tools/fontconverter)
+// ADDING 4-BIT FONTS WITH ONLY NEEDED CHARACTERS FROM MONTSERRAT 34 & 20 AND FONTAWESOME_SVG_SOLID 20 & 34 (https://lvgl.io/tools/fontconverter)
 LV_FONT_DECLARE(Montserrat34_0_9_percent);
 LV_FONT_DECLARE(Montserrat20_0_9_W_minus);
-LV_FONT_DECLARE(FontAwesomeIcons); // 0xF185, 0xF1E6, 0xF0E7, 0xF5DF = sun, two-pin, lightening and car battery
+LV_FONT_DECLARE(FontAwesomeSolid20_icons); // 0xF185, 0xF1E6, 0xF0E7, 0xF5DF  = sun, two-pin, lightening and car battery
+LV_FONT_DECLARE(FontAwesomeSolid34_leaf); // 0xF06C
 
 
 //  CANBUS data Identifier List
@@ -282,9 +283,8 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     // INVERTER LABEL
     if ( relay_pin == RELAY1 ) {
       data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
-      lv_obj_set_width(data->label_obj, 300);
-      lv_obj_align_to(data->label_obj, data->button, LV_ALIGN_OUT_BOTTOM_MID, 115, 12);
-      lv_obj_set_style_text_align(data->label_obj, LV_TEXT_ALIGN_LEFT, 0);
+      //lv_obj_set_width(data->label_obj, 300);
+      lv_obj_align_to(data->label_obj, data->button, LV_ALIGN_OUT_BOTTOM_MID, -15, 12);
 
       // INITIALISE LABEL TEXT
       lv_label_set_text(data->label_obj, "OFF");
@@ -553,7 +553,7 @@ void can_msgbox_update_timer(msgbox_data_t *data) {
   lv_label_set_text(label, set_can_msgbox_text()); // Update the text object in the msgBox
 }
 
-void can_msgbox(lv_event_t *e) {
+void can_msgbox(lv_event_t* e) {
   lv_event_code_t code = lv_event_get_code(e);
   msgbox_data_t *data = (msgbox_data_t*)lv_event_get_user_data(e);
   lv_obj_t *parent = lv_obj_get_parent(dataDisplay.soc_label);
@@ -695,8 +695,8 @@ void power_check(lv_timer_t *timer) {
   static uint32_t time_ms = 0;
   static uint8_t minute_count = 0;
   static bool pre_sleep_delay = false;
-  char plural[2] = "s";
-  char label[30];
+  //char plural[2] = "s";
+  char label[13];
 
   // INVERTER CHECK
   if ( data->relay_pin == RELAY1 ) {
@@ -758,9 +758,9 @@ void power_check(lv_timer_t *timer) {
     }
     else if ( (millis() - time_ms) > ((1 + minute_count) * 60 * 1000) && minute_count < off_interval_min && ! pre_sleep_delay ) {
       minute_count++;
-      if ( minute_count == 2 ) {
+      /*if ( minute_count == 2 ) {
         strcpy(plural, "");
-      }
+      }*/
     }
     else if ( (minute_count + 1) == off_interval_min && ! pre_sleep_delay ) {
       minute_count = 0;
@@ -771,7 +771,7 @@ void power_check(lv_timer_t *timer) {
     }
 
     if ( ! pre_sleep_delay ) {
-      snprintf(label, sizeof(label), "OFF - NO LOAD\nON in %d minute%s", (off_interval_min - minute_count), plural);
+      snprintf(label, sizeof(label), "ECO %dmin OFF", off_interval_min - minute_count);
       lv_label_set_text(data->label_obj, label);
     }
     return;
@@ -1815,11 +1815,11 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
     lv_obj_set_style_text_font(data->watt_label, &Montserrat20_0_9_W_minus, NULL);
 
   data->charge_icon = lv_label_create(parent);
-    lv_obj_set_style_text_font(data->charge_icon, &FontAwesomeIcons, NULL);
+    lv_obj_set_style_text_font(data->charge_icon, &FontAwesomeSolid20_icons, NULL);
     lv_obj_set_style_text_color(data->charge_icon, lv_palette_main(LV_PALETTE_YELLOW), NULL);
 
   data->car_battery_icon = lv_label_create(parent);
-    lv_obj_set_style_text_font(data->car_battery_icon, &FontAwesomeIcons, NULL);
+    lv_obj_set_style_text_font(data->car_battery_icon, &FontAwesomeSolid20_icons, NULL);
     lv_label_set_text(data->car_battery_icon, "\uF5DF");
 
   // ALLIGN LABELS, EXCEPT WATTS AND AMPS WHICH SHIFT X-POS WITH READINGS
@@ -1878,13 +1878,18 @@ void combined_10s_updater(lv_timer_t *timer) {
 
 
 
-void eco_switch_event_handler(lv_event_t* e) {
+void leaf_icon_event_handler(lv_event_t* e) {
   lv_event_code_t code = lv_event_get_code(e);
-  if ( code == LV_STATE_CHECKED ) {
-    eco_mode = true;
-  }
-  else {
-    eco_mode = false;
+  lv_obj_t* obj = lv_event_get_target(e);
+  if (code == LV_EVENT_CLICKED) {
+    if ( !eco_mode ) {
+      eco_mode = true;
+      lv_obj_set_style_text_color(obj, lv_color_hex(0x1cda70), NULL);
+    }
+    else {
+      eco_mode = false;
+      lv_obj_set_style_text_color(obj, lv_color_hex(0x555555), NULL);
+    }
   }
 }
 
@@ -1971,15 +1976,19 @@ void setup() {
   // Create Button 4 - INVERTER
   create_button(cont, "Inverter",       RELAY1, 305, 5, inverter_startup_delay_ms, &userData[3]);
 
-  // Create Switch - Eco Mode
-  lv_obj_t* eco_switch = lv_switch_create(cont);
-  lv_obj_align(eco_switch, LV_ALIGN_BOTTOM_RIGHT, -25, -45);
-  lv_obj_set_style_bg_color(eco_switch, lv_color_hex(0x555555), LV_PART_MAIN);
-  lv_obj_add_event_cb(eco_switch, eco_switch_event_handler, LV_EVENT_CLICKED, NULL);
+  // Create Leaf Icon for Inverter Eco Mode
+  lv_obj_t* leaf_icon = lv_label_create(cont);
+    lv_obj_set_style_text_font(leaf_icon, &FontAwesomeSolid34_leaf, NULL);
+    lv_label_set_text(leaf_icon, "\uF06C");
+    lv_obj_set_style_text_color(leaf_icon, lv_color_hex(0x555555), NULL);
+    lv_obj_align(leaf_icon, LV_ALIGN_BOTTOM_RIGHT, -40, -40);
+    lv_obj_add_flag(leaf_icon, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(leaf_icon, leaf_icon_event_handler, LV_EVENT_CLICKED, NULL);
 
-  lv_obj_t* eco_switch_label = lv_label_create(cont);
-  lv_label_set_text(eco_switch_label, "ECO mode");
-  lv_obj_align(eco_switch_label, LV_ALIGN_RIGHT_MID, -15, 95);
+  // Create Leaf Icon label
+  lv_obj_t* leaf_label = lv_label_create(cont);
+    lv_label_set_text(leaf_label, "ECO mode");
+    lv_obj_align(leaf_label, LV_ALIGN_BOTTOM_RIGHT, -22, -15);
 }
 
 // LOOP ///////////////////////////////////////////////////////////////////////////////////
