@@ -214,7 +214,7 @@ static CombinedData combinedData;
 #define CCL_ENFORCED    bmsStatusData.ccl_enforced
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size) int/float = 4 bytes
-uint8_t pwr_demand = 0;
+//uint8_t pwr_demand = 0;
 bool inverter_delay = false;
 bool eco_mode = false;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
@@ -283,11 +283,9 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     // INVERTER LABEL
     if ( relay_pin == RELAY1 ) {
       data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
-      //lv_obj_set_width(data->label_obj, 300);
-      lv_obj_align_to(data->label_obj, data->button, LV_ALIGN_OUT_BOTTOM_MID, -15, 12);
 
       // INITIALISE LABEL TEXT
-      lv_label_set_text(data->label_obj, "OFF");
+      update_inverter_label(0, data);
     }
   }
 }
@@ -299,8 +297,21 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 
 
 
-
-
+// UPDATE INVERTER LABEL //////////////////////////////////////////////////////////////////////////////////
+void update_inverter_label(bool state, user_data_t* data) {
+  char label_text[11];
+  byte x_pos = 0;
+  if (state) {
+    strcpy(label_text, "Inverter ON");
+    x_pos = 15;
+  }
+  else {
+    strcpy(label_text, "OFF");
+    x_pos = 41;
+  }
+  lv_label_set_text(data->label_obj, label_text);
+  lv_obj_set_pos(data->label_obj, x_pos, 355);
+}
 
 
 
@@ -467,7 +478,7 @@ void dcl_check(user_data_t *data) {
       lv_obj_clear_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN);
     }
     // SET INVERTER STATUS LABEL TEXT
-    lv_label_set_text(userData[3].label_obj, "OFF");
+    update_inverter_label(0, &userData[3]);
     start_time = millis();
   }
   // INDIVIDUAL BUTTON LIMITS IF NOT ALREADY DISABLED
@@ -481,7 +492,7 @@ void dcl_check(user_data_t *data) {
       button_off(data);
       // UPDATE INVERTER STATUS LABEL
       if ( data->relay_pin == RELAY1 ) {
-        lv_label_set_text(data->label_obj, "OFF");
+        update_inverter_label(0, data);
       }
     }
     // DISABLE BUTTON - TEST PERFORMED IN ELSE IF CONDITION
@@ -696,25 +707,26 @@ void power_check(lv_timer_t *timer) {
   static uint8_t minute_count = 0;
   static bool pre_sleep_delay = false;
   //char plural[2] = "s";
-  char label[13];
+  char label[14];
 
   // INVERTER CHECK
-  if ( data->relay_pin == RELAY1 ) {
+  if ( data->relay_pin == RELAY1) {
 
-    // Remain ON if charging when SOC above 50%
-    if ( AVG_AMPS < -5 && SOC > 50 ) {
-      on = true;
+    // CONDITIONS APPLY IF IN ECO MODE
+    if ( eco_mode ) {
+      // ON if charging when SOC above 50%
+      if ( AVG_AMPS < -5 && SOC > 50 ) {
+        on = true;
+      }
+
+      // ON if outside the inverter standby range
+      else if ( !time_ms && WATTS > 100 && WATTS < 80 ) {
+        on = true;
+      }
     }
-
-    // Remain ON if demand variable set
-    else if ( pwr_demand ) {
+    // ON IF NOT IN ECO MODE
+    else {
       on = true;
-    }
-
-    // Remain ON if discharge exceeds inverter standby - considering prestart_p and canData.p are signed it should cover most charge/discharge scenarios
-    else if ( WATTS > 100 || WATTS < 80 || !eco_mode ) {
-      on = true;
-      //Serial.println("DEBUG power check inverter load sustained, keep alive mode");
     }
   }
   
@@ -733,8 +745,7 @@ void power_check(lv_timer_t *timer) {
       }
       else { // INVERTER IN SLEEP MODE - WAKE-UP
         inverter_start();
-        //digitalWrite(data->relay_pin, HIGH);
-        lv_label_set_text(data->label_obj, "ON");
+        update_inverter_label(1, data);
         time_ms = 0; // RESET SLEEP TIMER
       }
     }
@@ -771,8 +782,9 @@ void power_check(lv_timer_t *timer) {
     }
 
     if ( ! pre_sleep_delay ) {
-      snprintf(label, sizeof(label), "ECO %dmin OFF", off_interval_min - minute_count);
+      snprintf(label, sizeof(label), "ECO %d min OFF", off_interval_min - minute_count);
       lv_label_set_text(data->label_obj, label);
+      lv_obj_set_pos(data->label_obj, 4, 355);
     }
     return;
   }
@@ -780,7 +792,7 @@ void power_check(lv_timer_t *timer) {
   // HOT WATER OFF
   else {
     button_off(data);
-    pwr_demand--;
+    //pwr_demand--;
     lv_timer_del(data->timer);
     data->timer = NULL;
   }
@@ -799,7 +811,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
       if ( WATTS >= 0 ) { //&& CHG_ENABLED ) {
         inverter_start();
       }
-      lv_label_set_text(data->label_obj, "Inverter ON");
+      update_inverter_label(1, data);
     }
 
     // HOT WATER - TRY TO START INVERTER IF OFF
@@ -814,12 +826,12 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
         return; // exit function if inverter doesn't start
       }
       // IF INVERTER STARTED SUCCESSFULLY INCREMENT PWR_DEMAND
-      else pwr_demand++;
+      //else pwr_demand++;
     }
-    // WITH INVERTER ALREADY ON, ONLY INCREMENT PWR_DEMAND
+    /*// WITH INVERTER ALREADY ON, ONLY INCREMENT PWR_DEMAND
     else {
       pwr_demand++; // only for hot water
-    }
+    }*/
 
     // TURN ON RELAY UNLESS MPPT DELAYER IS RUNNING
     if ( ! inverter_delay || data->relay_pin == RELAY3 ) {
@@ -851,7 +863,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
 
     // INVERTER MANIPULATES BUTTONS THAT ARE ON
     if ( data->relay_pin == RELAY1 ) {
-      lv_label_set_text(data->label_obj, "OFF");
+      update_inverter_label(0, data);
 
       // TURN OFF THE 3 BUTTONS THAT MAY BE ON
       for ( uint8_t i = 0; i < 3; i++ ) {
@@ -859,12 +871,12 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
           button_off(&userData[i]);
         }
       }
-      pwr_demand = 0;
+      //pwr_demand = 0;
     }
 
     // HOT WATER
     else {
-      pwr_demand ? pwr_demand-- : NULL;
+      //pwr_demand ? pwr_demand-- : NULL;
     }
   }
 }
@@ -968,7 +980,7 @@ void thermostat_event_handler(lv_event_t *e) {
     }
     data->on = true;
     data->update_timer = true;
-    pwr_demand++;
+    //pwr_demand++;
   }
 
   // Button OFF
@@ -976,7 +988,7 @@ void thermostat_event_handler(lv_event_t *e) {
     data->on = false;
     digitalWrite(data->relay_pin, LOW);
     data->update_timer = false;
-    pwr_demand ? pwr_demand-- : NULL;
+    //pwr_demand ? pwr_demand-- : NULL;
   }
 }
 
