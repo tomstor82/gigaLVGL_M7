@@ -723,6 +723,11 @@ void power_check(lv_timer_t *timer) {
       else if ( !time_ms && WATTS > 100 && WATTS < 80 ) {
         on = true;
       }
+
+      // ON if inside inverter standby range with solar charge, as fluctuation during charge might otherwise trigger eco delay
+      else if ( !time_ms && WATTS <= 100 && WATTS >= 80 && CHG_ENABLED ) {
+        on = true;
+      }
     }
     // ON IF NOT IN ECO MODE
     else {
