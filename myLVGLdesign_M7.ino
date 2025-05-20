@@ -716,14 +716,14 @@ void power_check(lv_timer_t *timer) {
   if ( data->relay_pin == RELAY1) {
 
     // CONDITIONS APPLY IF IN ECO MODE
-    if ( eco_mode ) {
+    if ( eco_mode && !time_ms ) {
       // ON if charging when SOC above 50%
       if ( AVG_AMPS < -5 && SOC > 50 ) {
         on = true;
       }
 
       // ON if outside the inverter standby range or inside the range if solar available
-      else if ( !time_ms && (WATTS > 100 && WATTS < 80 || WATTS <= 100 && WATTS >= 80 && CHG_ENABLED) ) {
+      else if ( WATTS > 100 && WATTS < 80 || CHG_ENABLED ) {
         on = true;
       }
     }
