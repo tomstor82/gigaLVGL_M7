@@ -420,8 +420,10 @@ void ccl_check() {
   }
   // ALLOW PV RELAY TO BE CLOSED WHEN CCL IS ABOVE 0 ( ASSUMING CCL WILL BE 0 IF MAX CELL VOLTAGE IS REACHED )
   else if ( CCL > 0 || HI_CELL_V < (MAX_CELL_V - 0.2) ) {
+    if (CCL_ENFORCED) {
+      TRIP_PV = 0x00; // otherwise this interferes with inverter start
+    }
     CCL_ENFORCED = false;
-    TRIP_PV = 0x00;
   }
 }
 
