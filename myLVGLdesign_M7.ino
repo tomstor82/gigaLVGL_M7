@@ -709,8 +709,8 @@ void power_check(lv_timer_t *timer) {
   static uint32_t time_ms = 0;
   static uint8_t minute_count = 0;
   static bool pre_sleep_delay = false;
-  //char plural[2] = "s";
-  char label[14];
+  char plural[2] = "s";
+  char label[15];
 
   // INVERTER CHECK
   if ( data->relay_pin == RELAY1) {
@@ -722,13 +722,13 @@ void power_check(lv_timer_t *timer) {
         on = true;
       }
 
-      // ON if outside the inverter standby range
-      else if ( !time_ms && WATTS > 100 && WATTS < 80 ) {
+      // ON if inside inverter standby range with solar charge, as fluctuation during charge might otherwise trigger eco delay
+      else if ( !time_ms && WATTS <= 100 && WATTS >= 80 && CHG_ENABLED ) {
         on = true;
       }
 
-      // ON if inside inverter standby range with solar charge, as fluctuation during charge might otherwise trigger eco delay
-      else if ( !time_ms && WATTS <= 100 && WATTS >= 80 && CHG_ENABLED ) {
+      // ON if outside the inverter standby range
+      else if ( !time_ms && WATTS > 100 && WATTS < 80 ) {
         on = true;
       }
     }
@@ -777,9 +777,9 @@ void power_check(lv_timer_t *timer) {
     }
     else if ( (millis() - time_ms) > ((1 + minute_count) * 60 * 1000) && minute_count < off_interval_min && ! pre_sleep_delay ) {
       minute_count++;
-      /*if ( minute_count == 2 ) {
+      if ( minute_count == 2 ) {
         strcpy(plural, "");
-      }*/
+      }
     }
     else if ( (minute_count + 1) == off_interval_min && ! pre_sleep_delay ) {
       minute_count = 0;
@@ -790,9 +790,14 @@ void power_check(lv_timer_t *timer) {
     }
 
     if ( ! pre_sleep_delay ) {
-      snprintf(label, sizeof(label), "ECO %d min OFF", off_interval_min - minute_count);
+      snprintf(label, sizeof(label), "ECO %d min%s OFF", off_interval_min - minute_count, plural);
       lv_label_set_text(data->label_obj, label);
-      lv_obj_set_pos(data->label_obj, 4, 355);
+      if ( minute_count == 2 ) {
+        lv_obj_set_pos(data->label_obj, 4, 355);
+      }
+      else {
+        lv_obj_set_pos(data->label_obj, 1, 355);
+      }
     }
     return;
   }
