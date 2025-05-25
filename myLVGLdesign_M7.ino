@@ -303,7 +303,7 @@ void update_inverter_label(bool state, user_data_t* data) {
   byte x_pos = 0;
   if (state) {
     strcpy(label_text, "Inverter ON");
-    x_pos = 15;
+    x_pos = 16;
   }
   else {
     strcpy(label_text, "OFF");
@@ -715,25 +715,16 @@ void power_check(lv_timer_t *timer) {
   // INVERTER CHECK
   if ( data->relay_pin == RELAY1) {
 
-    // CONDITIONS APPLY IF IN ECO MODE
+    // IN ECO MODE CONDITIONS APPLY
     if ( eco_mode ) {
 
-      // ON if above inverter standby, solar charge or charging
-      if ( !time_ms && ( WATTS > 75 || CHG_ENABLED || AVG_AMPS < -5 && SOC > 50) ) {
+      // ON if above inverter standby, solar charge or charging when above 50% soc
+      if ( !time_ms && ( WATTS > 80 || CHG_ENABLED || AVG_AMPS < -5 && SOC > 50) ) {
         on = true;
       }
-/*
-      // ON if charging when SOC above 50%
-      if ( AVG_AMPS < -5 && SOC > 50 ) {
-        on = true;
-      }
-
-      // ON if outside the inverter standby range or solar available
-      else if ( WATTS > 100 && WATTS < 80 || CHG_ENABLED ) {
-        on = true;
-      }*/
     }
-    // ON IF NOT IN ECO MODE
+
+    // NORMAL MODE ON
     else {
       on = true;
     }
