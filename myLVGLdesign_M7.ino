@@ -305,7 +305,7 @@ void update_inverter_label(bool state, user_data_t* data) {
     strcpy(label_text, "Inverter ON");
     x_pos = 16;
   }
-  else if ( ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+  else if ( lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
     strcpy(label_text, "OFF");
     x_pos = 41;
   }
