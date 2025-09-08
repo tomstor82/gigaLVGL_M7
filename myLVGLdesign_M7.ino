@@ -305,7 +305,7 @@ void update_inverter_label(bool state, user_data_t* data) {
     strcpy(label_text, "Inverter ON");
     x_pos = 16;
   }
-  else {
+  else if ( ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
     strcpy(label_text, "OFF");
     x_pos = 41;
   }
@@ -1586,7 +1586,7 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
       lv_obj_align(data->title_label, LV_ALIGN_TOP_MID, 0, y);
       lv_obj_add_flag(data->title_label, LV_OBJ_FLAG_HIDDEN);
 
-    // Initialize button (hidden initially)
+    // Initialise button (hidden initially)
     data->button = lv_btn_create(parent);
       lv_obj_t *btn_label = lv_label_create(data->button);
       lv_label_set_text(btn_label, "Clear BMS Flags");
@@ -1919,10 +1919,10 @@ void setup() {
 
   lv_init();
 
-  if ( Serial ) Serial.begin(115200); // Initialize Serial Monitor if available
+  if ( Serial ) Serial.begin(115200); // Initialise Serial Monitor if available
   //while (!Serial); // used to delay boot until serial console ready, in order to read all messages
 
-  // Boot M4 & Initialize RPC protocol
+  // Boot M4 & Initialise RPC protocol
   if ( RPC.begin() ) {
     Serial.println("M7 sending Boot command to M4 Core");
   }
