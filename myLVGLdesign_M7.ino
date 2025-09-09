@@ -252,7 +252,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   // ADD DCL TIMER AND LABEL
   data->dcl_label = lv_label_create(lv_obj_get_parent(data->button));
     lv_label_set_long_mode(data->dcl_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_label_set_text(data->dcl_label, "Battery Low Power                    Please Charge                     ");
+    lv_label_set_text(data->dcl_label, "Low Battery                    Please Charge                     ");
     lv_obj_set_width(data->dcl_label, 140);
     lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
     lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
