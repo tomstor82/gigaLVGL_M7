@@ -129,8 +129,17 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
 } user_data_t;
 
 typedef struct {
-  lv_obj_t *clock_label = NULL;
+  lv_obj_t* clock_label = NULL;
 } clock_data_t;
+
+typedef struct {
+  lv_obj_t* time_label = NULL;
+  lv_obj_t* time_modal = NULL;
+  lv_obj_t* hours_roller = NULL;
+  lv_obj_t* minutes_roller = NULL;
+  byte hh = 0;
+  byte mm = 0;
+} time_data_t;
 
 typedef struct {
   lv_obj_t *label_obj = NULL;
@@ -160,6 +169,7 @@ static CanMsgData canMsgData;
 static bms_status_data_t bmsStatusData;
 static user_data_t userData[4] = {}; // 4 buttons with user_data
 static clock_data_t clockData;
+static time_data_t timeData;
 static msgbox_data_t msgboxData[2] = {};
 static data_display_t dataDisplay;
 static CombinedData combinedData;
@@ -996,6 +1006,142 @@ void thermostat_event_handler(lv_event_t *e) {
     //pwr_demand ? pwr_demand-- : NULL;
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// TIME COMPUTATIONS
+void time_updater(time_data_t* data) {
+  uint32_t previous_ms = 0;
+
+  if ((millis() - previous_ms) >= 60000) {
+    previous_ms += 60000;  // Better than previous_ms = millis() for drift prevention
+    
+    byte h = data->hh;
+    byte m = data->mm;
+
+    if (m < 59) {
+      data->mm++;
+    }
+    else {
+      data->mm = 0;
+      if (h < 23) {
+        data->hh++;
+      }
+      else {
+        data->hh = 0;
+      }
+    }
+    lv_label_set_text_fmt(data->time_label, "%02d:%02d", data->hh, data->mm);
+  }
+}
+
+// MODAL OK AND CANCEL BUTTON HANDLERS
+void time_modal_ok_cb(lv_event_t* e) {
+  time_data_t* data = (time_data_t*)lv_event_get_user_data(e);
+
+  if (data && data->time_modal) {
+    data->hh = lv_roller_get_selected(data->hours_roller);
+    data->mm = lv_roller_get_selected(data->minutes_roller);
+
+    data->hours_roller = NULL;
+    data->minutes_roller = NULL;
+    lv_obj_del(data->time_modal);
+    data->time_modal = NULL;
+  }
+}
+void time_modal_cancel_cb(lv_event_t* e) {
+  time_data_t* data = (time_data_t*)lv_event_get_user_data(e);
+
+  if (data->time_modal) {
+     data->hours_roller = NULL;
+     data->minutes_roller = NULL;
+     lv_obj_del(data->time_modal);
+     data->time_modal = NULL;
+  }
+}
+
+// TIME SETTING MODAL
+void create_time_setting_modal(time_data_t* data) {
+  data->time_modal = lv_obj_create(lv_scr_act());
+  lv_obj_set_size(data->time_modal, 220, 200);
+  lv_obj_center(data->time_modal);
+
+  // Hours roller (0-23)
+  data->hours_roller = lv_roller_create(data->time_modal);
+  lv_roller_set_options(data->hours_roller, 
+    "00\n01\n02\n03\n04\n05\n06\n07\n08\n09\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23", 
+    LV_ROLLER_MODE_NORMAL);
+  lv_roller_set_selected(data->hours_roller, data->hh, LV_ANIM_OFF);
+  lv_obj_align(data->hours_roller, LV_ALIGN_TOP_LEFT, 10, 30);
+
+  // Minutes roller (0-59)
+  data->minutes_roller = lv_roller_create(data->time_modal);
+  lv_roller_set_options(data->minutes_roller, 
+    "00\n01\n02\n03\n04\n05\n06\n07\n08\n09\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48\n49\n50\n51\n52\n53\n54\n55\n56\n57\n58\n59", 
+    LV_ROLLER_MODE_NORMAL);
+  lv_roller_set_selected(data->minutes_roller, data->mm, LV_ANIM_OFF);
+  lv_obj_align(data->minutes_roller, LV_ALIGN_TOP_RIGHT, -10, 30);
+
+  // Buttons
+  lv_obj_t* btn_ok = lv_btn_create(data->time_modal);
+  lv_obj_set_size(btn_ok, 80, 30);
+  lv_obj_align(btn_ok, LV_ALIGN_BOTTOM_LEFT, 10, -10);
+  lv_obj_t* btn_label_ok = lv_label_create(btn_ok);
+  lv_label_set_text(btn_label_ok, "OK");
+  lv_obj_center(btn_label_ok);
+  lv_obj_add_event_cb(btn_ok, time_modal_ok_cb, LV_EVENT_CLICKED, data);
+
+  lv_obj_t* btn_cancel = lv_btn_create(data->time_modal);
+  lv_obj_set_size(btn_cancel, 80, 30);
+  lv_obj_align(btn_cancel, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
+  lv_obj_t* btn_label_cancel = lv_label_create(btn_cancel);
+  lv_label_set_text(btn_label_cancel, "Cancel");
+  lv_obj_center(btn_label_cancel);
+  lv_obj_add_event_cb(btn_cancel, time_modal_cancel_cb, LV_EVENT_CLICKED, data);
+}
+
+// SET TIME EVENT HANDLER
+void set_time(lv_event_t* e) {
+  lv_event_code_t code = lv_event_get_code(e);
+
+  if (code == LV_EVENT_CLICKED) {
+    time_data_t* data = (time_data_t*)lv_event_get_user_data(e);
+    // Only create modal if one doesn't already exist
+    if (!data->time_modal) {
+      create_time_setting_modal(data);
+    }
+  }
+}
+
+// CREATE TIME LABEL WITH CLICK EVENT HANDLER
+void create_time_label(lv_obj_t *parent, time_data_t* data) {
+  data->time_label = lv_label_create(parent);
+  lv_obj_align(data->time_label, LV_ALIGN_TOP_RIGHT, -10, -10);
+  lv_obj_add_flag(data->time_label, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(data->time_label, set_time, LV_EVENT_CLICKED, data);
+}
+
+
+
 
 
 
@@ -1860,10 +2006,11 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
 
 
 
-// INSTEAD OF INDIVIDUAL TIMERS I ADDED A HELPER FUNCTION TO CALL ALL 1s INTERVAL FUNCTIONS IN ONE GO - CURRENTLY 5 INDIVIDUAL TIMERS AND 15 COMBINED HERE ////////////////
+// INSTEAD OF INDIVIDUAL TIMERS I ADDED A HELPER FUNCTION TO CALL ALL 1s INTERVAL FUNCTIONS IN ONE GO - CURRENTLY 5 INDIVIDUAL TIMERS AND 16 COMBINED HERE ////////////////
 void combined_1s_updater(lv_timer_t *timer) {
   ccl_check();
   clock_updater(&clockData);
+  time_updater(&timeData);
   charge_icons_updater(&dataDisplay);
   if (userData[3].on == false && inverter_delay == false) {
     sunrise_detector();
@@ -1909,7 +2056,6 @@ void leaf_icon_event_handler(lv_event_t* e) {
     }
   }
 }
-
 
 
 
@@ -1978,6 +2124,9 @@ void setup() {
   lv_obj_add_event_cb(cont, screen_touch, LV_EVENT_ALL, NULL);
   lv_obj_set_grid_cell(cont, LV_GRID_ALIGN_STRETCH, 1, 1,
                             LV_GRID_ALIGN_STRETCH, 0, 1);
+
+  // create digital 24H clock
+  create_time_label(cont, &timeData);
 
   // arguments 1:obj  2:label 3:relay_pin 4:y_offset 5:dcl_limit 6:timeout_ms 7:user_data struct
 
