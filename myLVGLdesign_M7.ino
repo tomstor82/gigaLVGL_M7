@@ -137,8 +137,9 @@ typedef struct {
   lv_obj_t* time_modal = NULL;
   lv_obj_t* hours_roller = NULL;
   lv_obj_t* minutes_roller = NULL;
-  byte hh = 0;
-  byte mm = 0;
+  uint32_t previous_ms = 0;
+  byte hh = 12;
+  byte mm = 30;
 } time_data_t;
 
 typedef struct {
@@ -1030,28 +1031,39 @@ void thermostat_event_handler(lv_event_t *e) {
 
 // TIME COMPUTATIONS
 void time_updater(time_data_t* data) {
-  uint32_t previous_ms = 0;
 
-  if ((millis() - previous_ms) >= 60000) {
-    previous_ms += 60000;  // Better than previous_ms = millis() for drift prevention
-    
-    byte h = data->hh;
-    byte m = data->mm;
+  if ((millis() - data->previous_ms) >= 60000) {
 
-    if (m < 59) {
+    // overrun compensation
+    if ( data->previous_ms < 2^32 - 60000 ) {
+      // increment by 1 minute
+      data->previous_ms += 60000;
+    }
+    else {
+      data->previous_ms = 2^32 - data->previous_ms + 60000;
+    }
+
+    // apply drift correction for each minute if needed
+    uint32_t drift_ms = (millis() - data->previous_ms) - 60000;
+    if ( drift_ms >= 60000) {
+      data->mm += drift_ms / 60000;
+    }
+
+    // increment time
+    if (data->mm < 59) {
       data->mm++;
     }
     else {
       data->mm = 0;
-      if (h < 23) {
+      if (data->hh < 23) {
         data->hh++;
       }
       else {
         data->hh = 0;
       }
     }
-    lv_label_set_text_fmt(data->time_label, "%02d:%02d", data->hh, data->mm);
   }
+  lv_label_set_text_fmt(data->time_label, "%02d:%02d", data->hh, data->mm);
 }
 
 // MODAL OK AND CANCEL BUTTON HANDLERS
@@ -1061,6 +1073,7 @@ void time_modal_ok_cb(lv_event_t* e) {
   if (data && data->time_modal) {
     data->hh = lv_roller_get_selected(data->hours_roller);
     data->mm = lv_roller_get_selected(data->minutes_roller);
+    data->previous_ms = millis(); // restart clock seconds
 
     data->hours_roller = NULL;
     data->minutes_roller = NULL;
@@ -1082,7 +1095,7 @@ void time_modal_cancel_cb(lv_event_t* e) {
 // TIME SETTING MODAL
 void create_time_setting_modal(time_data_t* data) {
   data->time_modal = lv_obj_create(lv_scr_act());
-  lv_obj_set_size(data->time_modal, 220, 200);
+  lv_obj_set_size(data->time_modal, 220, 250);
   lv_obj_center(data->time_modal);
 
   // Hours roller (0-23)
@@ -1104,7 +1117,7 @@ void create_time_setting_modal(time_data_t* data) {
   // Buttons
   lv_obj_t* btn_ok = lv_btn_create(data->time_modal);
   lv_obj_set_size(btn_ok, 80, 30);
-  lv_obj_align(btn_ok, LV_ALIGN_BOTTOM_LEFT, 10, -10);
+  lv_obj_align(btn_ok, LV_ALIGN_BOTTOM_LEFT, 5, 0);
   lv_obj_t* btn_label_ok = lv_label_create(btn_ok);
   lv_label_set_text(btn_label_ok, "OK");
   lv_obj_center(btn_label_ok);
@@ -1112,7 +1125,7 @@ void create_time_setting_modal(time_data_t* data) {
 
   lv_obj_t* btn_cancel = lv_btn_create(data->time_modal);
   lv_obj_set_size(btn_cancel, 80, 30);
-  lv_obj_align(btn_cancel, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
+  lv_obj_align(btn_cancel, LV_ALIGN_BOTTOM_RIGHT, -5, 0);
   lv_obj_t* btn_label_cancel = lv_label_create(btn_cancel);
   lv_label_set_text(btn_label_cancel, "Cancel");
   lv_obj_center(btn_label_cancel);
@@ -1133,7 +1146,7 @@ void set_time(lv_event_t* e) {
 }
 
 // CREATE TIME LABEL WITH CLICK EVENT HANDLER
-void create_time_label(lv_obj_t *parent, time_data_t* data) {
+void create_time_label(lv_obj_t* parent, time_data_t* data) {
   data->time_label = lv_label_create(parent);
   lv_obj_align(data->time_label, LV_ALIGN_TOP_RIGHT, -10, -10);
   lv_obj_add_flag(data->time_label, LV_OBJ_FLAG_CLICKABLE);
