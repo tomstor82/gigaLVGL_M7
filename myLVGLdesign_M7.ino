@@ -118,7 +118,6 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   lv_obj_t *dcl_label = NULL;
   lv_obj_t *label_obj = NULL;
   lv_timer_t *timer = NULL; // used for hot water and inverter
-  bool update_timer = false;
   uint8_t relay_pin = 0;
   uint8_t y_offset = 0;
   unsigned long timeout_ms = 0;
@@ -131,16 +130,6 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
 typedef struct {
   lv_obj_t* clock_label = NULL;
 } clock_data_t;
-
-typedef struct {
-  lv_obj_t* time_label = NULL;
-  lv_obj_t* time_modal = NULL;
-  lv_obj_t* hours_roller = NULL;
-  lv_obj_t* minutes_roller = NULL;
-  uint32_t previous_ms = 0;
-  byte hh = 12;
-  byte mm = 30;
-} time_data_t;
 
 typedef struct {
   lv_obj_t *label_obj = NULL;
@@ -170,7 +159,6 @@ static CanMsgData canMsgData;
 static bms_status_data_t bmsStatusData;
 static user_data_t userData[4] = {}; // 4 buttons with user_data
 static clock_data_t clockData;
-static time_data_t timeData;
 static msgbox_data_t msgboxData[2] = {};
 static data_display_t dataDisplay;
 static CombinedData combinedData;
@@ -225,7 +213,6 @@ static CombinedData combinedData;
 #define CCL_ENFORCED    bmsStatusData.ccl_enforced
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size) int/float = 4 bytes
-//uint8_t pwr_demand = 0;
 bool inverter_delay = false;
 bool eco_mode = false;
 const uint32_t hot_water_interval_ms = 900000; // 15 min
@@ -452,7 +439,6 @@ void button_off(user_data_t *data) {
   lv_obj_clear_state(data->button, LV_STATE_CHECKED);
   digitalWrite(data->relay_pin, LOW);
   data->on = false;
-  data->update_timer = false; // thermostat checker
 }
 
 
@@ -943,7 +929,7 @@ void thermostat_checker(user_data_t *data) {
     else if ( TEMP2 != 99.9f && TEMP2 < data->set_temp ) {
       on = true;
     }
-    else if ( TEMP3 != 99.9f && TEMP4 < data->set_temp ) {
+    else if ( TEMP4 != 99.9f && TEMP4 < data->set_temp ) {
       on = true;
     }
 
@@ -955,7 +941,7 @@ void thermostat_checker(user_data_t *data) {
 
   // Shower heater thermostat
   else {
-    if ( TEMP3 < data->set_temp ) {
+    if ( TEMP3 != 99.9f && TEMP3 < data->set_temp ) {
       on = true;
     }
 
@@ -995,16 +981,12 @@ void thermostat_event_handler(lv_event_t *e) {
       }
     }
     data->on = true;
-    data->update_timer = true;
-    //pwr_demand++;
   }
 
   // Button OFF
   else {
     data->on = false;
     digitalWrite(data->relay_pin, LOW);
-    data->update_timer = false;
-    //pwr_demand ? pwr_demand-- : NULL;
   }
 }
 
@@ -1018,7 +1000,7 @@ void thermostat_event_handler(lv_event_t *e) {
 
 
 
-
+/*
 
 
 
@@ -1163,12 +1145,42 @@ void create_time_label(lv_obj_t* parent, time_data_t* data) {
 
 
 
+*/
 
 
+// Heaters night mode
+void heaters_night_mode(user_data_t* data) {
 
+  static bool night_mode = false; // used to set temp only once allowing a manual selection to not be changed back
+  //static uint32_t sunrise_ms = 0;
+  static uint32_t sunset_ms = 0;
+  //static uint32_t night_duration_ms = 0;
 
+  /*if ( sunrise_ms && sunset_ms && sunrise_ms > sunset_ms ) {
+    night_duration_ms = sunrise_ms - sunset_ms;
+  }*/
 
+  if ( CHG_ENABLED && sunset_ms ) {
+    sunset_ms = 0;
+    //sunrise_ms = millis();
+    return;
+  }
+  else if ( !CHG_ENABLED && !sunset_ms ) {
+    sunset_ms = millis(); // record time at sunset
+  }
 
+  // set 17C 3 hours after sunset
+  if ( sunset_ms && (millis() - sunset_ms) > 3*60*60*1000 && !night_mode ) {
+    night_mode = true;
+    data->set_temp = 17;
+  }
+  // set 21C 9 hours after sunset or at sunrise
+  else if ( sunset_ms && ((millis() - sunset_ms) > 9*60*60*1000 || CHG_ENABLED) && night_mode ) {
+    night_mode = false;
+    sunset_ms = 0; // this end cycle
+    data->set_temp = 21;
+  }
+}
 
 
 
@@ -1215,7 +1227,7 @@ void create_temperature_dropdown(lv_obj_t *parent, user_data_t *data) {
     "5\u00B0C\n18\u00B0C\n19\u00B0C\n20\u00B0C\n21\u00B0C\n22\u00B0C\n23\u00B0C");
     
   // set user data
-  lv_dropdown_set_selected(dd, 3); // default index to be displayed. value set_temp in struct
+  lv_dropdown_set_selected(dd, 4); // default index to be displayed. value set_temp in struct
   lv_obj_set_user_data(dd, data);
   lv_obj_add_event_cb(dd, dropdown_event_handler, LV_EVENT_VALUE_CHANGED, data);
   
@@ -2023,7 +2035,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
 void combined_1s_updater(lv_timer_t *timer) {
   ccl_check();
   clock_updater(&clockData);
-  time_updater(&timeData);
+  //time_updater(&timeData);
   charge_icons_updater(&dataDisplay);
   if (userData[3].on == false && inverter_delay == false) {
     sunrise_detector();
@@ -2045,8 +2057,9 @@ void combined_10s_updater(lv_timer_t *timer) {
   }
   for ( uint8_t i = 0; i < 2; i++ ) {
     update_temp(&userData[i]);
-    if ( userData[i].update_timer ) {
+    if ( userData[i].on ) {
       thermostat_checker(&userData[i]);
+      heaters_night_mode(&userData[i]);
     }
   }
 }
@@ -2139,7 +2152,7 @@ void setup() {
                             LV_GRID_ALIGN_STRETCH, 0, 1);
 
   // create digital 24H clock
-  create_time_label(cont, &timeData);
+  //create_time_label(cont, &timeData);
 
   // arguments 1:obj  2:label 3:relay_pin 4:y_offset 5:dcl_limit 6:timeout_ms 7:user_data struct
 
