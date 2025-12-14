@@ -794,7 +794,6 @@ void power_check(lv_timer_t *timer) {
   // HOT WATER OFF
   else {
     button_off(data);
-    //pwr_demand--;
     lv_timer_del(data->timer);
     data->timer = NULL;
   }
@@ -827,13 +826,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
         lv_obj_clear_state(data->button, LV_STATE_CHECKED);
         return; // exit function if inverter doesn't start
       }
-      // IF INVERTER STARTED SUCCESSFULLY INCREMENT PWR_DEMAND
-      //else pwr_demand++;
     }
-    /*// WITH INVERTER ALREADY ON, ONLY INCREMENT PWR_DEMAND
-    else {
-      pwr_demand++; // only for hot water
-    }*/
 
     // TURN ON RELAY UNLESS MPPT DELAYER IS RUNNING
     if ( ! inverter_delay || data->relay_pin == RELAY3 ) {
@@ -873,12 +866,6 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
           button_off(&userData[i]);
         }
       }
-      //pwr_demand = 0;
-    }
-
-    // HOT WATER
-    else {
-      //pwr_demand ? pwr_demand-- : NULL;
     }
   }
 }
@@ -997,187 +984,32 @@ void thermostat_event_handler(lv_event_t *e) {
 
 
 
-
-
-
-/*
-
-
-
-
-
-
-
-
-
-
-// TIME COMPUTATIONS
-void time_updater(time_data_t* data) {
-
-  if ((millis() - data->previous_ms) >= 60000) {
-
-    // overrun compensation
-    if ( data->previous_ms < 2^32 - 60000 ) {
-      // increment by 1 minute
-      data->previous_ms += 60000;
-    }
-    else {
-      data->previous_ms = 2^32 - data->previous_ms + 60000;
-    }
-
-    // apply drift correction for each minute if needed
-    uint32_t drift_ms = (millis() - data->previous_ms) - 60000;
-    if ( drift_ms >= 60000) {
-      data->mm += drift_ms / 60000;
-    }
-
-    // increment time
-    if (data->mm < 59) {
-      data->mm++;
-    }
-    else {
-      data->mm = 0;
-      if (data->hh < 23) {
-        data->hh++;
-      }
-      else {
-        data->hh = 0;
-      }
-    }
-  }
-  lv_label_set_text_fmt(data->time_label, "%02d:%02d", data->hh, data->mm);
-}
-
-// MODAL OK AND CANCEL BUTTON HANDLERS
-void time_modal_ok_cb(lv_event_t* e) {
-  time_data_t* data = (time_data_t*)lv_event_get_user_data(e);
-
-  if (data && data->time_modal) {
-    data->hh = lv_roller_get_selected(data->hours_roller);
-    data->mm = lv_roller_get_selected(data->minutes_roller);
-    data->previous_ms = millis(); // restart clock seconds
-
-    data->hours_roller = NULL;
-    data->minutes_roller = NULL;
-    lv_obj_del(data->time_modal);
-    data->time_modal = NULL;
-  }
-}
-void time_modal_cancel_cb(lv_event_t* e) {
-  time_data_t* data = (time_data_t*)lv_event_get_user_data(e);
-
-  if (data->time_modal) {
-     data->hours_roller = NULL;
-     data->minutes_roller = NULL;
-     lv_obj_del(data->time_modal);
-     data->time_modal = NULL;
-  }
-}
-
-// TIME SETTING MODAL
-void create_time_setting_modal(time_data_t* data) {
-  data->time_modal = lv_obj_create(lv_scr_act());
-  lv_obj_set_size(data->time_modal, 220, 250);
-  lv_obj_center(data->time_modal);
-
-  // Hours roller (0-23)
-  data->hours_roller = lv_roller_create(data->time_modal);
-  lv_roller_set_options(data->hours_roller, 
-    "00\n01\n02\n03\n04\n05\n06\n07\n08\n09\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23", 
-    LV_ROLLER_MODE_NORMAL);
-  lv_roller_set_selected(data->hours_roller, data->hh, LV_ANIM_OFF);
-  lv_obj_align(data->hours_roller, LV_ALIGN_TOP_LEFT, 10, 30);
-
-  // Minutes roller (0-59)
-  data->minutes_roller = lv_roller_create(data->time_modal);
-  lv_roller_set_options(data->minutes_roller, 
-    "00\n01\n02\n03\n04\n05\n06\n07\n08\n09\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48\n49\n50\n51\n52\n53\n54\n55\n56\n57\n58\n59", 
-    LV_ROLLER_MODE_NORMAL);
-  lv_roller_set_selected(data->minutes_roller, data->mm, LV_ANIM_OFF);
-  lv_obj_align(data->minutes_roller, LV_ALIGN_TOP_RIGHT, -10, 30);
-
-  // Buttons
-  lv_obj_t* btn_ok = lv_btn_create(data->time_modal);
-  lv_obj_set_size(btn_ok, 80, 30);
-  lv_obj_align(btn_ok, LV_ALIGN_BOTTOM_LEFT, 5, 0);
-  lv_obj_t* btn_label_ok = lv_label_create(btn_ok);
-  lv_label_set_text(btn_label_ok, "OK");
-  lv_obj_center(btn_label_ok);
-  lv_obj_add_event_cb(btn_ok, time_modal_ok_cb, LV_EVENT_CLICKED, data);
-
-  lv_obj_t* btn_cancel = lv_btn_create(data->time_modal);
-  lv_obj_set_size(btn_cancel, 80, 30);
-  lv_obj_align(btn_cancel, LV_ALIGN_BOTTOM_RIGHT, -5, 0);
-  lv_obj_t* btn_label_cancel = lv_label_create(btn_cancel);
-  lv_label_set_text(btn_label_cancel, "Cancel");
-  lv_obj_center(btn_label_cancel);
-  lv_obj_add_event_cb(btn_cancel, time_modal_cancel_cb, LV_EVENT_CLICKED, data);
-}
-
-// SET TIME EVENT HANDLER
-void set_time(lv_event_t* e) {
-  lv_event_code_t code = lv_event_get_code(e);
-
-  if (code == LV_EVENT_CLICKED) {
-    time_data_t* data = (time_data_t*)lv_event_get_user_data(e);
-    // Only create modal if one doesn't already exist
-    if (!data->time_modal) {
-      create_time_setting_modal(data);
-    }
-  }
-}
-
-// CREATE TIME LABEL WITH CLICK EVENT HANDLER
-void create_time_label(lv_obj_t* parent, time_data_t* data) {
-  data->time_label = lv_label_create(parent);
-  lv_obj_align(data->time_label, LV_ALIGN_TOP_RIGHT, -10, -10);
-  lv_obj_add_flag(data->time_label, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(data->time_label, set_time, LV_EVENT_CLICKED, data);
-}
-
-
-
-
-
-
-
-
-
-
-
-*/
-
-
 // Heaters night mode
 void heaters_night_mode(user_data_t* data) {
 
-  static bool night_mode = false; // used to set temp only once allowing a manual selection to not be changed back
-  //static uint32_t sunrise_ms = 0;
+  static bool night_mode = false; // used to set temp only once allowing a manual selection override to remain
+  static bool prev_daylight = false;
   static uint32_t sunset_ms = 0;
-  //static uint32_t night_duration_ms = 0;
 
-  /*if ( sunrise_ms && sunset_ms && sunrise_ms > sunset_ms ) {
-    night_duration_ms = sunrise_ms - sunset_ms;
-  }*/
-
-  if ( CHG_ENABLED && sunset_ms ) {
-    sunset_ms = 0;
-    //sunrise_ms = millis();
-    return;
+  // set previous daylight detection variable
+  if ( CHG_ENABLED && !prev_daylight ) {
+    prev_daylight = true;
   }
-  else if ( !CHG_ENABLED && !sunset_ms ) {
+
+  // start timer at sunset - tested by previous daylight detection
+  if ( !sunset_ms && !CHG_ENABLED && prev_daylight ) {
     sunset_ms = millis(); // record time at sunset
+    prev_daylight = false;
   }
-
   // set 17C 3 hours after sunset
-  if ( sunset_ms && (millis() - sunset_ms) > 3*60*60*1000 && !night_mode ) {
+  else if ( sunset_ms && (millis() - sunset_ms) > 3*60*60*1000 && !night_mode ) {
     night_mode = true;
     data->set_temp = 17;
   }
   // set 21C 9 hours after sunset or at sunrise
   else if ( sunset_ms && ((millis() - sunset_ms) > 9*60*60*1000 || CHG_ENABLED) && night_mode ) {
     night_mode = false;
-    sunset_ms = 0; // this end cycle
+    sunset_ms = 0;
     data->set_temp = 21;
   }
 }
@@ -2035,7 +1867,6 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
 void combined_1s_updater(lv_timer_t *timer) {
   ccl_check();
   clock_updater(&clockData);
-  //time_updater(&timeData);
   charge_icons_updater(&dataDisplay);
   if (userData[3].on == false && inverter_delay == false) {
     sunrise_detector();
