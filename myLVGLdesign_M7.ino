@@ -329,12 +329,12 @@ void mppt_delayer(bool mppt_delay) {
     start_time_ms = millis(); // Start the timer
   }
 
-  // CHECK THAT MPPT DELAY LAST FOR AT LEAST 20s TO AVOID FLAPPING CONDITION
-  else if ( ! mppt_delay && start_time_ms && millis() - start_time_ms > 20000 ) {
+  // CHECK THAT MPPT DELAY LAST FOR AT LEAST 30s TO AVOID FLAPPING CONDITION AND A COLD INVERTER NEEDS TIME TO DETECT BATTERY
+  else if ( ! mppt_delay && start_time_ms && millis() - start_time_ms > 30000 ) {
     mppt_delay = true;
   }
   else {
-    start_time_ms = 0; // Reset the timer after 20 seconds
+    start_time_ms = 0; // Reset the timer after 30 seconds
   }
 
   // SET CAN MESSAGE AND ENABLE TX
@@ -990,6 +990,7 @@ void heaters_night_mode(user_data_t* data) {
   static bool night_mode = false; // used to set temp only once allowing a manual selection override to remain
   static bool prev_daylight = false;
   static uint32_t sunset_ms = 0;
+  static bool preset_temp = 0;
 
   // set previous daylight detection variable
   if ( CHG_ENABLED && !prev_daylight ) {
@@ -1004,13 +1005,14 @@ void heaters_night_mode(user_data_t* data) {
   // set 17C 3 hours after sunset
   else if ( sunset_ms && (millis() - sunset_ms) > 3*60*60*1000 && !night_mode ) {
     night_mode = true;
+    preset_temp = data->set_temp;
     data->set_temp = 17;
   }
-  // set 21C 9 hours after sunset or at sunrise
+  // reset temp to preselected value 9 hours after sunset or at sunrise
   else if ( sunset_ms && ((millis() - sunset_ms) > 9*60*60*1000 || CHG_ENABLED) && night_mode ) {
     night_mode = false;
     sunset_ms = 0;
-    data->set_temp = 21;
+    data->set_temp = preset_temp;
   }
 }
 
