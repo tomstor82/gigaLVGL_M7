@@ -329,12 +329,12 @@ void mppt_delayer(bool mppt_delay) {
     start_time_ms = millis(); // Start the timer
   }
 
-  // CHECK THAT MPPT DELAY LAST FOR AT LEAST 30s TO AVOID FLAPPING CONDITION AND A COLD INVERTER NEEDS TIME TO DETECT BATTERY
-  else if ( ! mppt_delay && start_time_ms && millis() - start_time_ms > 30000 ) {
+  // CHECK THAT MPPT DELAY LAST FOR AT LEAST 20s TO AVOID FLAPPING CONDITION
+  else if ( ! mppt_delay && start_time_ms && millis() - start_time_ms > 20000 ) {
     mppt_delay = true;
   }
   else {
-    start_time_ms = 0; // Reset the timer after 30 seconds
+    start_time_ms = 0; // Reset the timer after 20 seconds
   }
 
   // SET CAN MESSAGE AND ENABLE TX
@@ -894,13 +894,17 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
 
 
 // THERMOSTAT TIMER ////////////////////////////////////////////////////////////////
-void thermostat_checker(user_data_t *data) {
+void thermostat_checker(user_data_t *data, bool reset_timer = false) {
 
   static uint32_t thermostat_off_ms = 0;
   bool on = false;
 
+  if ( reset_timer ) {
+    thermostat_off_ms = 0;
+    return;
+  }
   // Off cycle time checker (2 min set)
-  if ( thermostat_off_ms && millis() - thermostat_off_ms < 120000 ) {
+  else if ( thermostat_off_ms && millis() - thermostat_off_ms < 120000 ) {
     return;
   }
 
@@ -963,6 +967,7 @@ void thermostat_event_handler(lv_event_t *e) {
       lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL);
       // DEBUG if inverter is still off disable change flag
       if ( userData[3].on == false ) {
+        Serial.println("DEBUG: Thermostat event handler IF inverter doesn't turn ON");
         lv_obj_clear_state(data->button, LV_STATE_CHECKED);
         return; // exit function if inverter is off
       }
@@ -974,6 +979,8 @@ void thermostat_event_handler(lv_event_t *e) {
   else {
     data->on = false;
     digitalWrite(data->relay_pin, LOW);
+    // reset thermostat timer
+    thermostat_checker(data, true);
   }
 }
 
@@ -2101,8 +2108,8 @@ void loop() {
       time_ms = millis();
     }
 
-    // WAIT 20s BEFORE SENDING MPPT RESTART SIGNAL AS SUNRISE_DETECTOR IS DISABLED WITH INVERTER ON OR IF INVERTER HAS BEEN SWITCH OFF
-    else if ( millis() - time_ms > 20000 && (inverter_on || userData[3].on == false) ) {
+    // WAIT 30s BEFORE SENDING MPPT RESTART SIGNAL AS SUNRISE_DETECTOR IS DISABLED WITH INVERTER ON OR IF INVERTER HAS BEEN SWITCH OFF
+    else if ( millis() - time_ms > 30000 && (inverter_on || userData[3].on == false) ) {
       TRIP_PV = 0x00;
       time_ms = 0;
       inverter_on = false; // reset for next start delay
@@ -2115,13 +2122,13 @@ void loop() {
     }
   }
 
-  // SEND BMS CELL BALANCING ALLOWED SIGNAL IF CHARGING OR CELLS ABOVE 3.3V IF DELTA GREATER THAN 0,01V AND BALANCING NOT DETECTED
-
-  if ( BLCG_ALLOWED && AVG_AMPS >= 0 && LO_CELL_V < 3.3 ) {
+  // ARDUINO COMMANDED CELL BALANCING IF CELLS ARE ABOVE 3,25V WITH CELL DIFF GREATER THAN 20mV UNDER CHARGE
+  // STOP BALANCING
+  if ( BLCG_ALLOWED && AVG_AMPS >= 0 && LO_CELL_V < 3.2 && (HI_CELL_V - LO_CELL_V) < 0.02 ) {
     BLCG_ALLOWED = 0x00; // Balancing NOT Allowed
   }
-
-  else if ( !BLCG_ACTIVE && !BLCG_ALLOWED && AVG_AMPS < 0 ) {
+  // START BALANCING
+  else if ( !BLCG_ACTIVE && !BLCG_ALLOWED && AVG_AMPS < 0 && LO_CELL_V > 3.25 && (HI_CELL_V - LO_CELL_V) >= 0.02) {
     BLCG_ALLOWED = 0x01; // Balancing Allowed
   }
   /*if (Serial) {
