@@ -1897,9 +1897,9 @@ void combined_10s_updater(lv_timer_t *timer) {
   }
   for ( uint8_t i = 0; i < 2; i++ ) {
     update_temp(&userData[i]);
+    heaters_night_mode(&userData[i]);
     if ( userData[i].on ) {
       thermostat_checker(&userData[i]);
-      heaters_night_mode(&userData[i]);
     }
   }
 }
