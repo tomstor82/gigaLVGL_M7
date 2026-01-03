@@ -21,4 +21,4 @@ Inverter sleep timer and also conditions like solar will keep it on.
 
 Message boxes for more data on dht22 sensors and BMS data with 10s refresh data interval set
 
-Data display including arcs and easy reading of important information, including dynamic charge and usage arcs. Colours changing on battery icon depending on SOC and AMPS with a timer indicating charge or discharge time.
+Data display including arcs and easy reading of important information, including dynamic charge and usage arcs. Colours changing on battery icon depending on SOC and AMPS with a timer indicating charge or discharge time

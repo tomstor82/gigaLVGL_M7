@@ -250,7 +250,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   // ADD DCL TIMER AND LABEL
   data->dcl_label = lv_label_create(lv_obj_get_parent(data->button));
     lv_label_set_long_mode(data->dcl_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_label_set_text(data->dcl_label, "Low Battery                    Please Charge                     ");
+    lv_label_set_text(data->dcl_label, "Battery Current Limit Reached              Please Charge                     ");
     lv_obj_set_width(data->dcl_label, 140);
     lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
     lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
@@ -297,16 +297,30 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 
 // UPDATE INVERTER LABEL //////////////////////////////////////////////////////////////////////////////////
 void update_inverter_label(bool state, user_data_t* data) {
-  char label_text[11];
-  byte x_pos = 0;
+  char label_text[12];
+  byte x_pos = 16;
+
+  // is dcl enforced hide inverter label
+  if ( ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+    lv_obj_add_flag(data->label_obj, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  // show inverter label if not
+  else if ( lv_obj_has_flag(data->label_obj, LV_OBJ_FLAG_HIDDEN) ) {
+    lv_obj_clear_flag(data->label_obj, LV_OBJ_FLAG_HIDDEN);
+  }
+
+  // inverter is on
   if (state) {
     strcpy(label_text, "Inverter ON");
-    x_pos = 16;
   }
-  else if ( lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+  // inverter off
+  else {
     strcpy(label_text, "OFF");
     x_pos = 41;
   }
+
+  // write inverter label
   lv_label_set_text(data->label_obj, label_text);
   lv_obj_set_pos(data->label_obj, x_pos, 355);
 }
@@ -462,8 +476,8 @@ void dcl_check(user_data_t *data) {
     return;
   }
 
-  // IF DCL IS ZERO, CELL VOLTAGE LOW OR DCH RELAY OPEN AND BUTTON NOT ALREADY DISABLED
-  else if ( DCL == 0 || LO_CELL_V < (MIN_CELL_V + 0.3) || (RELAYS & 0x01) != 0x01 && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
+  // IF DISCHARGE CURRENT ABOVE DCL OR IF DCL IS ZERO, CELL VOLTAGE LOW OR DCH RELAY OPEN AND BUTTON NOT ALREADY DISABLED
+  else if ( AVG_AMPS > DCL || DCL == 0 || LO_CELL_V < (MIN_CELL_V + 0.3) || (RELAYS & 0x01) != 0x01 && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
     for ( uint8_t i = 0; i < 4; i++ ) {
       if ( userData[i].on ) {
         button_off(&userData[i]);
