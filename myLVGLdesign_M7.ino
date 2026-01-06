@@ -424,17 +424,17 @@ void sunrise_detector() {
 // CCL AND HIGH CELL VOLTAGE CHECK TIMER ////////////////////////////////////////////////////////////////////////////
 void ccl_check() {
 
-  // ONLY TRIP RELAY, SUNRISE FUNCTION WILL RE-ENABLE IT
-  if ( CCL == 0 || HI_CELL_V > (MAX_CELL_V - 0.1) ) {
+  if ( inverter_delay )  { return; }
+
+  // OPEN CONTACTOR AT 0 CCL OR CELL APPROACHING MAX VOLTAGE
+  else if ( !CCL_ENFORCED && CCL == 0 || HI_CELL_V > (MAX_CELL_V - 0.02) ) {
     TRIP_PV = 0x01;
     strcpy(DYNAMIC_LABEL, "Solar OFF - CCL enforced");
     CCL_ENFORCED = true;
   }
-  // ALLOW PV RELAY TO BE CLOSED WHEN CCL IS ABOVE 0 ( ASSUMING CCL WILL BE 0 IF MAX CELL VOLTAGE IS REACHED )
-  else if ( CCL > 0 || HI_CELL_V < (MAX_CELL_V - 0.2) ) {
-    if (CCL_ENFORCED) {
-      TRIP_PV = 0x00; // otherwise this interferes with inverter start
-    }
+  // CLOSE CONTACTOR WHEN CCL IS ABOVE 0 OR CELL VOLTAGE HAS DROPPED LOW ENOUGH 
+  else if ( CCL_ENFORCED && CCL > 0 || HI_CELL_V < (MAX_CELL_V - 0.2) ) {
+    TRIP_PV = 0x00;
     CCL_ENFORCED = false;
   }
 }
@@ -2011,7 +2011,7 @@ void setup() {
   // arguments 1:obj  2:label 3:relay_pin 4:y_offset 5:dcl_limit 6:timeout_ms 7:user_data struct
 
   // Create Button 1 - CEILING HEATER
-  create_button(cont, "Ceiling Heater", RELAY2, 20, 70, 0, &userData[0]); // dcl for test max 255 uint8_t
+  create_button(cont, "Ceiling Heater", RELAY2, 20, 20, 0, &userData[0]); // dcl for test max 255 uint8_t
 
   // Create Button 2 - SHOWER HEATER
   create_button(cont, "Shower Heater",  RELAY4, 115, 10, 0, &userData[1]);
