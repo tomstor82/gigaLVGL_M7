@@ -123,7 +123,7 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   unsigned long timeout_ms = 0;
   uint8_t dcl_limit = 0;
   uint32_t dcl_enforced_ms = 0;
-  uint8_t set_temp = 20; // should match value of dropdown default index
+  uint8_t set_temp = 21; // should match value of dropdown default index
   bool on = false; // simplifies code by substituting [lv_obj_has_state(data->button, LV_STATE_CHECKED)]
   bool faulty_temp_disabled = false; // used by thermostat to prevent dcl_check from enabling disabled buttons
 } user_data_t;
@@ -251,13 +251,13 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   // ADD DCL TIMER AND LABEL
   data->dcl_label = lv_label_create(lv_obj_get_parent(data->button));
     lv_label_set_long_mode(data->dcl_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_label_set_text(data->dcl_label, "Battery Current Limit Reached              Please Charge                     ");
-    lv_obj_set_width(data->dcl_label, 140);
-    lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
+    lv_label_set_text(data->dcl_label, "Please Charge                     Battery Current Limit Reached              ");
+    lv_obj_set_width(data->dcl_label, 300);
+    lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 5);
     lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
 
   // ADD EVENT HANDLER, LABELS AND UPDATE TIMER TO THERMOSTATIC HEATER BUTTONS
-  if ( ! timeout_ms ) {
+  if ( !timeout_ms ) {
     lv_obj_add_event_cb(data->button, thermostat_event_handler, LV_EVENT_CLICKED, data);
     data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
       lv_obj_set_width(data->label_obj, 80);
@@ -1003,13 +1003,13 @@ void thermostat_event_handler(lv_event_t *e) {
 
 
 
-// Heaters night mode
-void heaters_night_mode(user_data_t* data) {
+// HEATERS NIGHT MODE REDUCED TEMPERATURE - FUNCTION CALLED ONLY ONCE FOR BOTH HEATERS, AND THIS CHANGE IS NOT SHOWN ON SCREEN
+void heaters_night_mode() {
 
   static bool night_mode = false; // used to set temp only once allowing a manual selection override to remain
   static bool prev_daylight = false;
   static uint32_t sunset_ms = 0;
-  static bool preset_temp = 0;
+  static byte preset_temp[2] = {0, 0};
 
   // set previous daylight detection variable
   if ( CHG_ENABLED && !prev_daylight ) {
@@ -1024,14 +1024,20 @@ void heaters_night_mode(user_data_t* data) {
   // set 17C 3 hours after sunset
   else if ( sunset_ms && (millis() - sunset_ms) > 3*60*60*1000 && !night_mode ) {
     night_mode = true;
-    preset_temp = data->set_temp;
-    data->set_temp = 17;
+    for ( byte i = 0; i < 1; i++ ) {
+      preset_temp[i] = userData[i].set_temp;
+      userData[i].set_temp = 17;
+      Serial.println("DEBUG: Heaters in Night mode");
+    }
   }
   // reset temp to preselected value 9 hours after sunset or at sunrise
   else if ( sunset_ms && ((millis() - sunset_ms) > 9*60*60*1000 || CHG_ENABLED) && night_mode ) {
     night_mode = false;
     sunset_ms = 0;
-    data->set_temp = preset_temp;
+    for ( byte i = 0; i < 1; i++ ) {
+      userData[i].set_temp = preset_temp[i];
+      Serial.println("DEBUG: Heaters in day mode");
+    }
   }
 }
 
@@ -1083,7 +1089,7 @@ void create_temperature_dropdown(lv_obj_t *parent, user_data_t *data) {
   lv_dropdown_set_selected(dd, 4); // default index to be displayed. value set_temp in struct
   lv_obj_set_user_data(dd, data);
   lv_obj_add_event_cb(dd, dropdown_event_handler, LV_EVENT_VALUE_CHANGED, data);
-  
+
   // place roller
   lv_obj_set_pos(dd, 235, data->y_offset - 1);
   lv_obj_set_width(dd, 80);
@@ -1225,7 +1231,7 @@ void update_temp(user_data_t *data) {
     }
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }
-  // CLEAR DISABLED STATE IF NOT FAULTY TEMP SENSORS, BY DCL OR BY INVERTER DCL
+  // CLEAR DISABLED STATE IF NOT DISABLED BY FAULTY TEMP SENSORS, DCL OR OR INVERTER DCL
   else if ( !data->faulty_temp_disabled && !data->dcl_enforced_ms && !lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) && lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
     lv_obj_clear_state(data->button, LV_STATE_DISABLED);
   }
@@ -1907,9 +1913,9 @@ void combined_10s_updater(lv_timer_t *timer) {
   if ( msgboxData[0].update_timer ) {
     can_msgbox_update_timer(&msgboxData[0]);
   }
+  heaters_night_mode();
   for ( uint8_t i = 0; i < 2; i++ ) {
     update_temp(&userData[i]);
-    heaters_night_mode(&userData[i]);
     if ( userData[i].on ) {
       thermostat_checker(&userData[i]);
     }
