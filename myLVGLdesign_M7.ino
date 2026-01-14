@@ -122,9 +122,10 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   uint8_t y_offset = 0;
   unsigned long timeout_ms = 0;
   uint8_t dcl_limit = 0;
+  uint32_t dcl_enforced_ms = 0;
   uint8_t set_temp = 20; // should match value of dropdown default index
   bool on = false; // simplifies code by substituting [lv_obj_has_state(data->button, LV_STATE_CHECKED)]
-  bool disabled = false; // used by thermostat to prevent dcl_check from enabling disabled buttons
+  bool faulty_temp_disabled = false; // used by thermostat to prevent dcl_check from enabling disabled buttons
 } user_data_t;
 
 typedef struct {
@@ -336,19 +337,19 @@ void update_inverter_label(bool state, user_data_t* data) {
 
 // MPPT DELAYER ////////////////////////////////////////////////////////////////////////////////
 void mppt_delayer(bool mppt_delay) {
-  static uint32_t start_time_ms = 0;
+  static uint32_t delay_start_ms = 0;
 
   // START TIMER WHEN DELAY STARTS
-  if ( mppt_delay && ! start_time_ms ) {
-    start_time_ms = millis(); // Start the timer
+  if ( mppt_delay && ! delay_start_ms ) {
+    delay_start_ms = millis(); // Start the timer
   }
 
   // CHECK THAT MPPT DELAY LAST FOR AT LEAST 20s TO AVOID FLAPPING CONDITION
-  else if ( ! mppt_delay && start_time_ms && millis() - start_time_ms > 20000 ) {
+  else if ( ! mppt_delay && delay_start_ms && millis() - delay_start_ms > 20000 ) {
     mppt_delay = true;
   }
   else {
-    start_time_ms = 0; // Reset the timer after 20 seconds
+    delay_start_ms = 0; // Reset the timer after 20 seconds
   }
 
   // SET CAN MESSAGE AND ENABLE TX
@@ -466,61 +467,59 @@ void button_off(user_data_t *data) {
 
 
 
-// DCL AND LOW CELL VOLTAGE CHECK TIMER ////////////////////////////////////////////////////////////////////////////
+// DCL AND LOW CELL VOLTAGE CHECK TIMER - CALLED EVERY SECOND FOR EACH BUTTON ///////////////////////////////////////////
 void dcl_check(user_data_t *data) {
 
-  static uint32_t start_time = 0;
-
   // THERMOSTAT BUTTONS MAY ALREADY BE DISABLED BY FAULTY DHT22 SENSORS
-  if ( data->disabled ) {
+  if ( data->faulty_temp_disabled ) {
     return;
   }
 
-  // IF DISCHARGE CURRENT ABOVE DCL OR IF DCL IS ZERO, CELL VOLTAGE LOW OR DCH RELAY OPEN AND BUTTON NOT ALREADY DISABLED
-  else if ( AVG_AMPS > DCL || DCL == 0 || LO_CELL_V < (MIN_CELL_V + 0.3) || (RELAYS & 0x01) != 0x01 && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
-    for ( uint8_t i = 0; i < 4; i++ ) {
-      if ( userData[i].on ) {
-        button_off(&userData[i]);
-      }
-      // DISABLE ALL BUTTONS IF NOT ALREADY DONE
-      if ( ! lv_obj_has_state(userData[i].button, LV_STATE_DISABLED) ) {
-        lv_obj_add_state(userData[i].button, LV_STATE_DISABLED);
-      }
-    }
-    // CLEAR HIDDEN FLAG ON INVERTER DCL LABEL ONLY
-    if ( lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_clear_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN);
-    }
-    // SET INVERTER STATUS LABEL TEXT
-    update_inverter_label(0, &userData[3]);
-    start_time = millis();
-  }
-  // INDIVIDUAL BUTTON LIMITS IF NOT ALREADY DISABLED
-  else if ( DCL < data->dcl_limit && ! lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
-    // SHOW DCL LABEL
-    if ( lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // clear hidden flag to show
-    }
-    // TURN OFF BUTTON
-    if ( data->on ) {
-      button_off(data);
-      // UPDATE INVERTER STATUS LABEL
-      if ( data->relay_pin == RELAY1 ) {
-        update_inverter_label(0, data);
-      }
-    }
-    // DISABLE BUTTON - TEST PERFORMED IN ELSE IF CONDITION
-    lv_obj_add_state(data->button, LV_STATE_DISABLED);
-    start_time = millis();
+  // SET INVERTER LABEL AND START TIME IF CURRENT ABOVE DCL OR IF DCL IS ZERO, CELL VOLTAGE LOW OR DCH RELAY OPEN
+  else if ( data->relay_pin == RELAY1 && !data->dcl_enforced_ms && (AVG_AMPS > DCL || DCL == 0 || LO_CELL_V < (MIN_CELL_V + 0.3) || (RELAYS & 0x01) != 0x01) ) {
+    update_inverter_label(0, data); // set inverter status label
+    data->dcl_enforced_ms = millis();
+    dcl_check(data); // re-run this function immediately to enforce dcl immediately
   }
 
-  // RE-ENABLE DISABLED BUTTON IF WITHIN DCL AND IF BMS DISCHARGE RELAY CLOSED AND BUTTON(S) HAVE BEEN DISABLED FOR AT LEAST 60s
-  else if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) && (RELAYS & 0x01) == 0X01 && (millis() - start_time) > 60000 ) {
-    if ( ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+  // INDIVIDUAL BUTTON LIMITS IF NOT ALREADY DISABLED OR INVERTER IS DISABLED ALREADY
+  else if ( !data->dcl_enforced_ms && DCL < data->dcl_limit || lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
+    data->dcl_enforced_ms = millis();
+    dcl_check(data); // re-run this function immediately to enforce dcl immediately
+  }
+
+  // HIDE LABEL AND RE-ENABLE BUTTON
+  else if ( !data->dcl_enforced_ms ) {
+    if ( !lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
     }
-    lv_obj_clear_state(data->button, LV_STATE_DISABLED);
-    start_time = 0;
+    if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
+      lv_obj_clear_state(data->button, LV_STATE_DISABLED);
+    }
+  }
+
+  // RESET DCL ENFORCED TIMER TO RE-ENABLE IF TIMER AND DCL WITHIN CRITERIA AND DCH CONTACTOR CLOSED
+  else if ( (millis() - data->dcl_enforced_ms) > 60000 && lv_obj_has_state(data->button, LV_STATE_DISABLED) && (RELAYS & 0x01) == 0X01 && DCL > 0 ) {
+    if ( data->relay_pin == RELAY1 && data->dcl_limit < DCL ) {
+      data->dcl_enforced_ms = 0;
+    }
+    else if ( data->relay_pin != RELAY1 && !lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) && data->dcl_limit < DCL ) {
+      data->dcl_enforced_ms = 0;
+    }
+  }
+
+  // MANAGE LABEL, TURN OFF AND DISABLE BUTTON
+  else if ( data->dcl_enforced_ms ) {
+    // show button flags for inverter or if inverter is not disabled for other buttons
+    if ( data->relay_pin == RELAY1 || !lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) { // if inverter or if inverter is not disabled
+      lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
+    }
+    if ( data->on ) {
+      button_off(data); // turn button off
+    }
+    if ( !lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
+      lv_obj_add_state(data->button, LV_STATE_DISABLED); // disable button
+    }
   }
 }
 
@@ -913,7 +912,7 @@ void thermostat_checker(user_data_t *data, bool reset_timer = false) {
   static uint32_t thermostat_off_ms = 0;
   bool on = false;
 
-  if ( reset_timer ) {
+  if ( reset_timer || data->dcl_enforced_ms ) {
     thermostat_off_ms = 0;
     return;
   }
@@ -981,7 +980,6 @@ void thermostat_event_handler(lv_event_t *e) {
       lv_event_send(userData[3].button, LV_EVENT_CLICKED, NULL);
       // DEBUG if inverter is still off disable change flag
       if ( userData[3].on == false ) {
-        Serial.println("DEBUG: Thermostat event handler IF inverter doesn't turn ON");
         lv_obj_clear_state(data->button, LV_STATE_CHECKED);
         return; // exit function if inverter is off
       }
@@ -1170,7 +1168,7 @@ void update_temp(user_data_t *data) {
   static lv_timer_t *sensor_fault_timer = NULL;
 
   char buf[20];
-  data->disabled = false; // reset before run - used to prevent dcl_check from enabling disabled buttons
+  data -> faulty_temp_disabled = false; // reset before run - used to prevent dcl_check from enabling disabled buttons
   bool sensor_fault = false;
   bool all_sensors_faulty = false;
 
@@ -1195,7 +1193,7 @@ void update_temp(user_data_t *data) {
     else {
       snprintf(buf, sizeof(buf), "----");
       all_sensors_faulty = true;
-      data->disabled = true;
+      data -> faulty_temp_disabled = true;
     }
 
     // CALL FAULT LABEL MAKER FUNCTION AT INTERVALS 8 OR 5 SEC
@@ -1216,19 +1214,19 @@ void update_temp(user_data_t *data) {
     }
     else {
       snprintf(buf, sizeof(buf), "#3 --");
-      data->disabled = true;
+      data -> faulty_temp_disabled = true;
     }
   }
 
   // TURN OFF BUTTON AND ADD DISABLED STATE
-  if ( data->disabled && ! lv_obj_has_state(data->button, LV_STATE_DISABLED)) {
+  if ( data -> faulty_temp_disabled && ! lv_obj_has_state(data->button, LV_STATE_DISABLED)) {
     if (data->on == true) {
       lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
     }
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
   }
-  // CLEAR DISABLED STATE IF NOT ENFORCED BY DCL_CHECK FUNCTION
-  else if ( ! data->disabled && lv_obj_has_state(data->button, LV_STATE_DISABLED) && ! lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
+  // CLEAR DISABLED STATE IF NOT FAULTY TEMP SENSORS, BY DCL OR BY INVERTER DCL
+  else if ( !data->faulty_temp_disabled && !data->dcl_enforced_ms && !lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) && lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
     lv_obj_clear_state(data->button, LV_STATE_DISABLED);
   }
 
@@ -1661,7 +1659,7 @@ void charge_icons_updater(data_display_t *data) {
   // RED BATTERY ICON FROM SOC 10% AND LESS WITH FLASHING BELOW 5% OR IF DISCHARGE DISABLED
   else  {
     lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_RED), NULL);
-    if ( SOC < 5 || userData[3].disabled ) {
+    if ( SOC < 5 || userData[3].faulty_temp_disabled ) {
       flashing_battery = true;
     }
   }
@@ -2148,7 +2146,7 @@ void loop() {
   /*if (Serial) {
     // Average loop lap time of 256 iterations - reflects the lvgl delay at end of loop
     static uint8_t i = 0;
-    static uint32_t start_time = millis();
+    static uint32_t dcl_enforced_ms = millis();
     static bool finished = false;
 
     // start iterations
@@ -2157,7 +2155,7 @@ void loop() {
     }
     // calculate and write result
     else if ( ! finished ) {
-      uint8_t avg_lap = (millis() - start_time) / 256;
+      uint8_t avg_lap = (millis() - dcl_enforced_ms) / 256;
       char buf[30];
       snprintf(buf, sizeof(buf), "%d ms average loop lap", avg_lap);
       Serial.println(buf);
