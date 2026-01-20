@@ -252,7 +252,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   data->dcl_label = lv_label_create(lv_obj_get_parent(data->button));
     lv_label_set_long_mode(data->dcl_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_label_set_text(data->dcl_label, "Please Charge                     Battery Current Limit Reached              ");
-    lv_obj_set_width(data->dcl_label, 300);
+    lv_obj_set_width(data->dcl_label, 200);
     lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 5);
     lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
 
@@ -302,7 +302,7 @@ void update_inverter_label(bool state, user_data_t* data) {
   byte x_pos = 16;
 
   // is dcl enforced hide inverter label
-  if ( ! lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+  if ( data->dcl_enforced_ms ) {
     lv_obj_add_flag(data->label_obj, LV_OBJ_FLAG_HIDDEN);
     return;
   }
@@ -477,15 +477,14 @@ void dcl_check(user_data_t *data) {
 
   // SET INVERTER LABEL AND START TIME IF CURRENT ABOVE DCL OR IF DCL IS ZERO, CELL VOLTAGE LOW OR DCH RELAY OPEN
   else if ( data->relay_pin == RELAY1 && !data->dcl_enforced_ms && (AVG_AMPS > DCL || DCL == 0 || LO_CELL_V < (MIN_CELL_V + 0.3) || (RELAYS & 0x01) != 0x01) ) {
-    update_inverter_label(0, data); // set inverter status label
     data->dcl_enforced_ms = millis();
-    dcl_check(data); // re-run this function immediately to enforce dcl immediately
+    return;
   }
 
   // INDIVIDUAL BUTTON LIMITS IF NOT ALREADY DISABLED OR INVERTER IS DISABLED ALREADY
-  else if ( !data->dcl_enforced_ms && DCL < data->dcl_limit || lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) {
+  else if ( !data->dcl_enforced_ms && (DCL < data->dcl_limit || lv_obj_has_state(userData[3].button, LV_STATE_DISABLED)) ) {
     data->dcl_enforced_ms = millis();
-    dcl_check(data); // re-run this function immediately to enforce dcl immediately
+    return;
   }
 
   // HIDE LABEL AND RE-ENABLE BUTTON
@@ -509,17 +508,16 @@ void dcl_check(user_data_t *data) {
   }
 
   // MANAGE LABEL, TURN OFF AND DISABLE BUTTON
-  else if ( data->dcl_enforced_ms ) {
+  else if ( data->dcl_enforced_ms && !lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
     // show button flags for inverter or if inverter is not disabled for other buttons
     if ( data->relay_pin == RELAY1 || !lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) { // if inverter or if inverter is not disabled
       lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
+      update_inverter_label(0, &userData[3]); // run updater to hide inverter label, must send specific userdata only from inverter struct
     }
     if ( data->on ) {
       button_off(data); // turn button off
     }
-    if ( !lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
-      lv_obj_add_state(data->button, LV_STATE_DISABLED); // disable button
-    }
+    lv_obj_add_state(data->button, LV_STATE_DISABLED); // disable button
   }
 }
 
