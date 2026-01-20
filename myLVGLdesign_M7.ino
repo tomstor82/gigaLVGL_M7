@@ -253,7 +253,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     lv_label_set_long_mode(data->dcl_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_label_set_text(data->dcl_label, "Please Charge                     Battery Current Limit Reached              ");
     lv_obj_set_width(data->dcl_label, 200);
-    lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 5);
+    lv_obj_align_to(data->dcl_label, data->button, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 11);
     lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
 
   // ADD EVENT HANDLER, LABELS AND UPDATE TIMER TO THERMOSTATIC HEATER BUTTONS
@@ -333,8 +333,6 @@ void update_inverter_label(bool state, user_data_t* data) {
 
 
 
-
-
 // MPPT DELAYER ////////////////////////////////////////////////////////////////////////////////
 void mppt_delayer(bool mppt_delay) {
   static uint32_t delay_start_ms = 0;
@@ -361,6 +359,13 @@ void mppt_delayer(bool mppt_delay) {
     TRIP_PV = 0x00;
   }
 }
+
+
+
+
+
+
+
 
 
 // SUNRISE DETECTOR - ACTIVE WHEN INVERTER IS OFF //////////////////////////////////////////////////////
@@ -420,8 +425,6 @@ void sunrise_detector() {
 
 
 
-
-
 // CCL AND HIGH CELL VOLTAGE CHECK TIMER ////////////////////////////////////////////////////////////////////////////
 void ccl_check() {
 
@@ -464,9 +467,6 @@ void button_off(user_data_t *data) {
 
 
 
-
-
-
 // DCL AND LOW CELL VOLTAGE CHECK TIMER - CALLED EVERY SECOND FOR EACH BUTTON ///////////////////////////////////////////
 void dcl_check(user_data_t *data) {
 
@@ -497,34 +497,39 @@ void dcl_check(user_data_t *data) {
     }
   }
 
-  // RESET DCL ENFORCED TIMER TO RE-ENABLE IF TIMER AND DCL WITHIN CRITERIA AND DCH CONTACTOR CLOSED
-  else if ( (millis() - data->dcl_enforced_ms) > 60000 && lv_obj_has_state(data->button, LV_STATE_DISABLED) && (RELAYS & 0x01) == 0X01 && DCL > 0 ) {
-    if ( data->relay_pin == RELAY1 && data->dcl_limit < DCL ) {
-      data->dcl_enforced_ms = 0;
-    }
-    else if ( data->relay_pin != RELAY1 && !lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) && data->dcl_limit < DCL ) {
-      data->dcl_enforced_ms = 0;
-    }
+  // RESET DCL ENFORCED TIMER TO RE-ENABLE IF TIMER AND DCL WITHIN CRITERIA AND DCH CONTACTOR CLOSED - AS INVERTER HAS LOWEST DCL IT WILL ALWAYS ENABLE BEFORE BUTTONS
+  else if ( (millis() - data->dcl_enforced_ms) > 60000 && lv_obj_has_state(data->button, LV_STATE_DISABLED) && (RELAYS & 0x01) == 0X01 && data->dcl_limit < DCL) {
+    data->dcl_enforced_ms = 0;
   }
 
-  // MANAGE LABEL, TURN OFF AND DISABLE BUTTON
-  else if ( data->dcl_enforced_ms && !lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
-    // show button flags for inverter or if inverter is not disabled for other buttons
-    if ( data->relay_pin == RELAY1 || !lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) ) { // if inverter or if inverter is not disabled
-      lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
-      update_inverter_label(0, &userData[3]); // run updater to hide inverter label, must send specific userdata only from inverter struct
+  // MANAGE LABELS, TURN OFF AND DISABLE BUTTON
+  else if ( data->dcl_enforced_ms ) {
+
+    // FOR BUTTONS EXCLUDING INVERTER
+    if ( data->relay_pin != RELAY1 ) {
+      // SHOW LABELS ONLY IF INVERTER IS NOT DISABLED
+      if ( !lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) && lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+        lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
+      }
+      // HIDE LABEL IF INVERTER IS DISABLED
+      else if ( lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) && !lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+        lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
+      }
     }
+    // INVERTER
+    else if ( lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
+      update_inverter_label(0, data); // run updater to hide inverter label
+    }
+
     if ( data->on ) {
       button_off(data); // turn button off
     }
-    lv_obj_add_state(data->button, LV_STATE_DISABLED); // disable button
+    if ( !lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
+      lv_obj_add_state(data->button, LV_STATE_DISABLED); // disable button
+    }
   }
 }
-
-
-
-
-
 
 
 
