@@ -1944,7 +1944,22 @@ void leaf_icon_event_handler(lv_event_t* e) {
   }
 }
 
-
+void serial_debug() {
+  // ALLOW 10 ITERATIONS BEFORE PRINT TO CAPTURE DATA ONCE SCRIPT IS RUNNING
+  static byte run = 0;
+  if ( run > 10 || !Serial ) {
+    return;
+  }
+  else if ( run == 10 ) {
+    Serial.println("DEBUG parameters: ");
+    Serial.print("Balancing active: ");Serial.println(BLCG_ACTIVE);
+    Serial.print("Balancing allowed: ");Serial.println(BLCG_ALLOWED);
+    Serial.print("Avg amps: ");Serial.println(AVG_AMPS);
+    Serial.print("Low Cell Voltage: ");Serial.println(LO_CELL_V);
+    Serial.print("High Cell Voltage: ");Serial.println(HI_CELL_V);
+  }
+  run++;
+}
 
 
 // SETUP //////////////////////////////////////////////////////////////////////////////
@@ -2149,9 +2164,12 @@ void loop() {
     BLCG_ALLOWED = 0x00; // Balancing NOT Allowed
   }
   // START BALANCING
-  else if ( !BLCG_ACTIVE && !BLCG_ALLOWED && AVG_AMPS < 0 && LO_CELL_V > 3.25 && (HI_CELL_V - LO_CELL_V) >= 0.02) {
+  else if ( !BLCG_ALLOWED && AVG_AMPS < 0 && LO_CELL_V > 3.25 && (HI_CELL_V - LO_CELL_V) >= 0.02) {
     BLCG_ALLOWED = 0x01; // Balancing Allowed
   }
+
+  // Debug function
+  if(Serial) { serial_debug(); }
   /*if (Serial) {
     // Average loop lap time of 256 iterations - reflects the lvgl delay at end of loop
     static uint8_t i = 0;
