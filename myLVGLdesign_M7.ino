@@ -1588,6 +1588,7 @@ void refresh_bms_status_data(bms_status_data_t *data) {
     // HIDE BUTTON
     else if ( flag_index == comparator_index && ! lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
+      //lv_event_send(data->button, LV_EVENT_VALUE_CHANGED, data); // clear pressed state
     }
   }
 
@@ -1623,6 +1624,7 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
       lv_obj_t *btn_label = lv_label_create(data->button);
       lv_label_set_text(btn_label, "Clear BMS Flags");
       lv_obj_add_event_cb(data->button, clear_bms_flag, LV_EVENT_CLICKED, NULL);
+      lv_obj_add_flag(data->button, LV_OBJ_FLAG_CLICKABLE);//CLICK_FOCUSABLE);//CHECKABLE);
       lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
   }
 }
