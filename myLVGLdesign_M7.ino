@@ -1624,7 +1624,7 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
       lv_obj_t *btn_label = lv_label_create(data->button);
       lv_label_set_text(btn_label, "Clear BMS Flags");
       lv_obj_add_event_cb(data->button, clear_bms_flag, LV_EVENT_CLICKED, NULL);
-      lv_obj_add_flag(data->button, LV_OBJ_FLAG_CLICKABLE);//CLICK_FOCUSABLE);//CHECKABLE);
+      lv_obj_add_flag(data->button, LV_OBJ_FLAG_CLICK_FOCUSABLE);//CHECKABLE);
       lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
   }
 }
@@ -2093,7 +2093,7 @@ void loop() {
   }
 
   // send CAN if commanded
-  if ( CLEAR_BMS || TRIP_PV || BLCG_ALLOWED ) {
+  if ( CLEAR_BMS || TRIP_PV || canMsgData.msg_data[2] ) {
     CanMsg send_msg(CanStandardId(canMsgData.CAN_ID), sizeof(CAN_MSG), CAN_MSG);
 
     // retry if send failed for byte 0 - clear bms through mpo2
