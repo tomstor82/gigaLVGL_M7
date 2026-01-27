@@ -2160,11 +2160,11 @@ void loop() {
 
   // ARDUINO COMMANDED CELL BALANCING IF CELLS ARE ABOVE 3,25V WITH CELL DIFF GREATER THAN 20mV UNDER CHARGE
   // STOP BALANCING
-  if ( BLCG_ALLOWED && AVG_AMPS >= 0 && LO_CELL_V < 3.2 && (HI_CELL_V - LO_CELL_V) < 0.02 ) {
+  if ( BLCG_ALLOWED && (AVG_AMPS >= 0 || LO_CELL_V < 3.2) && (HI_CELL_V - LO_CELL_V) < 0.02 ) {
     BLCG_ALLOWED = 0x00; // Balancing NOT Allowed
   }
   // START BALANCING
-  else if ( !BLCG_ALLOWED && AVG_AMPS < 0 && LO_CELL_V > 3.25 && (HI_CELL_V - LO_CELL_V) >= 0.02) {
+  else if ( !BLCG_ALLOWED && AVG_AMPS < 0 && HI_CELL_V > 3.25 && (HI_CELL_V - LO_CELL_V) >= 0.02 ) {
     BLCG_ALLOWED = 0x01; // Balancing Allowed
   }
 
