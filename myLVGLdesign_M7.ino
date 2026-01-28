@@ -167,10 +167,6 @@ static CombinedData combinedData;
 // Macro short-hands that are free
 #define CAN_RX_BUF      canMsgData.rxBuf
 #define CAN_RX_ID       canMsgData.rxId
-#define CAN_MSG         canMsgData.msg_data
-#define CAN_RETRIES     canMsgData.msg_cnt
-#define CLEAR_BMS       canMsgData.msg_data[0]
-#define TRIP_PV         canMsgData.msg_data[1]
 
 #define AVG_TEMP        combinedData.sensorData.avg_temp
 #define TEMP1           combinedData.sensorData.temp1
@@ -337,12 +333,12 @@ void mppt_delayer(bool mppt_delay) {
   static uint32_t delay_start_ms = 0;
 
   // START TIMER WHEN DELAY STARTS
-  if ( mppt_delay && ! delay_start_ms ) {
+  if ( mppt_delay && !delay_start_ms ) {
     delay_start_ms = millis(); // Start the timer
   }
 
   // CHECK THAT MPPT DELAY LAST FOR AT LEAST 20s TO AVOID FLAPPING CONDITION
-  else if ( ! mppt_delay && delay_start_ms && millis() - delay_start_ms > 20000 ) {
+  else if ( !mppt_delay && delay_start_ms && millis() - delay_start_ms > 20000 ) {
     mppt_delay = true;
   }
   else {
@@ -351,11 +347,11 @@ void mppt_delayer(bool mppt_delay) {
 
   // SET CAN MESSAGE AND ENABLE TX
   if ( mppt_delay ) {
-    TRIP_PV = 0x01;
+    canMsgData.msg_data[1] = 0x01;
   }
   // REMOVE MESSAGE AND DISABLE TX IF CCL IS NOT ENFORCED
-  else if ( ! CCL_ENFORCED ) {
-    TRIP_PV = 0x00;
+  else if ( !CCL_ENFORCED ) {
+    canMsgData.msg_data[1] = 0x00;
   }
 }
 
@@ -374,10 +370,10 @@ void sunrise_detector() {
   static uint32_t time_ms = 0;
 
   // IS SOLAR CHARGE SIGNAL AVAILABLE THROUGH CUSTOM FLAG AND MPPT DELAY VARIABLE FALSE
-  if ( CHG_ENABLED && ! mppt_delay ) {
+  if ( CHG_ENABLED && !mppt_delay ) {
 
     // START TIME TO CHECK WHEN SOLAR SIGNAL IS LOST
-    if ( ! time_ms ) {
+    if ( !time_ms ) {
       time_ms = millis();
     }
 
@@ -389,7 +385,7 @@ void sunrise_detector() {
   }
 
   // IF SOLAR CHARGE SIGNAL IS LOST
-  else if ( ! CHG_ENABLED && time_ms && ! mppt_delay ) {
+  else if ( !CHG_ENABLED && time_ms && !mppt_delay ) {
 
     // within 10 seconds lets trigger mppt delay as relay flap detected
     if ( (millis() - time_ms) < 10000 ) {
@@ -405,7 +401,7 @@ void sunrise_detector() {
   }
 
   // when mppt delay timer has expired - currently after 10 minutes
-  if ( mppt_delay && (millis() - time_ms) > 600000 && ! CCL_ENFORCED ) {
+  if ( mppt_delay && (millis() - time_ms) > 600000 && !CCL_ENFORCED ) {
     time_ms = 0;
     mppt_delay = false;
   }
@@ -431,13 +427,13 @@ void ccl_check() {
 
   // OPEN CONTACTOR AT 0 CCL OR CELL APPROACHING MAX VOLTAGE
   else if ( !CCL_ENFORCED && CCL == 0 || HI_CELL_V > (MAX_CELL_V - 0.02) ) {
-    TRIP_PV = 0x01;
+    canMsgData.msg_data[1] = 0x01;
     strcpy(DYNAMIC_LABEL, "Solar OFF - CCL enforced");
     CCL_ENFORCED = true;
   }
   // CLOSE CONTACTOR WHEN CCL IS ABOVE 0 OR CELL VOLTAGE HAS DROPPED LOW ENOUGH 
   else if ( CCL_ENFORCED && CCL > 0 || HI_CELL_V < (MAX_CELL_V - 0.2) ) {
-    TRIP_PV = 0x00;
+    canMsgData.msg_data[1] = 0x00;
     CCL_ENFORCED = false;
   }
 }
@@ -694,7 +690,7 @@ void close_sensor_msgbox_event_handler(lv_event_t *e) {
 
 
 void inverter_start() {
-  TRIP_PV = 0x01;
+  canMsgData.msg_data[1] = 0x01;
   strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter starting");
   inverter_delay = true;
 }
@@ -1259,7 +1255,9 @@ void update_temp(user_data_t *data) {
 
 // CLEAR BMS FLAG CAN MSG EVENT HANDLER ////////////////////////////////////////////////////////////////////
 void clear_bms_flag(lv_event_t *e) {
-  CLEAR_BMS = 0x01;
+  //user_data_t *data = (user_data_t *)lv_event_get_user_data(e);
+  //lv_obj_clear_state/*event_send*/(data->button, LV_STATE_CHECKED/*EVENT_VALUE_CHANGED, data*/); // clear pressed state
+  canMsgData.msg_data[0] = 0x01;
   Serial.println("Sending CAN msg to clear BMS flags");
 }
 
@@ -1450,7 +1448,7 @@ void dim_display() {
 // SCREEN TOUCH HANDLER FOR DISPLAY DIMMING ///////////////////////////////////////////
 void screen_touch(lv_event_t *e) {
   lv_event_code_t code = lv_event_get_code(e);
-  if(code == LV_EVENT_CLICKED) {
+  if ( code == LV_EVENT_CLICKED ) {
     previous_touch_ms = millis();
     brightness = 70;
     backlight.set(brightness);
@@ -1483,7 +1481,7 @@ void create_status_label(const char* label_text, bms_status_data_t *data, bool f
   // if finised argument is true allign button and reset index to be ready for next round of calls
   if ( finished ) {
     // Align button if it is visible
-    if ( ! lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
+    if ( !lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_align_to(data->button, data->status_label[i-1], LV_ALIGN_OUT_BOTTOM_MID, 0, 20); // Align button below last label with index controlled gap (compensated for ++)
     }
     i = 0; // reset index for next cycle
@@ -1491,7 +1489,7 @@ void create_status_label(const char* label_text, bms_status_data_t *data, bool f
 
   // create label if it doesn't exist and add passed text to label object
   else {
-    if ( ! data->status_label[i] ) {
+    if ( !data->status_label[i] ) {
       data->status_label[i] = lv_label_create(data->parent);
     }
     // add text to label index and allign vertically by index
@@ -1556,7 +1554,7 @@ void refresh_bms_status_data(bms_status_data_t *data) {
   // CONTROLLED BY ARDUINO AND DISABLED IN BMS if ((RELAYS & 0x0002) == 0x0000) { create_status_label("Charge Relay Opened", data); flag_index++; }
 
   // Custom status messages
-  if ( TRIP_PV ) { create_status_label(DYNAMIC_LABEL, data); flag_index++; comparator_index++;}
+  if ( canMsgData.msg_data[1] ) { create_status_label(DYNAMIC_LABEL, data); flag_index++; comparator_index++;}
   if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Arduino - Discharge Disabled", data); flag_index++; comparator_index++;} // If Inverter DCL CHECK triggered
 
   // Cell balancing check at end ensures higher importance messages appear above
@@ -1588,16 +1586,15 @@ void refresh_bms_status_data(bms_status_data_t *data) {
     // HIDE BUTTON
     else if ( flag_index == comparator_index && ! lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
-      //lv_event_send(data->button, LV_EVENT_VALUE_CHANGED, data); // clear pressed state
     }
   }
 
   // HIDE EVERYTHING IF NO FLAGS AND IF THEY WERE VISIBLE PREVIOUSLY
   else {
-    if ( ! lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ){
+    if ( !lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ){
        lv_obj_add_flag(data->title_label, LV_OBJ_FLAG_HIDDEN);
     }
-    if ( ! lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
+    if ( !lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
        lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
     }
   }
@@ -1624,7 +1621,7 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
       lv_obj_t *btn_label = lv_label_create(data->button);
       lv_label_set_text(btn_label, "Clear BMS Flags");
       lv_obj_add_event_cb(data->button, clear_bms_flag, LV_EVENT_CLICKED, NULL);
-      lv_obj_add_flag(data->button, LV_OBJ_FLAG_CLICK_FOCUSABLE);//CHECKABLE);
+      lv_obj_add_flag(data->button, LV_OBJ_FLAG_CHECKABLE);
       lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
   }
 }
@@ -2093,24 +2090,25 @@ void loop() {
   }
 
   // send CAN if commanded
-  if ( CLEAR_BMS || TRIP_PV || canMsgData.msg_data[2] ) {
-    CanMsg send_msg(CanStandardId(canMsgData.CAN_ID), sizeof(CAN_MSG), CAN_MSG);
+  if ( canMsgData.msg_data[0] || canMsgData.msg_data[1] || canMsgData.msg_data[2] ) {
+    CanMsg send_msg(CanStandardId(canMsgData.CAN_ID), sizeof(canMsgData.msg_data), canMsgData.msg_data);
 
     // retry if send failed for byte 0 - clear bms through mpo2
     int const rc = CAN.write(send_msg);
-    if (rc <= 0 && CAN_RETRIES < 3) { // if CAN.write returns 0 or lower errors have occurred in transmission
+    if (rc <= 0 && canMsgData.msg_cnt < 3) { // if CAN.write returns 0 or lower errors have occurred in transmission
       Serial.print("CAN.write(...) failed with error code ");
       Serial.println(rc);
-      CAN_RETRIES++;
+      canMsgData.msg_cnt++;
     }
     // Stop MPO#2 signal if successful or after 3 retries
-    else if ( CLEAR_BMS ) {
-      CLEAR_BMS = 0x00; // clear send data
-      CAN_RETRIES = 0;
+    else if ( canMsgData.msg_data[0] ) {
+      canMsgData.msg_data[0] = 0x00; // clear send data
+      canMsgData.msg_cnt = 0;
+      lv_obj_clear_state/*event_send*/(bmsStatusData.button, LV_STATE_CHECKED/*EVENT_VALUE_CHANGED, data*/); // clear pressed state
     }
     // Trip PV and Balancing are initiated and stopped by timers or loop
     else {
-      CAN_RETRIES = 0;
+      canMsgData.msg_cnt = 0;
     }
   }
   if (RPC.available()) {
@@ -2147,7 +2145,7 @@ void loop() {
 
     // WAIT 30s BEFORE SENDING MPPT RESTART SIGNAL AS SUNRISE_DETECTOR IS DISABLED WITH INVERTER ON OR IF INVERTER HAS BEEN SWITCH OFF
     else if ( millis() - time_ms > 30000 && (inverter_on || userData[3].on == false) ) {
-      TRIP_PV = 0x00;
+      canMsgData.msg_data[1] = 0x00;
       time_ms = 0;
       inverter_on = false; // reset for next start delay
       inverter_delay = false; // stop this function executing
