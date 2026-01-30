@@ -97,7 +97,7 @@ struct CanMsgData {
   // TX
   static const uint8_t CAN_ID = 0x02; // CAN id for the message (constant)
   uint8_t msg_data[3] = {0x00, 0x00, 0x00}; // 3 bytes used in BMS for MPO#2, MPO#1 and balancing allowed signals uint8_t indicates each index is 1 byte
-  uint8_t msg_cnt = 0;
+  uint8_t tx_retries = 0;
 };
 
 // Type defined structure for bms status messages allowing it to be passed to function
@@ -155,6 +155,10 @@ typedef struct {
   uint8_t watt_label_x_pos = 0;
 } data_display_t;
 
+typedef struct {
+  lv_obj_t *dd = NULL;
+} temp_dd_t;
+
 //Initialise structures
 static CanMsgData canMsgData;
 static bms_status_data_t bmsStatusData;
@@ -163,10 +167,16 @@ static clock_data_t clockData;
 static msgbox_data_t msgboxData[2] = {};
 static data_display_t dataDisplay;
 static CombinedData combinedData;
+static temp_dd_t tempDropdown[2] = {};
 
 // Macro short-hands that are free
 #define CAN_RX_BUF      canMsgData.rxBuf
 #define CAN_RX_ID       canMsgData.rxId
+#define CAN_RETRIES     canMsgData.tx_retries
+#define CAN_MSG         canMsgData.msg_data
+#define CLEAR_BMS       canMsgData.msg_data[0]
+#define TRIP_PV         canMsgData.msg_data[1]
+#define BLCG_ALLOWED    canMsgData.msg_data[2]
 
 #define AVG_TEMP        combinedData.sensorData.avg_temp
 #define TEMP1           combinedData.sensorData.temp1
@@ -347,11 +357,11 @@ void mppt_delayer(bool mppt_delay) {
 
   // SET CAN MESSAGE AND ENABLE TX
   if ( mppt_delay ) {
-    canMsgData.msg_data[1] = 0x01;
+    TRIP_PV = 0x01;
   }
   // REMOVE MESSAGE AND DISABLE TX IF CCL IS NOT ENFORCED
   else if ( !CCL_ENFORCED ) {
-    canMsgData.msg_data[1] = 0x00;
+    TRIP_PV = 0x00;
   }
 }
 
@@ -427,13 +437,13 @@ void ccl_check() {
 
   // OPEN CONTACTOR AT 0 CCL OR CELL APPROACHING MAX VOLTAGE
   else if ( !CCL_ENFORCED && CCL == 0 || HI_CELL_V > (MAX_CELL_V - 0.02) ) {
-    canMsgData.msg_data[1] = 0x01;
+    TRIP_PV = 0x01;
     strcpy(DYNAMIC_LABEL, "Solar OFF - CCL enforced");
     CCL_ENFORCED = true;
   }
   // CLOSE CONTACTOR WHEN CCL IS ABOVE 0 OR CELL VOLTAGE HAS DROPPED LOW ENOUGH 
   else if ( CCL_ENFORCED && CCL > 0 || HI_CELL_V < (MAX_CELL_V - 0.2) ) {
-    canMsgData.msg_data[1] = 0x00;
+    TRIP_PV = 0x00;
     CCL_ENFORCED = false;
   }
 }
@@ -690,7 +700,7 @@ void close_sensor_msgbox_event_handler(lv_event_t *e) {
 
 
 void inverter_start() {
-  canMsgData.msg_data[1] = 0x01;
+  TRIP_PV = 0x01;
   strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter starting");
   inverter_delay = true;
 }
@@ -1023,9 +1033,9 @@ void heaters_night_mode() {
   else if ( sunset_ms && (millis() - sunset_ms) > 3*60*60*1000 && !night_mode ) {
     night_mode = true;
     for ( byte i = 0; i < 1; i++ ) {
-      preset_temp[i] = userData[i].set_temp;
-      userData[i].set_temp = 17;
-      Serial.println("DEBUG: Heaters in Night mode");
+      preset_temp[i] = lv_dropdown_get_selected(tempDropdown[i].dd);
+      userData[i].set_temp = 17;  // set temperature for thermostat logic
+      lv_dropdown_set_selected(tempDropdown[i].dd, 1);  // set temperature in dropdown menu
     }
   }
   // reset temp to preselected value 9 hours after sunset or at sunrise
@@ -1034,7 +1044,7 @@ void heaters_night_mode() {
     sunset_ms = 0;
     for ( byte i = 0; i < 1; i++ ) {
       userData[i].set_temp = preset_temp[i];
-      Serial.println("DEBUG: Heaters in day mode");
+      lv_dropdown_set_selected(tempDropdown[i].dd, preset_temp[i]);
     }
   }
 }
@@ -1058,7 +1068,7 @@ void dropdown_event_handler(lv_event_t *e) {
       data->set_temp = 5;
       break;
     case 1:
-      data->set_temp = 18;
+      data->set_temp = 17;
       break;
     case 2:
       data->set_temp = 19;
@@ -1079,18 +1089,23 @@ void dropdown_event_handler(lv_event_t *e) {
 
 // CREATE TEMPERATURE SELECTION DROPDOWN MENU ///////////////////////////////////////
 void create_temperature_dropdown(lv_obj_t *parent, user_data_t *data) {
-  lv_obj_t *dd = lv_dropdown_create(parent);
-  lv_dropdown_set_options(dd,
+  // set index to determine which drop down struct to use
+  byte i = 0;
+  if ( data->relay_pin == RELAY4 ) {
+    i = 1;
+  }
+  tempDropdown[i].dd = lv_dropdown_create(parent);
+  lv_dropdown_set_options(tempDropdown[i].dd,
     "5\u00B0C\n18\u00B0C\n19\u00B0C\n20\u00B0C\n21\u00B0C\n22\u00B0C\n23\u00B0C");
     
   // set user data
-  lv_dropdown_set_selected(dd, 4); // default index to be displayed. value set_temp in struct
-  lv_obj_set_user_data(dd, data);
-  lv_obj_add_event_cb(dd, dropdown_event_handler, LV_EVENT_VALUE_CHANGED, data);
+  lv_dropdown_set_selected(tempDropdown[i].dd, 4); // default index to be displayed. value set_temp in struct
+  lv_obj_set_user_data(tempDropdown[i].dd, data);
+  lv_obj_add_event_cb(tempDropdown[i].dd, dropdown_event_handler, LV_EVENT_VALUE_CHANGED, data);
 
   // place roller
-  lv_obj_set_pos(dd, 235, data->y_offset - 1);
-  lv_obj_set_width(dd, 80);
+  lv_obj_set_pos(tempDropdown[i].dd, 235, data->y_offset - 1);
+  lv_obj_set_width(tempDropdown[i].dd, 80);
 }
 
 
@@ -1257,7 +1272,7 @@ void update_temp(user_data_t *data) {
 void clear_bms_flag(lv_event_t *e) {
   //user_data_t *data = (user_data_t *)lv_event_get_user_data(e);
   //lv_obj_clear_state/*event_send*/(data->button, LV_STATE_CHECKED/*EVENT_VALUE_CHANGED, data*/); // clear pressed state
-  canMsgData.msg_data[0] = 0x01;
+  CLEAR_BMS = 0x01;
   Serial.println("Sending CAN msg to clear BMS flags");
 }
 
@@ -1554,7 +1569,7 @@ void refresh_bms_status_data(bms_status_data_t *data) {
   // CONTROLLED BY ARDUINO AND DISABLED IN BMS if ((RELAYS & 0x0002) == 0x0000) { create_status_label("Charge Relay Opened", data); flag_index++; }
 
   // Custom status messages
-  if ( canMsgData.msg_data[1] ) { create_status_label(DYNAMIC_LABEL, data); flag_index++; comparator_index++;}
+  if ( TRIP_PV ) { create_status_label(DYNAMIC_LABEL, data); flag_index++; comparator_index++;}
   if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Arduino - Discharge Disabled", data); flag_index++; comparator_index++;} // If Inverter DCL CHECK triggered
 
   // Cell balancing check at end ensures higher importance messages appear above
@@ -1621,7 +1636,7 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
       lv_obj_t *btn_label = lv_label_create(data->button);
       lv_label_set_text(btn_label, "Clear BMS Flags");
       lv_obj_add_event_cb(data->button, clear_bms_flag, LV_EVENT_CLICKED, NULL);
-      lv_obj_add_flag(data->button, LV_OBJ_FLAG_CHECKABLE);
+      //lv_obj_add_flag(data->button, LV_OBJ_FLAG_CHECKABLE);
       lv_obj_add_flag(data->button, LV_OBJ_FLAG_HIDDEN);
   }
 }
@@ -1955,6 +1970,7 @@ void serial_debug() {
     Serial.print("Avg amps: ");Serial.println(AVG_AMPS);
     Serial.print("Low Cell Voltage: ");Serial.println(LO_CELL_V);
     Serial.print("High Cell Voltage: ");Serial.println(HI_CELL_V);
+    lv_dropdown_set_selected(tempDropdown[0].dd, 0);
   }
   run++;
 }
@@ -2090,25 +2106,25 @@ void loop() {
   }
 
   // send CAN if commanded
-  if ( canMsgData.msg_data[0] || canMsgData.msg_data[1] || canMsgData.msg_data[2] ) {
-    CanMsg send_msg(CanStandardId(canMsgData.CAN_ID), sizeof(canMsgData.msg_data), canMsgData.msg_data);
+  if ( CLEAR_BMS || TRIP_PV || BLCG_ALLOWED ) {
+    CanMsg send_msg(CanStandardId(CAN_RX_ID), sizeof(CAN_MSG), CAN_MSG);
 
     // retry if send failed for byte 0 - clear bms through mpo2
     int const rc = CAN.write(send_msg);
-    if (rc <= 0 && canMsgData.msg_cnt < 3) { // if CAN.write returns 0 or lower errors have occurred in transmission
+    if (rc <= 0 && CAN_RETRIES < 3) { // if CAN.write returns 0 or lower errors have occurred in transmission
       Serial.print("CAN.write(...) failed with error code ");
       Serial.println(rc);
-      canMsgData.msg_cnt++;
+      CAN_RETRIES++;
     }
     // Stop MPO#2 signal if successful or after 3 retries
-    else if ( canMsgData.msg_data[0] ) {
-      canMsgData.msg_data[0] = 0x00; // clear send data
-      canMsgData.msg_cnt = 0;
-      lv_obj_clear_state/*event_send*/(bmsStatusData.button, LV_STATE_CHECKED/*EVENT_VALUE_CHANGED, data*/); // clear pressed state
+    else if ( CLEAR_BMS ) {
+      CLEAR_BMS = 0x00; // clear send data
+      CAN_RETRIES = 0;
+      //lv_obj_clear_state/*event_send*/(bmsStatusData.button, LV_STATE_CHECKED/*EVENT_VALUE_CHANGED, data*/); // clear pressed state
     }
     // Trip PV and Balancing are initiated and stopped by timers or loop
     else {
-      canMsgData.msg_cnt = 0;
+      CAN_RETRIES = 0;
     }
   }
   if (RPC.available()) {
@@ -2145,7 +2161,7 @@ void loop() {
 
     // WAIT 30s BEFORE SENDING MPPT RESTART SIGNAL AS SUNRISE_DETECTOR IS DISABLED WITH INVERTER ON OR IF INVERTER HAS BEEN SWITCH OFF
     else if ( millis() - time_ms > 30000 && (inverter_on || userData[3].on == false) ) {
-      canMsgData.msg_data[1] = 0x00;
+      TRIP_PV = 0x00;
       time_ms = 0;
       inverter_on = false; // reset for next start delay
       inverter_delay = false; // stop this function executing
@@ -2159,12 +2175,12 @@ void loop() {
 
   // ARDUINO COMMANDED CELL BALANCING IF CELLS ARE ABOVE 3,25V WITH CELL DIFF GREATER THAN 20mV UNDER CHARGE
   // STOP BALANCING
-  if ( canMsgData.msg_data[2] && (AVG_AMPS >= 0 && LO_CELL_V < 3.2 || (HI_CELL_V - LO_CELL_V) < 0.02) ) {
-    canMsgData.msg_data[2] = 0x00; // Balancing NOT Allowed
+  if ( BLCG_ALLOWED && (AVG_AMPS >= 0 && LO_CELL_V < 3.2 || (HI_CELL_V - LO_CELL_V) < 0.02) ) {
+    BLCG_ALLOWED = 0x00; // Balancing NOT Allowed
   }
   // START BALANCING
-  else if ( !canMsgData.msg_data[2] && AVG_AMPS < 0 && HI_CELL_V > 3.25 && (HI_CELL_V - LO_CELL_V) >= 0.02 ) {
-    canMsgData.msg_data[2] = 0x01; // Balancing Allowed
+  else if ( !BLCG_ALLOWED && AVG_AMPS < 0 && HI_CELL_V > 3.25 && (HI_CELL_V - LO_CELL_V) >= 0.02 ) {
+    BLCG_ALLOWED = 0x01; // Balancing Allowed
   }
 
   // Debug function
