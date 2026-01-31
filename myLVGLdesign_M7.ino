@@ -91,13 +91,12 @@ struct CombinedData {
 struct CanMsgData {
   // RX
   uint32_t rxId = 0;
-  uint8_t len = 0;
+  uint8_t rxLen = 0;
   uint8_t rxBuf[8] = {};
 
   // TX
-  static const uint8_t CAN_ID = 0x02; // CAN id for the message (constant)
-  uint8_t msg_data[3] = {0x00, 0x00, 0x00}; // 3 bytes used in BMS for MPO#2, MPO#1 and balancing allowed signals uint8_t indicates each index is 1 byte
-  uint8_t tx_retries = 0;
+  uint8_t txBuf[3] = {0x00, 0x00, 0x00}; // 3 bytes used in BMS for MPO#2, MPO#1 and balancing allowed signals uint8_t indicates each index is 1 byte
+  uint8_t txRetries = 0;
 };
 
 // Type defined structure for bms status messages allowing it to be passed to function
@@ -123,7 +122,7 @@ typedef struct { // typedef used to not having to use the struct keyword for dec
   unsigned long timeout_ms = 0;
   uint8_t dcl_limit = 0;
   uint32_t dcl_enforced_ms = 0;
-  uint8_t set_temp = 21; // should match value of dropdown default index
+  uint8_t set_temp = 21; // should match value of dropdown default index as this is used by thermostat logic
   bool on = false; // simplifies code by substituting [lv_obj_has_state(data->button, LV_STATE_CHECKED)]
   bool faulty_temp_disabled = false; // used by thermostat to prevent dcl_check from enabling disabled buttons
 } user_data_t;
@@ -170,13 +169,16 @@ static CombinedData combinedData;
 static temp_dd_t tempDropdown[2] = {};
 
 // Macro short-hands that are free
-#define CAN_RX_BUF      canMsgData.rxBuf
 #define CAN_RX_ID       canMsgData.rxId
-#define CAN_RETRIES     canMsgData.tx_retries
-#define CAN_MSG         canMsgData.msg_data
-#define CLEAR_BMS       canMsgData.msg_data[0]
-#define TRIP_PV         canMsgData.msg_data[1]
-#define BLCG_ALLOWED    canMsgData.msg_data[2]
+#define CAN_RX_LEN      canMsgData.rxLen
+#define CAN_RX_BUF      canMsgData.rxBuf
+
+#define CAN_TX_ID       0x02
+#define CAN_TX_BUF      canMsgData.txBuf
+#define CLEAR_BMS       canMsgData.txBuf[0]
+#define TRIP_PV         canMsgData.txBuf[1]
+#define BLCG_ALLOWED    canMsgData.txBuf[2]
+#define CAN_RETRIES     canMsgData.txRetries
 
 #define AVG_TEMP        combinedData.sensorData.avg_temp
 #define TEMP1           combinedData.sensorData.temp1
@@ -1532,7 +1534,7 @@ void refresh_bms_status_data(bms_status_data_t *data) {
     }
   }
   // CRITICAL CAN RX FAILURE - LESS THAN 3 TO AVOID HAVING TX SIGNALS HIDE THIS MESSAGE AS RX DATA IS 8-BYTE LONG
-  if ( canMsgData.len <= 3 ) { create_status_label("Arduino - No BMS CAN data", data); flag_index++; comparator_index++; }
+  if ( CAN_RX_LEN <= 3 ) { create_status_label("Arduino - No BMS CAN data", data); flag_index++; comparator_index++; }
 
   // BMS flags 2 bytes
   if ( (BMS_FAULTS & 0x0100) == 0x0100 ) { create_status_label("Internal Hardware Fault", data); flag_index++; }
@@ -1959,7 +1961,7 @@ void leaf_icon_event_handler(lv_event_t* e) {
 
 void serial_debug() {
   // ALLOW 10 ITERATIONS BEFORE PRINT TO CAPTURE DATA ONCE SCRIPT IS RUNNING
-  static byte run = 0;
+  /*static byte run = 0;
   if ( run > 10 || !Serial ) {
     return;
   }
@@ -1972,7 +1974,7 @@ void serial_debug() {
     Serial.print("High Cell Voltage: ");Serial.println(HI_CELL_V);
     lv_dropdown_set_selected(tempDropdown[0].dd, 0);
   }
-  run++;
+  run++;*/
 }
 
 
@@ -2084,7 +2086,7 @@ void loop() {
   if (CAN.available()) {
     CanMsg const msg = CAN.read();
     CAN_RX_ID = msg.id;
-    canMsgData.len = msg.data_length;
+    CAN_RX_LEN = msg.data_length;
 
     //****************************************************************************************************************
     // READ ADDITIONAL CAN MSG AND OUTPUT TO SERIAL - DAXTROMN INVERTER
@@ -2095,8 +2097,8 @@ void loop() {
     //****************************************************************************************************************
 
     // PROCESS DATA IF RECEIVED
-    if (canMsgData.len > 0 && canMsgData.len <= sizeof(CAN_RX_BUF)) {
-      memcpy(CAN_RX_BUF, msg.data, canMsgData.len); // copy to memory block from another location a set number of bytes (data type doesn't matter)
+    if ( CAN_RX_LEN > 0 && CAN_RX_LEN <= sizeof(CAN_RX_BUF) ) {
+      memcpy(CAN_RX_BUF, msg.data, CAN_RX_LEN); // copy to memory block from another location a set number of bytes (data type doesn't matter)
       sort_can();
     }
     // ZERO CANDATA STRUCT IF RX FAILURE, TO PREVENT EXPIRED DATA DISPLAYED
@@ -2105,13 +2107,13 @@ void loop() {
     }
   }
 
-  // send CAN if commanded
+  // send CAN if any can msg array index is set
   if ( CLEAR_BMS || TRIP_PV || BLCG_ALLOWED ) {
-    CanMsg send_msg(CanStandardId(CAN_RX_ID), sizeof(CAN_MSG), CAN_MSG);
+    CanMsg send_msg(CanStandardId(CAN_TX_ID), sizeof(CAN_TX_BUF), CAN_TX_BUF);
 
     // retry if send failed for byte 0 - clear bms through mpo2
     int const rc = CAN.write(send_msg);
-    if (rc <= 0 && CAN_RETRIES < 3) { // if CAN.write returns 0 or lower errors have occurred in transmission
+    if (rc <= 0 && CAN_RETRIES < 3) { // if CAN.write returns 0 or lower, errors have occurred in transmission
       Serial.print("CAN.write(...) failed with error code ");
       Serial.println(rc);
       CAN_RETRIES++;
@@ -2173,13 +2175,14 @@ void loop() {
     }
   }
 
-  // ARDUINO COMMANDED CELL BALANCING IF CELLS ARE ABOVE 3,25V WITH CELL DIFF GREATER THAN 20mV UNDER CHARGE
+  // ARDUINO COMMANDED CELL BALANCING FOR GRID CHARGE WHEN CELLS ARE ABOVE 3,25V WITH CELL DIFF GREATER THAN 20mV
+
   // STOP BALANCING
-  if ( BLCG_ALLOWED && (AVG_AMPS >= 0 && LO_CELL_V < 3.2 || (HI_CELL_V - LO_CELL_V) < 0.02) ) {
+  if ( BLCG_ALLOWED && (AVG_AMPS > 0 && LO_CELL_V < 3.2 || (HI_CELL_V - LO_CELL_V) < 0.02) ) {
     BLCG_ALLOWED = 0x00; // Balancing NOT Allowed
   }
   // START BALANCING
-  else if ( !BLCG_ALLOWED && AVG_AMPS < 0 && HI_CELL_V > 3.25 && (HI_CELL_V - LO_CELL_V) >= 0.02 ) {
+  else if ( !BLCG_ALLOWED && AVG_AMPS <= 0 && HI_CELL_V > 3.25 && (HI_CELL_V - LO_CELL_V) >= 0.02 ) {
     BLCG_ALLOWED = 0x01; // Balancing Allowed
   }
 
