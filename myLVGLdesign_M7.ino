@@ -96,7 +96,6 @@ struct CanMsgData {
 
   // TX
   uint8_t txBuf[3] = { 0x00, 0x00, 0x00 }; // 3 bytes used in BMS for MPO#2, MPO#1 and balancing allowed signals uint8_t indicates each index is 1 byte
-  uint8_t txBufCopy[3] = { 0x00, 0x00, 0x00 };
   uint8_t txRetries = 0;
 };
 
@@ -179,7 +178,6 @@ static temp_dd_t tempDropdown[2] = {};
 #define CLEAR_BMS       canMsgData.txBuf[0]
 #define TRIP_PV         canMsgData.txBuf[1]
 #define BLCG_ALLOWED    canMsgData.txBuf[2]
-#define CAN_TX_BUF_COPY canMsgData.txBufCopy
 #define CAN_RETRIES     canMsgData.txRetries
 
 #define AVG_TEMP        combinedData.sensorData.avg_temp
@@ -2107,12 +2105,9 @@ void loop() {
     else {
       combinedData.canData = {};
     }
-  }
 
-  // TRANSMIT CAN BUFFER IF ARRAY COMPARISON FAILS
-  if ( !std::equal(CAN_TX_BUF, CAN_TX_BUF + 3, CAN_TX_BUF_COPY) ) { //CLEAR_BMS != CAN_TX_BUF_COPY[0] || TRIP_PV != CAN_TX_BUF_COPY[1] || BLCG_ALLOWED != CAN_TX_BUF_COPY[2] ) {
+    // CONTINUALLY TRANSMIT CAN TX BUFFER AS BMS RESETS INPUTS TO 0 AFTER 1s IF NOT
     CanMsg send_msg(CanStandardId(CAN_TX_ID), sizeof(CAN_TX_BUF), CAN_TX_BUF);
-
     // RETRY IF SEND FAILED FOR BYTE 0 - CLEAR BMS THROUGH MPO#2
     int const rc = CAN.write(send_msg);
     if (rc <= 0 && CAN_RETRIES < 3) { // if CAN.write returns 0 or lower, errors have occurred in transmission
@@ -2124,14 +2119,14 @@ void loop() {
     else if ( CLEAR_BMS ) {
       CLEAR_BMS = 0x00;
       //lv_obj_clear_state/*event_send*/(bmsStatusData.button, LV_STATE_CHECKED/*EVENT_VALUE_CHANGED, data*/); // clear pressed state
-      return; // Needed to send new CLEAR_BMS signal
     }
     // RESET RETRIES AND COPY TX BUFFER TO COMPARISON ARRAY TO AVOID REPEATING TRANSMISSIONS
     else {
       CAN_RETRIES = 0;
-      std::copy(CAN_TX_BUF, CAN_TX_BUF + 3, CAN_TX_BUF_COPY);
     }
   }
+
+  // CHECK IF M7 TO M4 COMMUNICATION IS AVAILABLE
   if (RPC.available()) {
     // call func to get sensors and can data from M4 core
     retrieve_M4_data();
@@ -2166,6 +2161,8 @@ void loop() {
 
     // WAIT 30s BEFORE SENDING MPPT RESTART SIGNAL AS SUNRISE_DETECTOR IS DISABLED WITH INVERTER ON OR IF INVERTER HAS BEEN SWITCH OFF
     else if ( millis() - time_ms > 30000 && (inverter_on || userData[3].on == false) ) {
+      // DEBUG
+      Serial.println("DEBUG: TRIP_PV = 0x00");
       TRIP_PV = 0x00;
       time_ms = 0;
       inverter_on = false; // reset for next start delay
@@ -2188,51 +2185,6 @@ void loop() {
   else if ( !BLCG_ALLOWED && AVG_AMPS <= 0 && HI_CELL_V > 3.25 && (HI_CELL_V - LO_CELL_V) >= 0.02 ) {
     BLCG_ALLOWED = 0x01; // Balancing Allowed
   }
-
-  // Debug function
-  if(Serial) { serial_debug(); }
-  /*if (Serial) {
-    // Average loop lap time of 256 iterations - reflects the lvgl delay at end of loop
-    static uint8_t i = 0;
-    static uint32_t dcl_enforced_ms = millis();
-    static bool finished = false;
-
-    // start iterations
-    if ( i <  255 && ! finished ) {
-      i++;
-    }
-    // calculate and write result
-    else if ( ! finished ) {
-      uint8_t avg_lap = (millis() - dcl_enforced_ms) / 256;
-      char buf[30];
-      snprintf(buf, sizeof(buf), "%d ms average loop lap", avg_lap);
-      Serial.println(buf);
-      finished = true;
-    }
-    // start again at 30s intervals
-    else if ( finished && (millis() - start_time) > 30000 ) {
-      i = 0;
-      start_time = millis();
-      finished = false;
-    }
-  }*/
-  /*// TESTING OF X POS ALIGNMENT
-  static bool increment = true;
-  if (AMPS < 166 && increment) {
-    AMPS++;
-  }
-  else if (AMPS > -166 && !increment) {
-    AMPS--;
-  }
-  else if (AMPS == 166) {
-    increment = false;
-  }
-  else if (AMPS == -166) {
-    increment = true;
-  }*/
-  
-  
-  
-  
+ 
   delay(4); // lvgl recommends 5ms delay for display (code takes up 1ms)
 }
