@@ -1030,7 +1030,7 @@ void heaters_night_mode() {
   if ( !sunset_ms && !CHG_ENABLED && prev_daylight ) {
     sunset_ms = millis(); // record time at sunset
     prev_daylight = false;
-    return;
+    return; // to prevent loop running
   }
   // set 17C 3 hours after sunset
   else if ( sunset_ms && (millis() - sunset_ms) > 3*60*60*1000 && !night_mode ) {
@@ -1040,7 +1040,8 @@ void heaters_night_mode() {
   else if ( sunset_ms && ((millis() - sunset_ms) > 9*60*60*1000 || CHG_ENABLED) && night_mode ) {
     night_mode = false;
   }
-  // common loop
+
+  // common loop manipulating both heaters temperature selections
   for ( byte i = 0; i < 2; i++ ) {
     if ( night_mode ) {
       preset_temp[i] = lv_dropdown_get_selected(tempDropdown[i].dd);
