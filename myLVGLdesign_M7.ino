@@ -1969,23 +1969,6 @@ void leaf_icon_event_handler(lv_event_t* e) {
   }
 }
 
-void serial_debug() {
-  // ALLOW 10 ITERATIONS BEFORE PRINT TO CAPTURE DATA ONCE SCRIPT IS RUNNING
-  /*static byte run = 0;
-  if ( run > 10 || !Serial ) {
-    return;
-  }
-  else if ( run == 10 ) {
-    Serial.println("DEBUG parameters: ");
-    Serial.print("Balancing active: ");Serial.println(BLCG_ACTIVE);
-    Serial.print("Balancing allowed: ");Serial.println(BLCG_ALLOWED);
-    Serial.print("Avg amps: ");Serial.println(AVG_AMPS);
-    Serial.print("Low Cell Voltage: ");Serial.println(LO_CELL_V);
-    Serial.print("High Cell Voltage: ");Serial.println(HI_CELL_V);
-    lv_dropdown_set_selected(tempDropdown[0].dd, 0);
-  }
-  run++;*/
-}
 
 
 // SETUP //////////////////////////////////////////////////////////////////////////////
