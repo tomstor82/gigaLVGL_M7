@@ -166,7 +166,7 @@ static clock_data_t clockData;
 static msgbox_data_t msgboxData[2] = {};
 static data_display_t dataDisplay;
 static CombinedData combinedData;
-static temp_dd_t tempDropdown[2] = {};
+static temp_dd_t temp_dd_index[2] = {};
 
 // Macro short-hands that are free
 #define CAN_RX_ID       canMsgData.rxId
@@ -1019,7 +1019,7 @@ void heaters_night_mode() {
   static bool night_mode = false; // used to set temp only once allowing a manual selection override to remain
   static bool prev_daylight = false;
   static uint32_t sunset_ms = 0;
-  static byte preset_temp[2] = {0, 0};
+  static byte preset_temp_dd_index[2] = {254, 254};
 
   // set previous daylight detection variable
   if ( CHG_ENABLED && !prev_daylight ) {
@@ -1044,18 +1044,19 @@ void heaters_night_mode() {
   // common loop manipulating both heaters temperature selections
   for ( byte i = 0; i < 2; i++ ) {
     if ( night_mode ) {
-      preset_temp[i] = lv_dropdown_get_selected(tempDropdown[i].dd);
+      preset_temp_dd_index[i] = lv_dropdown_get_selected(temp_dd_index[i].dd);
       // only set temp if above 17C to avoid starting heater if in 5C selection
-      if ( preset_temp[i] > 17 ) {
+      if ( preset_temp_dd_index[i] > 1 ) { // index 1 is 17C
         userData[i].set_temp = 17;  // set temperature for thermostat logic
-        lv_dropdown_set_selected(tempDropdown[i].dd, 1);  // set temperature in dropdown menu
+        lv_dropdown_set_selected(temp_dd_index[i].dd, 1);  // set temperature in dropdown menu
       }
     }
-    else {
+    else if ( preset_temp_dd_index[i] != 254 ) { // using preset_temp to avoid this running every time
       sunset_ms = 0;
-      if ( userData[i].set_temp != preset_temp[i] ) {
-        userData[i].set_temp = preset_temp[i];
-        lv_dropdown_set_selected(tempDropdown[i].dd, preset_temp[i]);
+      if ( userData[i].set_temp != preset_temp_dd_index[i] ) {
+        userData[i].set_temp = preset_temp_dd_index[i];
+        lv_dropdown_set_selected(temp_dd_index[i].dd, preset_temp_dd_index[i]);
+        preset_temp_dd_index[i] = 254; // reset to avoid it running again
       }
     }
   }
@@ -1106,18 +1107,18 @@ void create_temperature_dropdown(lv_obj_t *parent, user_data_t *data) {
   if ( data->relay_pin == RELAY4 ) {
     i = 1;
   }
-  tempDropdown[i].dd = lv_dropdown_create(parent);
-  lv_dropdown_set_options(tempDropdown[i].dd,
-    "5\u00B0C\n18\u00B0C\n19\u00B0C\n20\u00B0C\n21\u00B0C\n22\u00B0C\n23\u00B0C");
+  temp_dd_index[i].dd = lv_dropdown_create(parent);
+  lv_dropdown_set_options(temp_dd_index[i].dd,
+    "5\u00B0C\n17\u00B0C\n19\u00B0C\n20\u00B0C\n21\u00B0C\n22\u00B0C\n23\u00B0C");
     
   // set user data
-  lv_dropdown_set_selected(tempDropdown[i].dd, 4); // default index to be displayed. value set_temp in struct
-  lv_obj_set_user_data(tempDropdown[i].dd, data);
-  lv_obj_add_event_cb(tempDropdown[i].dd, dropdown_event_handler, LV_EVENT_VALUE_CHANGED, data);
+  lv_dropdown_set_selected(temp_dd_index[i].dd, 4); // default index to be displayed. value set_temp in struct
+  lv_obj_set_user_data(temp_dd_index[i].dd, data);
+  lv_obj_add_event_cb(temp_dd_index[i].dd, dropdown_event_handler, LV_EVENT_VALUE_CHANGED, data);
 
   // place roller
-  lv_obj_set_pos(tempDropdown[i].dd, 235, data->y_offset - 1);
-  lv_obj_set_width(tempDropdown[i].dd, 80);
+  lv_obj_set_pos(temp_dd_index[i].dd, 235, data->y_offset - 1);
+  lv_obj_set_width(temp_dd_index[i].dd, 80);
 }
 
 
