@@ -1013,7 +1013,7 @@ void thermostat_event_handler(lv_event_t *e) {
 
 
 
-// HEATERS NIGHT MODE REDUCED TEMPERATURE - FUNCTION CALLED ONLY ONCE FOR BOTH HEATERS, AND THIS CHANGE IS NOT SHOWN ON SCREEN
+// HEATERS NIGHT MODE REDUCED TEMPERATURE - FUNCTION CALLED ONLY ONCE FOR BOTH HEATERS
 void heaters_night_mode() {
 
   static bool night_mode = false; // used to set temp only once allowing a manual selection override to remain
@@ -1030,23 +1030,32 @@ void heaters_night_mode() {
   if ( !sunset_ms && !CHG_ENABLED && prev_daylight ) {
     sunset_ms = millis(); // record time at sunset
     prev_daylight = false;
+    return;
   }
   // set 17C 3 hours after sunset
   else if ( sunset_ms && (millis() - sunset_ms) > 3*60*60*1000 && !night_mode ) {
     night_mode = true;
-    for ( byte i = 0; i < 1; i++ ) {
-      preset_temp[i] = lv_dropdown_get_selected(tempDropdown[i].dd);
-      userData[i].set_temp = 17;  // set temperature for thermostat logic
-      lv_dropdown_set_selected(tempDropdown[i].dd, 1);  // set temperature in dropdown menu
-    }
   }
   // reset temp to preselected value 9 hours after sunset or at sunrise
   else if ( sunset_ms && ((millis() - sunset_ms) > 9*60*60*1000 || CHG_ENABLED) && night_mode ) {
     night_mode = false;
-    sunset_ms = 0;
-    for ( byte i = 0; i < 1; i++ ) {
-      userData[i].set_temp = preset_temp[i];
-      lv_dropdown_set_selected(tempDropdown[i].dd, preset_temp[i]);
+  }
+  // common loop
+  for ( byte i = 0; i < 2; i++ ) {
+    if ( night_mode ) {
+      preset_temp[i] = lv_dropdown_get_selected(tempDropdown[i].dd);
+      // only set temp if above 17C to avoid starting heater if in 5C selection
+      if ( preset_temp[i] > 17 ) {
+        userData[i].set_temp = 17;  // set temperature for thermostat logic
+        lv_dropdown_set_selected(tempDropdown[i].dd, 1);  // set temperature in dropdown menu
+      }
+    }
+    else {
+      sunset_ms = 0;
+      if ( userData[i].set_temp != preset_temp[i] ) {
+        userData[i].set_temp = preset_temp[i];
+        lv_dropdown_set_selected(tempDropdown[i].dd, preset_temp[i]);
+      }
     }
   }
 }
