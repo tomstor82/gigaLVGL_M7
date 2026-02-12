@@ -357,11 +357,11 @@ void mppt_delayer(bool mppt_delay) {
     delay_start_ms = 0; // Reset the timer after 20 seconds
   }
 
-  // SET CAN MESSAGE AND ENABLE TX
+  // SEND MSG TO DISENGAGE PV CONTACTOR
   if ( mppt_delay ) {
     TRIP_PV = 0x01;
   }
-  // REMOVE MESSAGE AND DISABLE TX IF CCL IS NOT ENFORCED
+  // SET MSG TO ENGAGE PV CONTACTOR
   else if ( !CCL_ENFORCED ) {
     TRIP_PV = 0x00;
   }
@@ -411,9 +411,13 @@ void sunrise_detector() {
       return;
     }
   }
+  else if ( !CHG_ENABLED ) {
+    mppt_delay = true;
+    strcpy(DYNAMIC_LABEL, "Solar OFF - Night mode");
+  }
 
-  // when mppt delay timer has expired - currently after 10 minutes
-  if ( mppt_delay && (millis() - time_ms) > 600000 && !CCL_ENFORCED ) {
+  // when mppt delay timer has expired and no ccl enforced and sunlight present reset - 10 minutes delay set
+  if ( mppt_delay && (millis() - time_ms) > 600000 && !CCL_ENFORCED && CHG_ENABLED ) {
     time_ms = 0;
     mppt_delay = false;
   }
