@@ -341,24 +341,24 @@ void update_inverter_label(bool state, user_data_t* data) {
 
 
 // MPPT DELAYER ////////////////////////////////////////////////////////////////////////////////
-void mppt_delayer(bool mppt_delay) {
+void pv_contactor_controller(bool mppt_off) {
   static uint32_t delay_start_ms = 0;
 
   // START TIMER WHEN DELAY STARTS
-  if ( mppt_delay && !delay_start_ms ) {
+  if ( mppt_off && !delay_start_ms ) {
     delay_start_ms = millis(); // Start the timer
   }
 
   // CHECK THAT MPPT DELAY LAST FOR AT LEAST 20s TO AVOID FLAPPING CONDITION
-  else if ( !mppt_delay && delay_start_ms && millis() - delay_start_ms > 20000 ) {
-    mppt_delay = true;
+  else if ( !mppt_off && delay_start_ms && millis() - delay_start_ms < 20000 ) {
+    return;
   }
   else {
     delay_start_ms = 0; // Reset the timer after 20 seconds
   }
 
   // SEND MSG TO DISENGAGE PV CONTACTOR
-  if ( mppt_delay ) {
+  if ( mppt_off ) {
     TRIP_PV = 0x01;
   }
   // SET MSG TO ENGAGE PV CONTACTOR
@@ -374,14 +374,14 @@ void mppt_delayer(bool mppt_delay) {
 
 
 
-// SUNRISE DETECTOR - ACTIVE WHEN INVERTER IS OFF //////////////////////////////////////////////////////
-void sunrise_detector() {
+// MPPT MANAGER ////////////////////////////////////////////////////////////////////////////////////////
+void mppt_manager() {
 
-  static bool mppt_delay = false;
+  static bool mppt_off = false;
   static uint32_t time_ms = 0;
 
   // IS SOLAR CHARGE SIGNAL AVAILABLE THROUGH CUSTOM FLAG AND MPPT DELAY VARIABLE FALSE
-  if ( CHG_ENABLED && !mppt_delay ) {
+  if ( CHG_ENABLED && !mppt_off ) {
 
     // START TIME TO CHECK WHEN SOLAR SIGNAL IS LOST
     if ( !time_ms ) {
@@ -390,36 +390,39 @@ void sunrise_detector() {
 
     // IF MPPT DRAINS BATTERY WHILST INVERTER IS OFF AND PV HAS BEEN ENABLED FOR AT LEAST 30s
     else if ( WATTS > 30 && (millis() - time_ms) > 30000 && userData[3].on == false && inverter_delay == false ) { // OVER 30 WATTS TO AVOID LIGHTS TRIPPING PV
-      mppt_delay = true;
+      mppt_off = true;
       strcpy(DYNAMIC_LABEL, "Solar OFF - MPPT drain");
     }
   }
 
   // IF SOLAR CHARGE SIGNAL IS LOST
-  else if ( !CHG_ENABLED && time_ms && !mppt_delay ) {
+  else if ( !CHG_ENABLED && time_ms && !mppt_off ) {
 
     // within 10 seconds lets trigger mppt delay as relay flap detected
     if ( (millis() - time_ms) < 10000 ) {
-      mppt_delay = true;
+      mppt_off = true;
       strcpy(DYNAMIC_LABEL, "Solar OFF - Relay flapping");
     }
 
     // more than 10s later e.g. sunset
     else {
       time_ms = 0;
-      mppt_delay = true;
-      strcpy(DYNAMIC_LABEL, "Solar OFF - Night mode");
+      return;
     }
+  }
+  else if ( !CHG_ENABLED && !time_ms && !mppt_off ) {
+    mppt_off = true;
+    strcpy(DYNAMIC_LABEL, "Solar OFF - Night mode");
   }
 
   // when mppt delay timer has expired and no ccl enforced and sunlight present reset - 10 minutes delay set
-  if ( mppt_delay && (millis() - time_ms) > 600000 && !CCL_ENFORCED ) {
+  if ( mppt_off && (millis() - time_ms) > 600000 && !CCL_ENFORCED && CHG_ENABLED ) {
     time_ms = 0;
-    mppt_delay = false;
+    mppt_off = false;
   }
 
-  // Send signal to mppt_delayer function
-  mppt_delayer(mppt_delay);
+  // Send signal to pv_contactor_controller function
+  pv_contactor_controller(mppt_off);
 }
 
 
@@ -439,13 +442,13 @@ void ccl_check() {
 
   // OPEN CONTACTOR AT 0 CCL OR CELL APPROACHING MAX VOLTAGE
   else if ( !CCL_ENFORCED && CCL == 0 || HI_CELL_V > (MAX_CELL_V - 0.02) ) {
-    TRIP_PV = 0x01;
+    pv_contactor_controller(true);
     strcpy(DYNAMIC_LABEL, "Solar OFF - CCL enforced");
     CCL_ENFORCED = true;
   }
   // CLOSE CONTACTOR WHEN CCL IS ABOVE 0 OR CELL VOLTAGE HAS DROPPED LOW ENOUGH 
   else if ( CCL_ENFORCED && CCL > 0 || HI_CELL_V < (MAX_CELL_V - 0.2) ) {
-    TRIP_PV = 0x00;
+    pv_contactor_controller(false);
     CCL_ENFORCED = false;
   }
 }
@@ -702,8 +705,8 @@ void close_sensor_msgbox_event_handler(lv_event_t *e) {
 
 
 void inverter_start() {
-  TRIP_PV = 0x01;
-  strcpy(DYNAMIC_LABEL, "Solar OFF - Inverter starting");
+  pv_contactor_controller(true);
+  strcpy(DYNAMIC_LABEL, "Inverter starting");
   inverter_delay = true;
 }
 
@@ -1924,7 +1927,7 @@ void combined_1s_updater(lv_timer_t *timer) {
   ccl_check();
   clock_updater(&clockData);
   charge_icons_updater(&dataDisplay);
-  sunrise_detector();
+  mppt_manager();
   for (uint8_t i = 0; i < 4; i++) {
     dcl_check(&userData[i]);
   }
@@ -2103,8 +2106,10 @@ void loop() {
     // RETRY IF SEND FAILED FOR BYTE 0 - CLEAR BMS THROUGH MPO#2
     int const rc = CAN.write(send_msg);
     if (rc <= 0 && CAN_RETRIES < 3) { // if CAN.write returns 0 or lower, errors have occurred in transmission
-      Serial.print("CAN.write(...) failed with error code ");
-      Serial.println(rc);
+      if (Serial) {
+        Serial.print("CAN.write(...) failed with error code ");
+        Serial.println(rc);
+      }
       CAN_RETRIES++;
     }
     // STOP CLEAR_BMS MPO#2 SIGNAL IF SUCCESS OR AFTER 3 RETRIES. NOT NECCESSARY FOR TRIP_PV AND BLCG_ALLOWED AS THEY ARE TIMED AND LOOPED RESPECTIVELY
@@ -2115,9 +2120,11 @@ void loop() {
     // RESET RETRIES AND COPY TX BUFFER TO COMPARISON ARRAY TO AVOID REPEATING TRANSMISSIONS
     else {
       CAN_RETRIES = 0;
-      char report[32];
-      sprintf(report, "Can.write = { 0x0%d, 0x0%d, 0x0%d }", CAN_TX_BUF[0], CAN_TX_BUF[1], CAN_TX_BUF[2]);
-      Serial.println(report);
+      if (Serial) {
+        char report[32];
+        sprintf(report, "Can.write = { 0x0%d, 0x0%d, 0x0%d }", CAN_TX_BUF[0], CAN_TX_BUF[1], CAN_TX_BUF[2]);
+        Serial.println(report);
+      }
     }
   }
 
@@ -2154,15 +2161,15 @@ void loop() {
       time_ms = millis();
     }
 
-    // WAIT 30s BEFORE SENDING MPPT RESTART SIGNAL AS SUNRISE_DETECTOR IS DISABLED WITH INVERTER ON OR IF INVERTER HAS BEEN SWITCH OFF
+    // WAIT 30s BEFORE SENDING MPPT RESTART SIGNAL
     else if ( millis() - time_ms > 30000 && (inverter_on || userData[3].on == false) ) {
-      TRIP_PV = 0x00;
+      if ( CHG_ENABLED ) pv_contactor_controller(false);
       time_ms = 0;
       inverter_on = false; // reset for next start delay
       inverter_delay = false; // stop this function executing
     }
-    // ALLOW MPPT 2s TO LOOSE POWER TO AVOID POWER SURGE BEFORE STARTING INVERTER
-    else if ( (millis() - time_ms) > 2000 && inverter_on == false && userData[3].on ) {
+    // ALLOW MPPT 6s TO LOOSE POWER TO AVOID POWER SURGE BEFORE STARTING INVERTER
+    else if ( (millis() - time_ms) > 6000 && inverter_on == false && userData[3].on ) {
       digitalWrite(userData[3].relay_pin, HIGH);
       inverter_on = true;
     }
