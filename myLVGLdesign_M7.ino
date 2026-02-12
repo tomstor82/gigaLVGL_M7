@@ -374,7 +374,6 @@ void mppt_delayer(bool mppt_delay) {
 
 
 
-
 // SUNRISE DETECTOR - ACTIVE WHEN INVERTER IS OFF //////////////////////////////////////////////////////
 void sunrise_detector() {
 
@@ -390,7 +389,7 @@ void sunrise_detector() {
     }
 
     // IF MPPT DRAINS BATTERY WHILST INVERTER IS OFF AND PV HAS BEEN ENABLED FOR AT LEAST 30s
-    else if ( WATTS > 20 && (millis() - time_ms) > 30000 ) { // OVER 30 WATTS TO AVOID LIGHTS TRIPPING PV
+    else if ( WATTS > 30 && (millis() - time_ms) > 30000 && userData[3].on == false && inverter_delay == false ) { // OVER 30 WATTS TO AVOID LIGHTS TRIPPING PV
       mppt_delay = true;
       strcpy(DYNAMIC_LABEL, "Solar OFF - MPPT drain");
     }
@@ -408,16 +407,13 @@ void sunrise_detector() {
     // more than 10s later e.g. sunset
     else {
       time_ms = 0;
-      return;
+      mppt_delay = true;
+      strcpy(DYNAMIC_LABEL, "Solar OFF - Night mode");
     }
-  }
-  else if ( !CHG_ENABLED ) {
-    mppt_delay = true;
-    strcpy(DYNAMIC_LABEL, "Solar OFF - Night mode");
   }
 
   // when mppt delay timer has expired and no ccl enforced and sunlight present reset - 10 minutes delay set
-  if ( mppt_delay && (millis() - time_ms) > 600000 && !CCL_ENFORCED && CHG_ENABLED ) {
+  if ( mppt_delay && (millis() - time_ms) > 600000 && !CCL_ENFORCED ) {
     time_ms = 0;
     mppt_delay = false;
   }
@@ -1928,9 +1924,7 @@ void combined_1s_updater(lv_timer_t *timer) {
   ccl_check();
   clock_updater(&clockData);
   charge_icons_updater(&dataDisplay);
-  if (userData[3].on == false && inverter_delay == false) {
-    sunrise_detector();
-  }
+  sunrise_detector();
   for (uint8_t i = 0; i < 4; i++) {
     dcl_check(&userData[i]);
   }
@@ -2121,6 +2115,9 @@ void loop() {
     // RESET RETRIES AND COPY TX BUFFER TO COMPARISON ARRAY TO AVOID REPEATING TRANSMISSIONS
     else {
       CAN_RETRIES = 0;
+      char report[32];
+      sprintf(report, "Can.write = { 0x0%d, 0x0%d, 0x0%d }", CAN_TX_BUF[0], CAN_TX_BUF[1], CAN_TX_BUF[2]);
+      Serial.println(report);
     }
   }
 
@@ -2159,8 +2156,6 @@ void loop() {
 
     // WAIT 30s BEFORE SENDING MPPT RESTART SIGNAL AS SUNRISE_DETECTOR IS DISABLED WITH INVERTER ON OR IF INVERTER HAS BEEN SWITCH OFF
     else if ( millis() - time_ms > 30000 && (inverter_on || userData[3].on == false) ) {
-      // DEBUG
-      Serial.println("DEBUG: TRIP_PV = 0x00");
       TRIP_PV = 0x00;
       time_ms = 0;
       inverter_on = false; // reset for next start delay
