@@ -410,7 +410,8 @@ void mppt_manager() {
       return;
     }
   }
-  else if ( !CHG_ENABLED && !time_ms && !mppt_off ) {
+  // TURN OFF AT NIGHT AND SUBSTITUTE "Inverter starting" LABEL ONCE INVERTER DELAY IS FINISHED
+  else if ( !CHG_ENABLED && !time_ms && (!mppt_off || !inverter_delay) ) {
     mppt_off = true;
     strcpy(DYNAMIC_LABEL, "Solar OFF - Night mode");
   }
