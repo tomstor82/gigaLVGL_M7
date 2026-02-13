@@ -411,9 +411,15 @@ void mppt_manager() {
     }
   }
   // TURN OFF AT NIGHT AND SUBSTITUTE "Inverter starting" LABEL ONCE INVERTER DELAY IS FINISHED
-  else if ( !CHG_ENABLED && !time_ms && (!mppt_off || !inverter_delay) ) {
-    mppt_off = true;
-    strcpy(DYNAMIC_LABEL, "Solar OFF - Night mode");
+  else if ( !CHG_ENABLED && !time_ms ) {
+    if ( inverter_delay ) {
+      mppt_off = false; // allows triggering label substitution on function call after inverter_delay completed
+      return; // has to return to not trigger contactor as this statement is only to allow label manipulation
+    }
+    else if ( !mppt_off ) {
+      mppt_off = true;
+      strcpy(DYNAMIC_LABEL, "Solar OFF - Night mode");
+    }
   }
 
   // when mppt delay timer has expired and no ccl enforced and sunlight present reset - 10 minutes delay set
