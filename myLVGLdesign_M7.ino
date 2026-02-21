@@ -380,8 +380,11 @@ void mppt_manager() {
   static bool mppt_off = false;
   static uint32_t time_ms = 0;
 
+  // IF BATTERY CONTACTOR OPEN SOLAR REMAINS DISCONNECTED TO PROTECT INVERTER
+  if ( (RELAYS & 0x0001) == 0x0000 ) return;
+
   // IS SOLAR CHARGE SIGNAL AVAILABLE THROUGH CUSTOM FLAG AND MPPT DELAY VARIABLE FALSE
-  if ( CHG_ENABLED && !mppt_off ) {
+  else if ( CHG_ENABLED && !mppt_off ) {
 
     // START TIME TO CHECK WHEN SOLAR SIGNAL IS LOST
     if ( !time_ms ) {
@@ -2194,6 +2197,12 @@ void loop() {
   // START BALANCING
   else if ( !BLCG_ALLOWED && AVG_AMPS <= 0 && HI_CELL_V > 3.25 && (HI_CELL_V - LO_CELL_V) >= 0.02 ) {
     BLCG_ALLOWED = 0x01; // Balancing Allowed
+  }
+
+  // DISABLE PV IF DCH CONTACTOR OPEN TO AVOID DAMAGING INVERTER FROM PV ARRAY
+  if ( (RELAYS & 0x0001) == 0x0000 ) {
+    pv_contactor_controller(true);
+    strcpy(DYNAMIC_LABEL, "Solar OFF - Battery Contactor Open");
   }
  
   delay(4); // lvgl recommends 5ms delay for display (code takes up 1ms)
