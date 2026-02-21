@@ -107,7 +107,7 @@ typedef struct {
   lv_obj_t *status_label[33] = {};
   bool update_timer = true;
   bool ccl_enforced = false;
-  char dynamic_label[30] = {};
+  char dynamic_label[35] = {};
   uint8_t y = NULL;
 } bms_status_data_t;
 
@@ -342,28 +342,23 @@ void update_inverter_label(bool state, user_data_t* data) {
 
 // MPPT DELAYER ////////////////////////////////////////////////////////////////////////////////
 void pv_contactor_controller(bool mppt_off) {
+
   static uint32_t delay_start_ms = 0;
 
-  // START TIMER WHEN DELAY STARTS
-  if ( mppt_off && !delay_start_ms ) {
-    delay_start_ms = millis(); // Start the timer
+  // IF TIMER NOT STARTED START IT. IF MPPT COMMANDED ON LET'S ALSO RETURN TO ALLOW FOR OUR 20s DELAY
+  if ( !delay_start_ms ) {
+    delay_start_ms = millis();
+    if ( !mppt_off ) return;
   }
 
-  // CHECK THAT MPPT DELAY LAST FOR AT LEAST 20s TO AVOID FLAPPING CONDITION
-  else if ( !mppt_off && delay_start_ms && millis() - delay_start_ms < 20000 ) {
-    return;
-  }
-  else {
-    delay_start_ms = 0; // Reset the timer after 20 seconds
-  }
-
-  // SEND MSG TO DISENGAGE PV CONTACTOR
+  // SET VALUE IN BUFFER ARRAY TO OPEN PV CONTACTOR
   if ( mppt_off ) {
     TRIP_PV = 0x01;
   }
-  // SET MSG TO ENGAGE PV CONTACTOR
-  else if ( !CCL_ENFORCED ) {
+  // SET VALUE IN BUFFER ARRAY TO CLOSE PV CONTACTOR ONCE TIMER HAS EXPIRED
+  else if ( millis() - delay_start_ms > 20000 ) {
     TRIP_PV = 0x00;
+    delay_start_ms = 0; // Reset the timer after 20 seconds
   }
 }
 
@@ -380,8 +375,8 @@ void mppt_manager() {
   static bool mppt_off = false;
   static uint32_t time_ms = 0;
 
-  // IF BATTERY CONTACTOR OPEN SOLAR REMAINS DISCONNECTED TO PROTECT INVERTER
-  if ( (RELAYS & 0x0001) == 0x0000 ) return;
+  // IF BATTERY CONTACTOR OPEN OR CCL ENFORCED, SOLAR CONTACTOR OPENED ELSEWHERE TO REMAIN OPEN
+  if ( (RELAYS & 0x0001) == 0x0000 || CCL_ENFORCED ) return;
 
   // IS SOLAR CHARGE SIGNAL AVAILABLE THROUGH CUSTOM FLAG AND MPPT DELAY VARIABLE FALSE
   else if ( CHG_ENABLED && !mppt_off ) {
@@ -394,7 +389,7 @@ void mppt_manager() {
     // IF MPPT DRAINS BATTERY WHILST INVERTER IS OFF AND PV HAS BEEN ENABLED FOR AT LEAST 30s
     else if ( WATTS > 30 && (millis() - time_ms) > 30000 && userData[3].on == false && inverter_delay == false ) { // OVER 30 WATTS TO AVOID LIGHTS TRIPPING PV
       mppt_off = true;
-      strcpy(DYNAMIC_LABEL, "Solar OFF - MPPT drain");
+      strcpy(DYNAMIC_LABEL, "Solar OFF - Insufficient sunlight");
     }
   }
 
@@ -404,7 +399,7 @@ void mppt_manager() {
     // within 10 seconds lets trigger mppt delay as relay flap detected
     if ( (millis() - time_ms) < 10000 ) {
       mppt_off = true;
-      strcpy(DYNAMIC_LABEL, "Solar OFF - Relay flapping");
+      strcpy(DYNAMIC_LABEL, "Solar OFF - Sense relay flapping");
     }
 
     // more than 10s later e.g. sunset
@@ -420,7 +415,7 @@ void mppt_manager() {
       return; // has to return to not trigger contactor as this statement is only to allow label manipulation
     }
     else if ( AVG_AMPS < 0 ) {
-      strcpy(DYNAMIC_LABEL, "Solar OFF - Grid Charge");
+      strcpy(DYNAMIC_LABEL, "Solar OFF - External Charge");
     }
     else if ( !mppt_off ) {
       strcpy(DYNAMIC_LABEL, "Solar OFF - Night mode");
@@ -429,7 +424,7 @@ void mppt_manager() {
   }
 
   // when mppt delay timer has expired and no ccl enforced, sunlight present and no grid charge close PV contactor - 1 minute delay set
-  if ( mppt_off && (millis() - time_ms) > 60000 && !CCL_ENFORCED && CHG_ENABLED && AVG_AMPS >= 0 && !inverter_delay ) {
+  if ( mppt_off && (millis() - time_ms) > 60000 && CHG_ENABLED && AVG_AMPS >= 0 && !inverter_delay ) {
     time_ms = 0;
     mppt_off = false;
   }
