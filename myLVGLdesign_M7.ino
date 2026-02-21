@@ -416,14 +416,17 @@ void mppt_manager() {
       mppt_off = false; // allows triggering label substitution on function call after inverter_delay completed
       return; // has to return to not trigger contactor as this statement is only to allow label manipulation
     }
+    else if ( AVG_AMPS < 0 ) {
+      strcpy(DYNAMIC_LABEL, "Solar OFF - Grid Charge");
+    }
     else if ( !mppt_off ) {
-      mppt_off = true;
       strcpy(DYNAMIC_LABEL, "Solar OFF - Night mode");
     }
+    mppt_off = true;
   }
 
-  // when mppt delay timer has expired and no ccl enforced and sunlight present reset - 10 minutes delay set
-  if ( mppt_off && (millis() - time_ms) > 600000 && !CCL_ENFORCED && CHG_ENABLED ) {
+  // when mppt delay timer has expired and no ccl enforced, sunlight present and no grid charge close PV contactor - 1 minute delay set
+  if ( mppt_off && (millis() - time_ms) > 60000 && !CCL_ENFORCED && CHG_ENABLED && AVG_AMPS >= 0 && !inverter_delay ) {
     time_ms = 0;
     mppt_off = false;
   }
@@ -453,9 +456,9 @@ void ccl_check() {
     strcpy(DYNAMIC_LABEL, "Solar OFF - CCL enforced");
     CCL_ENFORCED = true;
   }
-  // CLOSE CONTACTOR WHEN CCL IS ABOVE 0 OR CELL VOLTAGE HAS DROPPED LOW ENOUGH 
+  // WHEN CCL IS ABOVE 0 OR CELL VOLTAGE HAS DROPPED LOW ENOUGH ALLOW MPPT CONTROLLER FUNCTION CONTROL AGAIN
   else if ( CCL_ENFORCED && CCL > 0 || HI_CELL_V < (MAX_CELL_V - 0.2) ) {
-    pv_contactor_controller(false);
+    //pv_contactor_controller(false); // this causes trouble as it resets a flapping/night mode relay so commented out
     CCL_ENFORCED = false;
   }
 }
@@ -2170,7 +2173,7 @@ void loop() {
 
     // WAIT 30s BEFORE SENDING MPPT RESTART SIGNAL
     else if ( millis() - time_ms > 30000 && (inverter_on || userData[3].on == false) ) {
-      if ( CHG_ENABLED ) pv_contactor_controller(false);
+      //if ( CHG_ENABLED ) pv_contactor_controller(false); // overrides mppt controller function so lets comment it out
       time_ms = 0;
       inverter_on = false; // reset for next start delay
       inverter_delay = false; // stop this function executing
