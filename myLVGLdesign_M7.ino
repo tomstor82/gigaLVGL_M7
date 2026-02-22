@@ -356,7 +356,7 @@ void pv_contactor(bool closed) {
     TRIP_PV = 0x01;
   }
   // SET VALUE IN BUFFER ARRAY TO CLOSE PV CONTACTOR ONCE TIMER HAS EXPIRED
-  else if ( millis() - delay_start_ms > 20000 && TRIP_PV ) {
+  else if ( closed && millis() - delay_start_ms > 20000 && TRIP_PV ) {
     TRIP_PV = 0x00;
     delay_start_ms = 0; // Reset the timer after 20 seconds
   }
@@ -376,7 +376,7 @@ void solar_charge_manager() {
   static uint32_t time_ms = 0;
 
   // IF BATTERY CONTACTOR OPEN OR CCL ENFORCED, PV CONTACTOR TO REMAIN OPEN
-  if ( (RELAYS & 0x0001) != 0x0001 || CCL_ENFORCED ) return;
+  if (!(RELAYS & 0x0001) || CCL_ENFORCED) return;
 
   // IS SOLAR CHARGE SIGNAL AVAILABLE THROUGH CUSTOM FLAG AND pv_enabled VARIABLE FALSE
   else if ( CHG_ENABLED && solar_enabled ) {
@@ -415,14 +415,10 @@ void solar_charge_manager() {
   }
   // TURN OFF AT NIGHT OR WHILE EXT. CHARGE RELAY SHORTS PV INPUTS AND SUBSTITUTE "Inverter starting" LABEL ONCE INVERTER DELAY IS FINISHED
   else if ( !CHG_ENABLED && !time_ms ) {
-    if ( inverter_delay ) {
-      solar_enabled = true; // allows triggering label substitution on function call after inverter_delay completed
-      return; // has to return to not trigger contactor as this statement is only to allow label manipulation
-    }
-    else if ( AVG_AMPS < 0 ) {
+    if ( AVG_AMPS < 0 ) {
       strcpy(DYNAMIC_LABEL, "Solar OFF - External Charge");
     }
-    else if ( solar_enabled ) {
+    else if ( !inverter_delay ) {
       strcpy(DYNAMIC_LABEL, "Solar OFF - Night mode");
     }
     solar_enabled = false;
@@ -2200,10 +2196,10 @@ void loop() {
   }
 
   // DISABLE PV IF DCH CONTACTOR OPEN TO AVOID DAMAGING INVERTER FROM PV ARRAY
-  if ( (RELAYS & 0x0001) != 0x0001 ) {
+  if ( !(RELAYS & 0x0001) ) {
     pv_contactor(false);
     strcpy(DYNAMIC_LABEL, "Solar OFF - Battery Contactor Open");
   }
- 
+
   delay(4); // lvgl recommends 5ms delay for display (code takes up 1ms)
 }
