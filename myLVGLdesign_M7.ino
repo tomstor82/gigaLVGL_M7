@@ -95,7 +95,7 @@ struct CanMsgData {
   uint8_t rxBuf[8] = {};
 
   // TX
-  uint8_t txBuf[3] = { 0x00, 0x00, 0x00 }; // 3 bytes used in BMS for MPO#2, MPO#1 and balancing allowed signals uint8_t indicates each index is 1 byte
+  uint8_t txBuf[3] = { 0x00, 0x00, 0x00 }; // 3 bytes used in BMS for PV_ON MPO#1, CLEAR_BMS MPO#2 (MPI connected with 20k pull-up) and balancing allowed signals uint8_t indicates each index is 1 byte
   uint8_t txRetries = 0;
 };
 
@@ -175,8 +175,8 @@ static temp_dd_t temp_dd_index[2] = {};
 
 #define CAN_TX_ID       0x02
 #define CAN_TX_BUF      canMsgData.txBuf
-#define CLEAR_BMS       canMsgData.txBuf[0]
-#define TRIP_PV         canMsgData.txBuf[1]
+#define PV_ON           canMsgData.txBuf[0]
+#define CLEAR_BMS       canMsgData.txBuf[1]
 #define BLCG_ALLOWED    canMsgData.txBuf[2]
 #define CAN_RETRIES     canMsgData.txRetries
 
@@ -340,25 +340,26 @@ void update_inverter_label(bool state, user_data_t* data) {
 
 
 
-// PV CONTACTOR TRIGGER ////////////////////////////////////////////////////////////////////////////////
-void pv_contactor(bool closed) {
+// PV CONTACTOR TRIGGER - REQUIRES CONTINEOUS CALLS TO FUNCTION /////////////////////////////////////////
+void pv_contactor(bool enable_solar) {
 
-  static uint32_t delay_start_ms = 0;
+  static uint32_t toggle_time_ms = 0;
 
-  // IF TIMER NOT STARTED START IT. IF RELAY COMMANDED CLOSED, LET'S RETURN TO ALLOW FOR OUR 20s DELAY
-  if ( !delay_start_ms ) {
-    delay_start_ms = millis();
-    if ( closed ) return;
+  // START TIMER
+  if ( !toggle_time_ms ) {
+    toggle_time_ms = millis();
+    return;
   }
 
-  // SET VALUE IN BUFFER ARRAY TO OPEN PV CONTACTOR
-  if ( !closed && !TRIP_PV ) {
-    TRIP_PV = 0x01;
+  // SET VALUE IN BUFFER ARRAY TO OPEN PV CONTACTOR - 10s DELAY
+  if ( !enable_solar && (millis() - toggle_time_ms) > 10000 && PV_ON ) {
+    PV_ON = 0x00;
+    toggle_time_ms = millis(); // Set toggle time
   }
-  // SET VALUE IN BUFFER ARRAY TO CLOSE PV CONTACTOR ONCE TIMER HAS EXPIRED
-  else if ( closed && millis() - delay_start_ms > 20000 && TRIP_PV ) {
-    TRIP_PV = 0x00;
-    delay_start_ms = 0; // Reset the timer after 20 seconds
+  // SET VALUE IN BUFFER ARRAY TO CLOSE PV CONTACTOR - 2m DELAY
+  else if ( enable_solar && (millis() - toggle_time_ms) > 120000 && !PV_ON ) {
+    PV_ON = 0x01;
+    toggle_time_ms = millis(); // Set toggle time
   }
 }
 
@@ -372,66 +373,84 @@ void pv_contactor(bool closed) {
 // MPPT MANAGER ////////////////////////////////////////////////////////////////////////////////////////
 void solar_charge_manager() {
 
-  static bool solar_enabled = false;
-  static uint32_t time_ms = 0;
+/*
+ * enable solar conditions
+ * 1. CHG_ENABLED
+ * 2. !inverter_delay && CHG_ENABLED
+ * 
+ * disable solar conditions
+ * 1. inverter_delay during start - ext. commanded
+ * 2. DCL and CCL - ext. commanded
+ * 3. sense relay flapping (timed)
+ * 4. !CHG_ENABLED (night mode)
+ * 5. !CHG_ENABLED && AVG_AMPS < 0 (ext. charger)
+ */
 
-  // IF BATTERY CONTACTOR OPEN OR CCL ENFORCED, PV CONTACTOR TO REMAIN OPEN
-  if (!(RELAYS & 0x0001) || CCL_ENFORCED) return;
+  static bool enable_solar = false;
+  static uint32_t sunrise_ms = 0;
 
-  // IS SOLAR CHARGE SIGNAL AVAILABLE THROUGH CUSTOM FLAG AND pv_enabled VARIABLE FALSE
-  else if ( CHG_ENABLED && solar_enabled ) {
+  // IF BATTERY CONTACTOR OPEN, CCL ENFORCED OR NO CAN COMMUNICATION, PV CONTACTOR TO REMAIN OPEN
+  if (!(RELAYS & 0x0001) || CCL_ENFORCED ) return;
 
-    // START TIME TO CHECK WHEN SOLAR SIGNAL IS LOST
-    if ( !time_ms ) {
-      time_ms = millis();
-    }
-    // IF INVERTER IS IN STARTUP MODE ALLOW MPPT TO CLOSE PV CONTACTOR AFTER 28s WHICH GIVES A BUFFER FROM 30s IN LOOP WHICH CHANGES inverter_delay VARIABLE
-    else if ( inverter_delay && (millis() - time_ms) > 28000 ) {
-      time_ms -= 572000; // Reduce delay from 10 minutes to 28s in re-enable statement
-      solar_enabled = false; // allows re-enabling to be triggered
-    }
 
-    // IF MPPT DRAINS BATTERY WHILST INVERTER IS OFF AND PV HAS BEEN ENABLED FOR AT LEAST 30s
-    else if ( WATTS > 30 && (millis() - time_ms) > 30000 && userData[3].on == false ) { // OVER 30 WATTS TO AVOID LIGHTS TRIPPING PV
-      solar_enabled = false;
-      strcpy(DYNAMIC_LABEL, "Solar OFF - Insufficient sunlight");
-    }
+  if ( !CAN.available() ) {
+    enable_solar = false;
+    strcpy(DYNAMIC_LABEL, "Solar OFF - No CAN communication");
   }
-
-  // IF SOLAR CHARGE SIGNAL IS LOST
-  else if ( !CHG_ENABLED && time_ms && solar_enabled ) {
-
-    // within 10 seconds lets trigger mppt delay as relay flap detected
-    if ( (millis() - time_ms) < 10000 ) {
-      solar_enabled = false;
-      strcpy(DYNAMIC_LABEL, "Solar OFF - Sense relay flapping");
-    }
-
-    // more than 10s later e.g. sunset
-    else {
-      time_ms = 0;
+  // WHEN SUNLIGHT IS SENSED - AS EXT.CHARGE SHORTS PV NO CHARGE AMP TESTS ARE NEEDED
+  else if ( CHG_ENABLED ) {
+    // START TIMER TO CHECK WHEN SOLAR SIGNAL IS LOST
+    if ( !sunrise_ms ) {
+      sunrise_ms = millis();
       return;
     }
+
+    if ( !inverter_delay ) {
+      // USED TO AVOID RAPID TRIGGERING OF THESE TWO STATEMENTS
+      static uint32_t mppt_drain_time_ms = 0;
+
+      // IF MPPT DRAINS BATTERY WHILST INVERTER IS OFF AND PV HAS BEEN ENABLED FOR AT LEAST 30s
+      if ( WATTS > 30 && (millis() - sunrise_ms) > 30000 && userData[3].on == false && enable_solar ) { // OVER 30 WATTS TO AVOID LIGHTS TRIPPING PV
+        enable_solar = false;
+        strcpy(DYNAMIC_LABEL, "Solar OFF - Insufficient sunlight");
+        mppt_drain_time_ms = millis();
+      }
+      // TURN ON PV ARRAY 10m AFTER SUNRISE, AFTER INVERTER START DELAY FINISHES AND 10m AFTER MPPT DRAIN WAS DETECTED
+      else if ( (millis() - sunrise_ms + mppt_drain_time_ms) > 600000 && !enable_solar ) {
+        enable_solar = true;
+        mppt_drain_time_ms = 0;
+      }
+    }
   }
-  // TURN OFF AT NIGHT OR WHILE EXT. CHARGE RELAY SHORTS PV INPUTS AND SUBSTITUTE "Inverter starting" LABEL ONCE INVERTER DELAY IS FINISHED
-  else if ( !CHG_ENABLED && !time_ms ) {
-    if ( AVG_AMPS < 0 ) {
-      strcpy(DYNAMIC_LABEL, "Solar OFF - External Charge");
+  // WHEN THERE IS NO SUN OR EXTERNAL CHARGING HAS SHORTED PV ARRAY
+  else {
+    // SENSE RELAY FLAPPING
+    if ( sunrise_ms ) {
+      // within 10 seconds lets trigger mppt delay as relay flap detected
+      if ( (millis() - sunrise_ms) < 10000 && enable_solar ) {
+        enable_solar = false;
+        strcpy(DYNAMIC_LABEL, "Solar OFF - Sense relay flapping");
+      }
+      // SUNSET MORE THAN 10s LATER IF NOT EXT. CHG HAS SHORTED PV POWER TO SENSE RELAY
+      else if ( AVG_AMPS >= 0 ) {
+        sunrise_ms = 0;
+        return;
+      }
     }
-    else if ( !inverter_delay ) {
-      strcpy(DYNAMIC_LABEL, "Solar OFF - Night mode");
+    // EXT. CHARGE WITH TIMER AND NIGHT WITHOUT
+    else if ( !inverter_delay ) { // inverter_delay condition to not over-write startup label
+      if ( AVG_AMPS < 0 && sunrise_ms ) {
+        strcpy(DYNAMIC_LABEL, "Solar OFF - External Charge");
+      }
+      else {
+        strcpy(DYNAMIC_LABEL, "Solar OFF - Night mode");
+      }
+      enable_solar = false;
     }
-    solar_enabled = false;
   }
 
-  // when mppt delay timer has expired, sunlight is present and no external charging, close PV contactor
-  if ( CHG_ENABLED && (millis() - time_ms) > 600000 && !solar_enabled && AVG_AMPS >= 0 ) {
-    time_ms = 0;
-    solar_enabled = true;
-  }
-
-  // Send signal to pv_contactor function
-  pv_contactor(solar_enabled);
+  // SEND TO PV CONTACTOR CONTROLL FUNCTION
+  pv_contactor(enable_solar);
 }
 
 
@@ -457,7 +476,6 @@ void ccl_check() {
   }
   // WHEN CCL IS ABOVE 0 OR CELL VOLTAGE HAS DROPPED LOW ENOUGH ALLOW MPPT CONTROLLER FUNCTION CONTROL AGAIN
   else if ( CCL_ENFORCED && CCL > 0 || HI_CELL_V < (MAX_CELL_V - 0.2) ) {
-    //pv_contactor(true); // this causes trouble as it resets a flapping/night mode relay so commented out
     CCL_ENFORCED = false;
   }
 }
@@ -494,8 +512,8 @@ void dcl_check(user_data_t *data) {
     return;
   }
 
-  // SET INVERTER LABEL AND START TIME IF CURRENT ABOVE DCL OR IF DCL IS ZERO, CELL VOLTAGE LOW OR DCH RELAY OPEN
-  else if ( data->relay_pin == RELAY1 && !data->dcl_enforced_ms && (AVG_AMPS > DCL || DCL == 0 || LO_CELL_V < (MIN_CELL_V + 0.3) || (RELAYS & 0x01) != 0x01) ) {
+  // SET INVERTER LABEL AND START TIME IF CURRENT ABOVE DCL OR IF DCL IS ZERO, CELL VOLTAGE LOW OR DCH RELAY OPEN OR NO CAN COMMUNICATION
+  else if ( data->relay_pin == RELAY1 && !data->dcl_enforced_ms && (AVG_AMPS > DCL || DCL == 0 || LO_CELL_V < (MIN_CELL_V + 0.3) || (RELAYS & 0x01) != 0x01) || !CAN.available() ) {
     data->dcl_enforced_ms = millis();
     return;
   }
@@ -788,7 +806,7 @@ void power_check(lv_timer_t *timer) {
   else if ( data->relay_pin == RELAY1 && data->on == true ) {
 
     // INVERTER OFF AND LABEL UPDATER ALGORITHM
-    if ( ! time_ms ) {
+    if ( !time_ms ) {
       time_ms = millis();
       pre_sleep_delay = true;
       return; // to prevent label being written once finished
@@ -864,7 +882,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
     }
 
     // TURN ON RELAY UNLESS MPPT DELAYER IS RUNNING
-    if ( ! inverter_delay || data->relay_pin == RELAY3 ) {
+    if ( !inverter_delay || data->relay_pin == RELAY3 ) {
       digitalWrite(data->relay_pin, HIGH);
     }
 
@@ -939,7 +957,7 @@ void thermostat_checker(user_data_t *data, bool reset_timer = false) {
     return;
   }
   // Off cycle time checker (2 min set)
-  else if ( thermostat_off_ms && millis() - thermostat_off_ms < 120000 ) {
+  else if ( thermostat_off_ms && (millis() - thermostat_off_ms) < 120000 ) {
     return;
   }
 
@@ -1590,11 +1608,11 @@ void refresh_bms_status_data(bms_status_data_t *data) {
   if ( (BMS_STATUS & 0x8000) == 0x8000 ) { create_status_label("Charge Mode Activated over CANBUS", data); flag_index++; }
 
   // Relay status 1 byte ( 2 bytes available includes mpo/mpi and charge statuses )
-  if ( (RELAYS & 0x01) != 0x01 ) { create_status_label("Discharge Relay Opened", data); flag_index++; }
+  if ( !(RELAYS & 0x01) ) { create_status_label("Discharge Relay Opened", data); flag_index++; }
   // CONTROLLED BY ARDUINO AND DISABLED IN BMS if ((RELAYS & 0x0002) == 0x0000) { create_status_label("Charge Relay Opened", data); flag_index++; }
 
   // Custom status messages
-  if ( TRIP_PV ) { create_status_label(DYNAMIC_LABEL, data); flag_index++; comparator_index++;}
+  if ( !PV_ON ) { create_status_label(DYNAMIC_LABEL, data); flag_index++; comparator_index++;}
   if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Arduino - Discharge Disabled", data); flag_index++; comparator_index++;} // If Inverter DCL CHECK triggered
 
   // Cell balancing check at end ensures higher importance messages appear above
@@ -2077,6 +2095,7 @@ void setup() {
   lv_obj_t* leaf_label = lv_label_create(cont);
     lv_label_set_text(leaf_label, "ECO mode");
     lv_obj_align(leaf_label, LV_ALIGN_BOTTOM_RIGHT, -22, -15);
+
 }
 
 // LOOP ///////////////////////////////////////////////////////////////////////////////////
@@ -2121,7 +2140,7 @@ void loop() {
       }
       CAN_RETRIES++;
     }
-    // STOP CLEAR_BMS MPO#2 SIGNAL IF SUCCESS OR AFTER 3 RETRIES. NOT NECCESSARY FOR TRIP_PV AND BLCG_ALLOWED AS THEY ARE TIMED AND LOOPED RESPECTIVELY
+    // STOP CLEAR_BMS MPO#2 SIGNAL IF SUCCESS OR AFTER 3 RETRIES. NOT NECCESSARY FOR PV_ON AND BLCG_ALLOWED AS THEY ARE TIMED AND LOOPED RESPECTIVELY
     else if ( CLEAR_BMS ) {
       CLEAR_BMS = 0x00;
       //lv_obj_clear_state/*event_send*/(bmsStatusData.button, LV_STATE_CHECKED/*EVENT_VALUE_CHANGED, data*/); // clear pressed state
@@ -2129,11 +2148,16 @@ void loop() {
     // RESET RETRIES AND COPY TX BUFFER TO COMPARISON ARRAY TO AVOID REPEATING TRANSMISSIONS
     else {
       CAN_RETRIES = 0;
-      if (Serial) {
+      /*if (Serial) {
         char report[32];
         sprintf(report, "Can.write = { 0x0%d, 0x0%d, 0x0%d }", CAN_TX_BUF[0], CAN_TX_BUF[1], CAN_TX_BUF[2]);
         Serial.println(report);
-      }
+      }*/
+    }
+    // DISABLE PV IF DCH CONTACTOR OPEN TO AVOID DAMAGING INVERTER FROM PV ARRAY
+    if ( !(RELAYS & 0x0001) ) {
+      pv_contactor(false);
+      strcpy(DYNAMIC_LABEL, "Solar OFF - Battery Contactor Open");
     }
   }
 
@@ -2162,23 +2186,22 @@ void loop() {
   }
 
   // 6s INVERTER DELAY AFTER MPPT DISABLED WITH 30s PAUSE BEFORE SENDING RE-ENABLE SIGNAL
-  if (inverter_delay) {
-    static uint32_t time_ms = 0;
+  if ( inverter_delay ) {
+    static uint32_t delay_start_ms = 0;
     static bool inverter_on = false; // prevents inverter from being turned on over and over for 30s
 
-    if (time_ms == 0) {
-      time_ms = millis();
+    if ( !delay_start_ms ) {
+      delay_start_ms = millis();
     }
 
     // WAIT 30s BEFORE SENDING MPPT RESTART SIGNAL
-    else if ( millis() - time_ms > 30000 && (inverter_on || userData[3].on == false) ) {
-      //if ( CHG_ENABLED ) pv_contactor(true); // overrides mppt controller function so lets comment it out
-      time_ms = 0;
+    else if ( (millis() - delay_start_ms) > 30000 && (inverter_on || userData[3].on == false) ) {
+      delay_start_ms = 0;
       inverter_on = false; // reset for next start delay
       inverter_delay = false; // stop this function executing
     }
     // ALLOW MPPT 6s TO LOOSE POWER TO AVOID POWER SURGE BEFORE STARTING INVERTER
-    else if ( (millis() - time_ms) > 6000 && inverter_on == false && userData[3].on ) {
+    else if ( (millis() - delay_start_ms) > 6000 && inverter_on == false && userData[3].on ) {
       digitalWrite(userData[3].relay_pin, HIGH);
       inverter_on = true;
     }
@@ -2193,12 +2216,6 @@ void loop() {
   // START BALANCING
   else if ( !BLCG_ALLOWED && AVG_AMPS <= 0 && HI_CELL_V > 3.25 && (HI_CELL_V - LO_CELL_V) >= 0.02 ) {
     BLCG_ALLOWED = 0x01; // Balancing Allowed
-  }
-
-  // DISABLE PV IF DCH CONTACTOR OPEN TO AVOID DAMAGING INVERTER FROM PV ARRAY
-  if ( !(RELAYS & 0x0001) ) {
-    pv_contactor(false);
-    strcpy(DYNAMIC_LABEL, "Solar OFF - Battery Contactor Open");
   }
 
   delay(4); // lvgl recommends 5ms delay for display (code takes up 1ms)
