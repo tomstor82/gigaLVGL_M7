@@ -373,18 +373,10 @@ void pv_contactor(bool enable_solar) {
 // MPPT MANAGER ////////////////////////////////////////////////////////////////////////////////////////
 void solar_charge_manager() {
 
-/*
- * enable solar conditions
- * 1. CHG_ENABLED
- * 2. !inverter_delay && CHG_ENABLED
- * 
- * disable solar conditions
- * 1. inverter_delay during start - ext. commanded
- * 2. DCL and CCL - ext. commanded
- * 3. sense relay flapping (timed)
- * 4. !CHG_ENABLED (night mode)
- * 5. !CHG_ENABLED && AVG_AMPS < 0 (ext. charger)
- */
+/********* DEBUG *////////////
+/*char debugStr[23] = {};
+snprintf(debugStr, sizeof(debugStr), "Debug: PV detect %s", CHG_ENABLED ? "true" : "false");
+Serial.println(debugStr);*/
 
   static bool enable_solar = false;
   static uint32_t sunrise_ms = 0;
@@ -402,6 +394,7 @@ void solar_charge_manager() {
     // START TIMER TO CHECK WHEN SOLAR SIGNAL IS LOST
     if ( !sunrise_ms ) {
       sunrise_ms = millis();
+      strcpy(DYNAMIC_LABEL, "Solar OFF - Startup delay");
       return;
     }
 
@@ -414,16 +407,19 @@ void solar_charge_manager() {
         enable_solar = false;
         strcpy(DYNAMIC_LABEL, "Solar OFF - Insufficient sunlight");
         mppt_drain_time_ms = millis();
+        Serial.println("DEBUG#1");
       }
       // TURN ON PV ARRAY 10m AFTER SUNRISE, AFTER INVERTER START DELAY FINISHES AND 10m AFTER MPPT DRAIN WAS DETECTED
       else if ( (millis() - sunrise_ms + mppt_drain_time_ms) > 600000 && !enable_solar ) {
         enable_solar = true;
         mppt_drain_time_ms = 0;
+        Serial.println("DEBUG#2");
       }
     }
   }
   // WHEN THERE IS NO SUN OR EXTERNAL CHARGING HAS SHORTED PV ARRAY
   else {
+    Serial.println("DEBUG#3");
     // SENSE RELAY FLAPPING
     if ( sunrise_ms ) {
       // within 10 seconds lets trigger mppt delay as relay flap detected
@@ -1347,13 +1343,13 @@ void clock_updater(clock_data_t *data) {
 
   uint16_t h = 0;
   uint8_t m = 0;
-  char t[11];
+  char sentence[29];
   char c[4] = {"hrs"};
   char state[17];
 
   // Zero
   if ( AVG_AMPS == 0 ) {
-    strcpy(t, "");;
+    strcpy(sentence, "");;
   }
 
   // Discharge
@@ -1373,17 +1369,17 @@ void clock_updater(clock_data_t *data) {
   // Over-run prevention by showing days
   if ( h > 120 ) {
     uint8_t d = h / 24;
-    sprintf(t, "%s %d days", state, d);
+    snprintf(sentence, sizeof(sentence), "%s %d days", state, d);
   }
   else if ( m || h ) {
     // Plural adjustment
     if (h == 1) strcpy(c, "hr");
 
-    sprintf(t, "%s %02d:%02d %s", state, h, m, c);
+    snprintf(sentence, sizeof(sentence), "%s %02d:%02d %s", state, h, m, c);
   }
 
   // Print
-  lv_label_set_text(data->clock_label, t);
+  lv_label_set_text(data->clock_label, sentence);
 }
 
 
@@ -2149,8 +2145,8 @@ void loop() {
     else {
       CAN_RETRIES = 0;
       /*if (Serial) {
-        char report[32];
-        sprintf(report, "Can.write = { 0x0%d, 0x0%d, 0x0%d }", CAN_TX_BUF[0], CAN_TX_BUF[1], CAN_TX_BUF[2]);
+        char report[34];
+        snprintf(report, sizeof(report), "Can.write = { 0x0%d, 0x0%d, 0x0%d }", CAN_TX_BUF[0], CAN_TX_BUF[1], CAN_TX_BUF[2]);
         Serial.println(report);
       }*/
     }
