@@ -391,35 +391,34 @@ Serial.println(debugStr);*/
   }
   // WHEN SUNLIGHT IS SENSED - AS EXT.CHARGE SHORTS PV NO CHARGE AMP TESTS ARE NEEDED
   else if ( CHG_ENABLED ) {
-    // START TIMER TO CHECK WHEN SOLAR SIGNAL IS LOST
+    // SYNC TIME EVERYTIME CHG SIGNAL DETECTED TO CHECK WHEN SOLAR SIGNAL IS LOST
     if ( !sunrise_ms ) {
       sunrise_ms = millis();
-      strcpy(DYNAMIC_LABEL, "Solar OFF - Startup delay");
       return;
     }
-
+    // AFTER INVERTER START DELAY
     if ( !inverter_delay ) {
       // USED TO AVOID RAPID TRIGGERING OF THESE TWO STATEMENTS
       static uint32_t mppt_drain_time_ms = 0;
 
       // IF MPPT DRAINS BATTERY WHILST INVERTER IS OFF AND PV HAS BEEN ENABLED FOR AT LEAST 30s
       if ( WATTS > 30 && (millis() - sunrise_ms) > 30000 && userData[3].on == false && enable_solar ) { // OVER 30 WATTS TO AVOID LIGHTS TRIPPING PV
-        enable_solar = false;
-        strcpy(DYNAMIC_LABEL, "Solar OFF - Insufficient sunlight");
         mppt_drain_time_ms = millis();
-        Serial.println("DEBUG#1");
+        // ALLOW INVERTER 15s TO TURN OFF BEFORE SETTING LABEL AND DISCONNECTING SOLAR PANELS
+        if ( (millis() - mppt_drain_time_ms) > 15000 ) {
+          enable_solar = false;
+          strcpy(DYNAMIC_LABEL, "Solar OFF - Not enough sunlight");
+        }
       }
-      // TURN ON PV ARRAY 10m AFTER SUNRISE, AFTER INVERTER START DELAY FINISHES AND 10m AFTER MPPT DRAIN WAS DETECTED
-      else if ( (millis() - sunrise_ms + mppt_drain_time_ms) > 600000 && !enable_solar ) {
+      // TURN ON PV ARRAY 10m AFTER SUNRISE OR MPPT DRAIN, OR AFTER ARDUINO STARTUP
+      else if ( ((millis() - sunrise_ms + mppt_drain_time_ms) > 600000 || millis() < 2000) && !enable_solar ) { // assuming millis are 0 after reboot 2000 hopefully works
         enable_solar = true;
         mppt_drain_time_ms = 0;
-        Serial.println("DEBUG#2");
       }
     }
   }
   // WHEN THERE IS NO SUN OR EXTERNAL CHARGING HAS SHORTED PV ARRAY
   else {
-    Serial.println("DEBUG#3");
     // SENSE RELAY FLAPPING
     if ( sunrise_ms ) {
       // within 10 seconds lets trigger mppt delay as relay flap detected
@@ -427,7 +426,7 @@ Serial.println(debugStr);*/
         enable_solar = false;
         strcpy(DYNAMIC_LABEL, "Solar OFF - Sense relay flapping");
       }
-      // SUNSET MORE THAN 10s LATER IF NOT EXT. CHG HAS SHORTED PV POWER TO SENSE RELAY
+      // SUNSET MORE THAN 10s LATER IF NOT GRID/GENERATOR CHG HAS SHORTED PV POWER TO SENSE RELAY
       else if ( AVG_AMPS >= 0 ) {
         sunrise_ms = 0;
         return;
@@ -1053,7 +1052,7 @@ void heaters_night_mode() {
   }
 
   // start timer at sunset - tested by previous daylight detection
-  if ( !sunset_ms && !CHG_ENABLED && prev_daylight ) {
+  if ( !sunset_ms && !CHG_ENABLED && AVG_AMPS >= 0 && prev_daylight ) { // added AVG_AMPS to prevent grid/generator charge stating timer
     sunset_ms = millis(); // record time at sunset
     prev_daylight = false;
     return; // to prevent loop running
