@@ -356,8 +356,8 @@ void pv_contactor(bool enable_solar) {
     PV_ON = 0x00;
     toggle_time_ms = millis(); // Set toggle time
   }
-  // SET VALUE IN BUFFER ARRAY TO CLOSE PV CONTACTOR - 2m DELAY
-  else if ( enable_solar && (millis() - toggle_time_ms) > 120000 && !PV_ON ) {
+  // SET VALUE IN BUFFER ARRAY TO CLOSE PV CONTACTOR - 1m DELAY
+  else if ( enable_solar && (millis() - toggle_time_ms) > 60000 && !PV_ON ) {
     PV_ON = 0x01;
     toggle_time_ms = millis(); // Set toggle time
   }
@@ -402,18 +402,25 @@ Serial.println(debugStr);*/
       static uint32_t mppt_drain_time_ms = 0;
 
       // IF MPPT DRAINS BATTERY WHILST INVERTER IS OFF AND PV HAS BEEN ENABLED FOR AT LEAST 30s
-      if ( WATTS > 30 && (millis() - sunrise_ms) > 30000 && userData[3].on == false && enable_solar ) { // OVER 30 WATTS TO AVOID LIGHTS TRIPPING PV
-        mppt_drain_time_ms = millis();
-        // ALLOW INVERTER 15s TO TURN OFF BEFORE SETTING LABEL AND DISCONNECTING SOLAR PANELS
-        if ( (millis() - mppt_drain_time_ms) > 15000 ) {
+      if ( WATTS > 30 && (millis() - sunrise_ms) > 30000 && !userData[3].on && enable_solar ) { // OVER 30 WATTS TO AVOID LIGHTS TRIPPING PV
+        if ( !mppt_drain_time_ms ) {
+          mppt_drain_time_ms = millis();
+          return;
+        }
+        // ALLOW INVERTER 20s TO TURN OFF BEFORE SETTING LABEL AND DISCONNECTING SOLAR PANELS
+        if ( (millis() - mppt_drain_time_ms) > 20000 ) {
           enable_solar = false;
-          strcpy(DYNAMIC_LABEL, "Solar OFF - Not enough sunlight");
+          strcpy(DYNAMIC_LABEL, "Solar OFF - Low PV voltage");
+        }
+        else {
+          return;
         }
       }
-      // TURN ON PV ARRAY 10m AFTER SUNRISE OR MPPT DRAIN, OR AFTER ARDUINO STARTUP
-      else if ( ((millis() - sunrise_ms + mppt_drain_time_ms) > 600000 || millis() < 2000) && !enable_solar ) { // assuming millis are 0 after reboot 2000 hopefully works
+      // TURN ON PV ARRAY 10m AFTER SUNRISE OR MPPT DRAIN, OR ARDUINO STARTUP
+      else if ( ((millis() - sunrise_ms + mppt_drain_time_ms) > 600000 || (millis() < 20000 && (millis() - sunrise_ms) < 2000)) && !enable_solar ) { // assuming millis are 0 after reboot 2000 hopefully works
         enable_solar = true;
         mppt_drain_time_ms = 0;
+        strcpy(DYNAMIC_LABEL, "System startup");
       }
     }
   }
@@ -2011,7 +2018,7 @@ void setup() {
     Serial.println("M7 Failed to boot M4 Core");
   }
 
-  if ( ! CAN.begin(CanBitRate::BR_500k) ) {
+  if ( !CAN.begin(CanBitRate::BR_500k) ) {
     Serial.println("CAN.begin(...) failed.");
     for (;;) {}
   }
@@ -2190,7 +2197,7 @@ void loop() {
     }
 
     // WAIT 30s BEFORE SENDING MPPT RESTART SIGNAL
-    else if ( (millis() - delay_start_ms) > 30000 && (inverter_on || userData[3].on == false) ) {
+    else if ( (millis() - delay_start_ms) > 30000 && (inverter_on || !userData[3].on) ) {
       delay_start_ms = 0;
       inverter_on = false; // reset for next start delay
       inverter_delay = false; // stop this function executing
