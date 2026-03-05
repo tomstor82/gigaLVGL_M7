@@ -373,11 +373,6 @@ void pv_contactor(bool enable_solar) {
 // MPPT MANAGER ////////////////////////////////////////////////////////////////////////////////////////
 void solar_charge_manager() {
 
-/********* DEBUG *////////////
-/*char debugStr[23] = {};
-snprintf(debugStr, sizeof(debugStr), "Debug: PV detect %s", CHG_ENABLED ? "true" : "false");
-Serial.println(debugStr);*/
-
   static bool enable_solar = false;
   static uint32_t sunrise_ms = 0;
 
@@ -420,11 +415,11 @@ Serial.println(debugStr);*/
       else if ( ((millis() - sunrise_ms + mppt_drain_time_ms) > 600000 || (millis() < 20000 && (millis() - sunrise_ms) < 2000)) && !enable_solar ) { // assuming millis are 0 after reboot 2000 hopefully works
         enable_solar = true;
         mppt_drain_time_ms = 0;
-        strcpy(DYNAMIC_LABEL, "System startup");
+        strcpy(DYNAMIC_LABEL, "Solar ON delay");
       }
     }
   }
-  // WHEN THERE IS NO SUN /*OR EXTERNAL CHARGING HAS SHORTED PV ARRAY*/
+  // WHEN THERE IS NO SUN
   else {
     // SENSE RELAY FLAPPING
     if ( sunrise_ms ) {
@@ -433,8 +428,8 @@ Serial.println(debugStr);*/
         enable_solar = false;
         strcpy(DYNAMIC_LABEL, "Solar OFF - Sense relay flapping");
       }
-      // SUNSET MORE THAN 10s LATER /*IF NOT GRID/GENERATOR CHG HAS SHORTED PV POWER TO SENSE RELAY*/
-      else /*if ( AVG_AMPS >= 0 )*/ {
+      // SUNSET MORE THAN 10s LATER
+      else {
         sunrise_ms = 0;
         return;
       }
@@ -514,58 +509,61 @@ void dcl_check(user_data_t *data) {
     return;
   }
 
-  // SET INVERTER LABEL AND START TIME IF CURRENT ABOVE DCL OR IF DCL IS ZERO, CELL VOLTAGE LOW OR DCH RELAY OPEN OR NO CAN COMMUNICATION
-  else if ( data->relay_pin == RELAY1 && !data->dcl_enforced_ms && (AVG_AMPS > DCL || DCL == 0 || LO_CELL_V < (MIN_CELL_V + 0.3) || (RELAYS & 0x01) != 0x01) || !CAN.available() ) {
-    data->dcl_enforced_ms = millis();
-    return;
-  }
+  // START TIMER IF INVERTER AND/OR HEATER/HOT WATER CRITERIA SATISFIED
+  if ( !data->dcl_enforced_ms ) {
+    if ( data->relay_pin == RELAY1 && (AVG_AMPS > DCL || DCL < data->dcl_limit || !DCL || LO_CELL_V < (MIN_CELL_V + 0.3) || !(RELAYS & 0x01) || !CAN.available()) || // inverter criteria
+         data->relay_pin != RELAY1 && (userData[3].dcl_enforced_ms || DCL < data->dcl_limit) ) {                                                              // heater/hot water criteria
 
-  // INDIVIDUAL BUTTON LIMITS IF NOT ALREADY DISABLED OR INVERTER IS DISABLED ALREADY
-  else if ( !data->dcl_enforced_ms && (DCL < data->dcl_limit || lv_obj_has_state(userData[3].button, LV_STATE_DISABLED)) ) {
-    data->dcl_enforced_ms = millis();
-    return;
-  }
-
-  // HIDE LABEL AND RE-ENABLE BUTTON
-  else if ( !data->dcl_enforced_ms ) {
-    if ( !lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
+      // RECORD TIME TO ALLOW TO DISABLING AND ENABLING OF BUTTONS AND LABELS CONTINIOUSLY LATER IN FUNCTION
+      data->dcl_enforced_ms = millis();
     }
+  }
+
+  // WHEN 60s HAS ELAPSED AFTER DCL ENFORCEMENT AND CRITERIA MET ENABLE BUTTONS AND HIDE LABELS AGAIN
+  else if ( (millis() - data->dcl_enforced_ms) > 60000 && (RELAYS & 0x01) && DCL > data->dcl_limit ) {
+
+    // ENABLE BUTTON
     if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
       lv_obj_clear_state(data->button, LV_STATE_DISABLED);
     }
-  }
 
-  // RESET DCL ENFORCED TIMER TO RE-ENABLE IF TIMER AND DCL WITHIN CRITERIA AND DCH CONTACTOR CLOSED - AS INVERTER HAS LOWEST DCL IT WILL ALWAYS ENABLE BEFORE BUTTONS
-  else if ( (millis() - data->dcl_enforced_ms) > 60000 && lv_obj_has_state(data->button, LV_STATE_DISABLED) && (RELAYS & 0x01) == 0X01 && data->dcl_limit < DCL) {
+    // HIDE LABEL
+    if ( !lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    // RESET TIMER
     data->dcl_enforced_ms = 0;
+    return;
   }
 
-  // MANAGE LABELS, TURN OFF AND DISABLE BUTTON
-  else if ( data->dcl_enforced_ms ) {
+  // IF TIMER RUNNING
+  else {
+    // TURN OFF AND DISABLE BUTTON
+    if ( data->on ) {
+      button_off(data);
+    }
+    if ( !lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
+      lv_obj_add_state(data->button, LV_STATE_DISABLED);
+    }
 
-    // FOR BUTTONS EXCLUDING INVERTER
+    // NON INVERTER LABELS ONLY SHOWING IF INVERTER NOT SHOWING TO AVOID CLUTTER
     if ( data->relay_pin != RELAY1 ) {
-      // SHOW LABELS ONLY IF INVERTER IS NOT DISABLED
-      if ( !lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) && lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+      // SHOW LABEL
+      if ( !userData[3].dcl_enforced_ms && lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
         lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
       }
-      // HIDE LABEL IF INVERTER IS DISABLED
-      else if ( lv_obj_has_state(userData[3].button, LV_STATE_DISABLED) && !lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+      // HIDE LABEL
+      else if ( userData[3].dcl_enforced_ms && !lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
         lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
       }
     }
-    // INVERTER
-    else if ( lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
-      update_inverter_label(0, data); // run updater to hide inverter label
-    }
-
-    if ( data->on ) {
-      button_off(data); // turn button off
-    }
-    if ( !lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
-      lv_obj_add_state(data->button, LV_STATE_DISABLED); // disable button
+    // INVERTER LABEL ALSO SENDING SIGNAL TO CLEAR STATUS LABEL
+    else {
+      if ( lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+        update_inverter_label(0, data);
+        lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
+      }
     }
   }
 }
@@ -1615,7 +1613,7 @@ void refresh_bms_status_data(bms_status_data_t *data) {
 
   // Custom status messages
   if ( !PV_ON ) { create_status_label(DYNAMIC_LABEL, data); flag_index++; comparator_index++;}
-  if ( ! lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Arduino - Discharge Disabled", data); flag_index++; comparator_index++;} // If Inverter DCL CHECK triggered
+  if ( !lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Arduino - Discharge Disabled", data); flag_index++; comparator_index++;} // If Inverter DCL CHECK triggered
 
   // Cell balancing check at end ensures higher importance messages appear above
   if ( BLCG_ACTIVE ) {
