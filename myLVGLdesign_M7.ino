@@ -33,140 +33,114 @@ LV_FONT_DECLARE(FontAwesomeSolid34_leaf); // 0xF06C
 //  ID 0x0BE BYT0:HI_CL_ID BYT1:LO_CL_ID BYT2:INT_HEATSINK BYT3+4:MIN_CELL BYT5+6:MAX_CELL
 
 // Temp and Relative Humidity data struct from M4
-struct SensorData {
-    float temp1;
-    float temp2;
-    float temp3;
-    float temp4;
-    float rh1;
-    float rh2;
-    float rh3;
-    float rh4;
-    float avg_temp;
-
-    MSGPACK_DEFINE_ARRAY(temp1, temp2, temp3, temp4, rh1, rh2, rh3, rh4, avg_temp);
-};
+typedef struct {
+  float temp1, temp2, temp3, temp4;
+  float rh1, rh2, rh3, rh4;
+  float avg_temp;
+  MSGPACK_DEFINE_ARRAY(temp1, temp2, temp3, temp4, rh1, rh2, rh3, rh4, avg_temp);
+} SensorData;
 
 // CanData struct
-struct CanData {
-
-    int p = 0;                  // watt calculated by script
-
-    float packU = 0;            // Voltage - multiplied by 100
-    float instI = 0;            // Current - multiplied by 10 - negative value indicates charge
-    float avgI = 0;             // Average current for clock, arcs and sun symbol calculations
-    float ah = 0;               // Amp hours
-    float hC = 0;               // High Cell Voltage in 0,001V
-    float lC = 0;               // Low Cell Voltage in 0,001V
-    float minC = 0;             // Minimum Allowed cell voltage
-    float maxC = 0;             // Maximum Allowed cell voltage
-    float cpcty = 0;            // Pack total capacity Ah
-
-    byte soc = 0;               // State of charge - multiplied by 2
-    byte hT = 0;                // Highest cell temperature
-    byte lT = 0;                // Lowest cell temperature
-    byte ry = 0;                // Relay status
-    byte dcl = 0;               // Discharge current limit
-    byte ccl = 0;               // Charge current limit
-    byte h = 0;                 // Health
-    byte hCid = 0;              // High Cell ID
-    byte lCid = 0;              // Low Cell ID
-
-    uint16_t fu = 0;            // BMS Faults
-    uint16_t st = 0;            // BMS Status
-    int cc = 0;                 // Total pack cycles (int to avoid overrun issues with uint16_t)
-
-    byte hs = 0;                // Internal Heatsink
-    byte cu = 0;                // BMS custom flags: 0x01 = charge power enabled triggered by pv sense circuit, 0x02 = MPO#1 signal feedback to trip pv relay
-
-};
+typedef struct {
+  int p;
+  float packU, instI, avgI, ah, hC, lC, minC, maxC, cpcty;
+  uint8_t soc, hT, lT, ry, dcl, ccl, h, hCid, lCid;
+  uint16_t fu, st;
+  int cc;
+  uint8_t hs, cu;
+} CanData;
 
 // Create combined struct with sensor and can data
-struct CombinedData {
+typedef struct {
   SensorData sensorData;
   CanData canData;
-};
+} CombinedData;
 
 // Can Message Data struct
-struct CanMsgData {
+typedef struct {
   // RX
-  uint32_t rxId = 0;
-  uint8_t rxLen = 0;
-  uint8_t rxBuf[8] = {};
-
+  uint32_t rxId;
+  uint8_t rxLen;
+  uint8_t rxBuf[8];
   // TX
-  uint8_t txBuf[3] = { 0x00, 0x00, 0x00 }; // 3 bytes used in BMS for PV_ON MPO#1, CLEAR_BMS MPO#2 (MPI connected with 20k pull-up) and balancing allowed signals uint8_t indicates each index is 1 byte
-  uint8_t txRetries = 0;
-};
+  uint8_t txBuf[3];
+  uint8_t txRetries;
+} CanMsgData;
 
 // Type defined structure for bms status messages allowing it to be passed to function
 typedef struct {
-  lv_obj_t *parent = NULL;
-  lv_obj_t *title_label = NULL;
-  lv_obj_t *button = NULL;
-  lv_obj_t *status_label[33] = {};
-  bool update_timer = true;
-  bool ccl_enforced = false;
-  char dynamic_label[35] = {};
-  uint8_t y = NULL;
+  lv_obj_t *parent;
+  lv_obj_t *title_label;
+  lv_obj_t *button;
+  lv_obj_t *status_label[33];
+  bool update_timer;
+  bool ccl_enforced;
+  char dynamic_label[35];
+  uint8_t y;
 } bms_status_data_t;
 
+// dropdown struct
+typedef struct {
+  lv_obj_t *dd_obj;
+  uint8_t temp_sel[7];
+} temp_dd_t;
+
 // define struct for function user-data
-typedef struct { // typedef used to not having to use the struct keyword for declaring struct variable
-  lv_obj_t *button = NULL;
-  lv_obj_t *dcl_label = NULL;
-  lv_obj_t *label_obj = NULL;
-  lv_timer_t *timer = NULL; // used for hot water and inverter
-  uint8_t relay_pin = 0;
-  uint8_t y_offset = 0;
-  unsigned long timeout_ms = 0;
-  uint8_t dcl_limit = 0;
-  uint32_t dcl_enforced_ms = 0;
-  uint8_t set_temp = 21; // should match value of dropdown default index as this is used by thermostat logic
-  bool on = false; // simplifies code by substituting [lv_obj_has_state(data->button, LV_STATE_CHECKED)]
-  bool faulty_temp_disabled = false; // used by thermostat to prevent dcl_check from enabling disabled buttons
+typedef struct {
+  lv_obj_t *button;
+  lv_obj_t *dcl_label;
+  lv_obj_t *label_obj;
+  lv_timer_t *timer;
+  uint8_t relay_pin;
+  uint8_t y_offset;
+  unsigned long timeout_ms;
+  uint8_t dcl_limit;
+  uint32_t dcl_enforced_ms;
+  uint8_t set_temp;
+  bool on;
+  bool faulty_temp_disabled;
+  temp_dd_t *dd;
 } user_data_t;
 
 typedef struct {
-  lv_obj_t* clock_label = NULL;
+  lv_obj_t* clock_label;
 } clock_data_t;
 
 typedef struct {
-  lv_obj_t *label_obj = NULL;
-  lv_obj_t *msgbox = NULL;
-  bool update_timer = false;
+  lv_obj_t *label_obj;
+  lv_obj_t *msgbox;
+  bool update_timer;
 } msgbox_data_t;
 
 typedef struct {
-  lv_obj_t *soc_arc = NULL;
-  lv_obj_t *charge_arc = NULL;
-  lv_obj_t *discharge_arc = NULL;
-  lv_obj_t *battery_label = NULL;
-  lv_obj_t *soc_label = NULL;
-  lv_obj_t *volt_label = NULL;
-  lv_obj_t *amps_label = NULL;
-  lv_obj_t *watt_label = NULL;
-  lv_obj_t *ah_label = NULL;
-  lv_obj_t *charge_icon = NULL;
-  lv_obj_t *car_battery_icon = NULL;
-  lv_obj_t *charge_label = NULL;
-  lv_obj_t *usage_label = NULL;
-  uint8_t watt_label_x_pos = 0;
+  lv_obj_t *soc_arc;
+  lv_obj_t *charge_arc;
+  lv_obj_t *discharge_arc;
+  lv_obj_t *battery_label;
+  lv_obj_t *soc_label;
+  lv_obj_t *volt_label;
+  lv_obj_t *amps_label;
+  lv_obj_t *watt_label;
+  lv_obj_t *ah_label;
+  lv_obj_t *charge_icon;
+  lv_obj_t *car_battery_icon;
+  lv_obj_t *charge_label;
+  lv_obj_t *usage_label;
+  uint8_t watt_label_x_pos;
 } data_display_t;
 
-typedef struct {
-  lv_obj_t *dd = NULL;
-} temp_dd_t;
-
-//Initialise structures
-static CanMsgData canMsgData;
-static bms_status_data_t bmsStatusData;
-static user_data_t userData[4] = {}; // 4 buttons with user_data
-static clock_data_t clockData;
-static msgbox_data_t msgboxData[2] = {};
-static data_display_t dataDisplay;
-static CombinedData combinedData;
-static temp_dd_t temp_dd_index[2] = {};
+// initialise structures
+static CanMsgData canMsgData = {0};
+static bms_status_data_t bmsStatusData = {0};
+static user_data_t userData[4] = {0};
+static clock_data_t clockData = {0};
+static msgbox_data_t msgboxData[2] = {0};
+static data_display_t dataDisplay = {0};
+static CombinedData combinedData = {0};
+static temp_dd_t tempDD = {
+  .dd_obj = NULL,
+  .temp_sel = { 5, 17, 19, 20, 21, 22, 23 }
+};
 
 // Macro short-hands that are free
 #define CAN_RX_ID       canMsgData.rxId
@@ -306,7 +280,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 // UPDATE INVERTER LABEL //////////////////////////////////////////////////////////////////////////////////
 void update_inverter_label(bool state, user_data_t* data) {
   char label_text[12];
-  byte x_pos = 16;
+  uint8_t x_pos = 16;
 
   // is dcl enforced hide inverter label
   if ( data->dcl_enforced_ms ) {
@@ -511,7 +485,7 @@ void dcl_check(user_data_t *data) {
 
   // START TIMER IF INVERTER AND/OR HEATER/HOT WATER CRITERIA SATISFIED
   if ( !data->dcl_enforced_ms ) {
-    if ( data->relay_pin == RELAY1 && (AVG_AMPS > DCL || DCL < data->dcl_limit || !DCL || LO_CELL_V < (MIN_CELL_V + 0.3) || !(RELAYS & 0x01) || !CAN.available()) || // inverter criteria
+    if ( data->relay_pin == RELAY1 && (AVG_AMPS > DCL || DCL < data->dcl_limit || LO_CELL_V < (MIN_CELL_V + 0.1) || !(RELAYS & 0x01) || !CAN.available()) || // inverter criteria
          data->relay_pin != RELAY1 && (userData[3].dcl_enforced_ms || DCL < data->dcl_limit) ) {                                                              // heater/hot water criteria
 
       // RECORD TIME TO ALLOW TO DISABLING AND ENABLING OF BUTTONS AND LABELS CONTINIOUSLY LATER IN FUNCTION
@@ -952,6 +926,11 @@ void thermostat_checker(user_data_t *data, bool reset_timer = false) {
   static uint32_t thermostat_off_ms = 0;
   bool on = false;
 
+  // set temperature in accordance with selection if not matching
+  if ( data->set_temp != data->dd->temp_sel[lv_dropdown_get_selected(data->dd->dd_obj)] ) {
+    data->set_temp = data->dd->temp_sel[lv_dropdown_get_selected(data->dd->dd_obj)];
+  }
+
   if ( reset_timer || data->dcl_enforced_ms ) {
     thermostat_off_ms = 0;
     return;
@@ -1049,7 +1028,7 @@ void heaters_night_mode() {
   static bool night_mode = false; // used to set temp only once allowing a manual selection override to remain
   static bool prev_daylight = false;
   static uint32_t sunset_ms = 0;
-  static byte preset_temp_dd_index[2] = {254, 254};
+  static uint8_t preset_temp_i[2] = {254, 254};
 
   // set previous daylight detection variable
   if ( CHG_ENABLED && !prev_daylight ) {
@@ -1072,21 +1051,21 @@ void heaters_night_mode() {
   }
 
   // common loop manipulating both heaters temperature selections
-  for ( byte i = 0; i < 2; i++ ) {
+  for ( uint8_t i = 0; i < 2; i++ ) {
     if ( night_mode ) {
-      preset_temp_dd_index[i] = lv_dropdown_get_selected(temp_dd_index[i].dd);
-      // only set temp if above 17C to avoid starting heater if in 5C selection
-      if ( preset_temp_dd_index[i] > 1 ) { // index 1 is 17C
-        userData[i].set_temp = 17;  // set temperature for thermostat logic
-        lv_dropdown_set_selected(temp_dd_index[i].dd, 1);  // set temperature in dropdown menu
+      preset_temp_i[i] = lv_dropdown_get_selected(userData[i].dd->dd_obj); // store set temperature
+      if ( preset_temp_i[i] > 1 ) { // if temp above index[1] e.g. 17C
+        lv_dropdown_set_selected(userData[i].dd->dd_obj, 1);  // set temperature in dropdown menu
+        lv_event_send(userData[i].dd->dd_obj, LV_EVENT_VALUE_CHANGED, NULL);
       }
     }
-    else if ( preset_temp_dd_index[i] != 254 ) { // using preset_temp to avoid this running every time
+    else if ( preset_temp_i[i] != 254 ) { // using preset_temp to avoid this running every time
       sunset_ms = 0;
-      if ( userData[i].set_temp != preset_temp_dd_index[i] ) {
-        userData[i].set_temp = preset_temp_dd_index[i];
-        lv_dropdown_set_selected(temp_dd_index[i].dd, preset_temp_dd_index[i]);
-        preset_temp_dd_index[i] = 254; // reset to avoid it running again
+      uint8_t selected_temp = lv_dropdown_get_selected(userData[i].dd->dd_obj);
+      if ( selected_temp != userData[i].dd->temp_sel[preset_temp_i[i]] ) {
+        lv_dropdown_set_selected(userData[i].dd->dd_obj, preset_temp_i[i]);
+        lv_event_send(userData[i].dd->dd_obj, LV_EVENT_VALUE_CHANGED, NULL);
+        preset_temp_i[i] = 254; // reset to avoid it running again
       }
     }
   }
@@ -1102,53 +1081,44 @@ void dropdown_event_handler(lv_event_t *e) {
   user_data_t *data = (user_data_t *)lv_event_get_user_data(e);
   lv_obj_t *dd = lv_event_get_target(e);
 
-  // get index of selected dropdown item
-  uint8_t id_selected = lv_dropdown_get_selected(dd);
-
-  // link index to selection
-  switch (id_selected) {
-    case 0:
-      data->set_temp = 5;
-      break;
-    case 1:
-      data->set_temp = 17;
-      break;
-    case 2:
-      data->set_temp = 19;
-      break;
-    case 3:
-      data->set_temp = 20;
-      break;
-    case 4:
-      data->set_temp = 21;
-      break;
-    case 5:
-      data->set_temp = 22;
-      break;
-    default:
-      data->set_temp = 23;
-  }
+  // set temperature by linking index to temperature selection array
+  data->set_temp = data->dd->temp_sel[lv_dropdown_get_selected(dd)];
 }
 
 // CREATE TEMPERATURE SELECTION DROPDOWN MENU ///////////////////////////////////////
 void create_temperature_dropdown(lv_obj_t *parent, user_data_t *data) {
-  // set index to determine which drop down struct to use
-  byte i = 0;
-  if ( data->relay_pin == RELAY4 ) {
-    i = 1;
+  data->dd = (temp_dd_t *)malloc(sizeof(*data->dd));
+
+  // create dropdown object
+  data->dd->dd_obj = lv_dropdown_create(parent);
+
+  char dd_temp_sel_str[64] = "";
+
+  // create string for dynamic dropdown options
+  for ( uint8_t i = 0; i < (sizeof(data->dd->temp_sel) / sizeof(data->dd->temp_sel[0])); i++ ) {
+    char temp_str[16] = "";
+    if ( i ) {
+      snprintf(temp_str, sizeof(temp_str), "\n%2d\u00B0C", data->dd->temp_sel[i]);
+    }
+    else {
+      snprintf(temp_str, sizeof(temp_str), "%d\u00B0C", data->dd->temp_sel[i]);
+    }
+    strcat(dd_temp_sel_str, temp_str);
   }
-  temp_dd_index[i].dd = lv_dropdown_create(parent);
-  lv_dropdown_set_options(temp_dd_index[i].dd,
-    "5\u00B0C\n17\u00B0C\n19\u00B0C\n20\u00B0C\n21\u00B0C\n22\u00B0C\n23\u00B0C");
+
+
+  // create dropdown from string options
+  lv_dropdown_set_options(data->dd->dd_obj,
+    dd_temp_sel_str);
     
   // set user data
-  lv_dropdown_set_selected(temp_dd_index[i].dd, 4); // default index to be displayed. value set_temp in struct
-  lv_obj_set_user_data(temp_dd_index[i].dd, data);
-  lv_obj_add_event_cb(temp_dd_index[i].dd, dropdown_event_handler, LV_EVENT_VALUE_CHANGED, data);
+  lv_dropdown_set_selected(data->dd->dd_obj, 4); // default index to be displayed. value set_temp in struct
+  lv_obj_set_user_data(data->dd->dd_obj, (void *)data);
+  lv_obj_add_event_cb(data->dd->dd_obj, dropdown_event_handler, LV_EVENT_VALUE_CHANGED, data);
 
   // place roller
-  lv_obj_set_pos(temp_dd_index[i].dd, 235, data->y_offset - 1);
-  lv_obj_set_width(temp_dd_index[i].dd, 80);
+  lv_obj_set_pos(data->dd->dd_obj, 235, data->y_offset - 1);
+  lv_obj_set_width(data->dd->dd_obj, 80);
 }
 
 
@@ -1206,7 +1176,7 @@ void fault_label_maker(lv_timer_t *timer) {
 
   strcpy(faultMsg, "#"); // Start with a #
 
-  for (uint8_t i = 0; i < index; ++i) {
+  for (uint8_t i = 0; i < index; i++) {
     char buffer[10]; // Buffer to hold the string representation of the number
     if (i > 0) {
       strcat(faultMsg, "+"); // Add + before each element except the first
