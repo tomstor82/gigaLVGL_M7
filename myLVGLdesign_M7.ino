@@ -77,10 +77,10 @@ typedef struct {
   bool ccl_enforced;
   char dynamic_label[35];
   uint8_t y;
-} bms_status_data;
+} bms_status_data_t;
 
-// define struct for function user-data
-typedef struct {
+// define struct for timed buttons
+struct timed_button_data {
   lv_obj_t *button;
   lv_obj_t *dcl_label;
   lv_obj_t *label_obj;
@@ -91,10 +91,10 @@ typedef struct {
   uint8_t dcl_limit;
   uint32_t dcl_enforced_ms;
   bool on;
-} user_data_timed_t;
+}; 
 
-// define struct for function user-data
-typedef struct {
+// define struct for thermostatic buttons
+struct thermo_button_data {
   lv_obj_t *button;
   lv_obj_t *dcl_label;
   lv_obj_t *label_obj;
@@ -108,7 +108,7 @@ typedef struct {
   uint8_t set_temp;
   bool on;
   bool faulty_temp_disabled;
-} user_data_thermo_t;
+};
 
 typedef struct {
   lv_obj_t* clock_label;
@@ -140,8 +140,8 @@ typedef struct {
 // initialise structures
 static CanMsgData canMsgData = {0};
 static bms_status_data_t bmsStatusData = {0};
-static user_data_timed_t userDataTimed[2] = {0};
-static user_data_thermo_t userDataThermo[2] = {0};
+static struct thermo_button_data thermoData[2] = {0};
+static struct timed_button_data timedData[2] = {0};
 static clock_data_t clockData = {0};
 static msgbox_data_t msgboxData[2] = {0};
 static data_display_t dataDisplay = {0};
@@ -220,11 +220,11 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   pinMode(relay_pin, OUTPUT);
   digitalWrite(relay_pin, LOW); // initialise pin LOW
 
-  // INITIALISE STRUCT DATA
+  // SET STRUCT DATA
   data->relay_pin = relay_pin;
   data->y_offset = y_offset;
   data->dcl_limit = dcl_limit;
-  data->timeout_ms = timeout_ms;
+  if (timeout_ms) data->timeout_ms = timeout_ms; // applies to timed buttons only
 
   // CREATE BUTTON
   data->button = lv_btn_create(parent);
@@ -2050,16 +2050,16 @@ void setup() {
   // arguments 1:obj  2:label 3:relay_pin 4:y_offset 5:dcl_limit 6:timeout_ms 7:user_data struct
 
   // Create Button 1 - CEILING HEATER
-  create_button(cont, "Ceiling Heater", RELAY2, 20, 20, 0, &userDataThermo[0]); // dcl for test max 255 uint8_t
+  create_button(cont, "Ceiling Heater", RELAY2, 20, 20, 0, &thermoData[0]); // dcl for test max 255 uint8_t
 
   // Create Button 2 - SHOWER HEATER
-  create_button(cont, "Shower Heater",  RELAY4, 115, 10, 0, &userDataThermo[1]);
+  create_button(cont, "Shower Heater",  RELAY4, 115, 10, 0, &thermoData[1]);
 
   // Create Button 3 - HOT WATER
-  create_button(cont, "Hot Water",      RELAY3, 210, 60, hot_water_interval_ms, &userDataTimed[0]);
+  create_button(cont, "Hot Water",      RELAY3, 210, 60, hot_water_interval_ms, &timedData[0]);
 
   // Create Button 4 - INVERTER
-  create_button(cont, "Inverter",       RELAY1, 305, 5, inverter_startup_delay_ms, &userDataTimed[1]);
+  create_button(cont, "Inverter",       RELAY1, 305, 5, inverter_startup_delay_ms, &timedData[1]);
 
   // Create Leaf Icon for Inverter Eco Mode
   lv_obj_t* leaf_icon = lv_label_create(cont);
