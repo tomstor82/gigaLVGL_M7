@@ -33,31 +33,31 @@ LV_FONT_DECLARE(FontAwesomeSolid34_leaf); // 0xF06C
 //  ID 0x0BE BYT0:HI_CL_ID BYT1:LO_CL_ID BYT2:INT_HEATSINK BYT3+4:MIN_CELL BYT5+6:MAX_CELL
 
 // Temp and Relative Humidity data struct from M4
-typedef struct {
+struct sensor_data {
   float temp1, temp2, temp3, temp4;
   float rh1, rh2, rh3, rh4;
   float avg_temp;
   MSGPACK_DEFINE_ARRAY(temp1, temp2, temp3, temp4, rh1, rh2, rh3, rh4, avg_temp);
-} SensorData;
+};
 
 // CanData struct
-typedef struct {
+struct can_data {
   int p;
   float packU, instI, avgI, ah, hC, lC, minC, maxC, cpcty;
   uint8_t soc, hT, lT, ry, dcl, ccl, h, hCid, lCid;
   uint16_t fu, st;
   int cc;
   uint8_t hs, cu;
-} CanData;
+};
 
 // Create combined struct with sensor and can data
-typedef struct {
-  SensorData sensorData;
-  CanData canData;
-} CombinedData;
+struct combined_data {
+  sensor_data sensorData;
+  can_data canData;
+};
 
 // Can Message Data struct
-typedef struct {
+struct can_msg_data {
   // RX
   uint32_t rxId;
   uint8_t rxLen;
@@ -65,10 +65,10 @@ typedef struct {
   // TX
   uint8_t txBuf[3];
   uint8_t txRetries;
-} CanMsgData;
+};
 
 // Type defined structure for bms status messages allowing it to be passed to function
-typedef struct {
+struct bms_status_data {
   lv_obj_t *parent;
   lv_obj_t *title_label;
   lv_obj_t *button;
@@ -77,7 +77,7 @@ typedef struct {
   bool ccl_enforced;
   char dynamic_label[35];
   uint8_t y;
-} bms_status_data_t;
+};
 
 // define struct for timed buttons
 struct timed_button_data {
@@ -138,14 +138,14 @@ typedef struct {
 } data_display_t;
 
 // initialise structures
-static CanMsgData canMsgData = {0};
-static bms_status_data_t bmsStatusData = {0};
+static struct can_msg_data canMsgData = {0};
+static struct bms_status_data bmsStatusData = {0};
 static struct thermo_button_data thermoData[2] = {0};
 static struct timed_button_data timedData[2] = {0};
 static clock_data_t clockData = {0};
 static msgbox_data_t msgboxData[2] = {0};
 static data_display_t dataDisplay = {0};
-static CombinedData combinedData = {0};
+static struct combined_data combinedData = {0};
 
 // Macro short-hands that are free
 #define CAN_RX_ID       canMsgData.rxId
@@ -936,8 +936,8 @@ void thermostat_checker(user_data_t *data, bool reset_timer = false) {
   bool on = false;
 
   // set temperature in accordance with selection if not matching
-  if ( data->set_temp != data->dd.temp_sel[lv_dropdown_get_selected(data->dd.dd_obj)] ) {
-    data->set_temp = data->dd.temp_sel[lv_dropdown_get_selected(data->dd.dd_obj)];
+  if ( data->set_temp != data->temp_sel[lv_dropdown_get_selected(data->dd_obj)] ) {
+    data->set_temp = data->temp_sel[lv_dropdown_get_selected(data->dd_obj)];
   }
 
   if ( reset_timer || data->dcl_enforced_ms ) {
@@ -1062,18 +1062,18 @@ void heaters_night_mode() {
   // common loop manipulating both heaters temperature selections
   for ( uint8_t i = 0; i < 2; i++ ) {
     if ( night_mode ) {
-      preset_temp_i[i] = lv_dropdown_get_selected(userData[i].dd.dd_obj); // store set temperature
+      preset_temp_i[i] = lv_dropdown_get_selected(userData[i].dd_obj); // store set temperature
       if ( preset_temp_i[i] > 1 ) { // if temp above index[1] e.g. 17C
-        lv_dropdown_set_selected(userData[i].dd.dd_obj, 1);  // set temperature in dropdown menu
-        lv_event_send(userData[i].dd.dd_obj, LV_EVENT_VALUE_CHANGED, NULL);
+        lv_dropdown_set_selected(userData[i].dd_obj, 1);  // set temperature in dropdown menu
+        lv_event_send(userData[i].dd_obj, LV_EVENT_VALUE_CHANGED, NULL);
       }
     }
     else if ( preset_temp_i[i] != 254 ) { // using preset_temp to avoid this running every time
       sunset_ms = 0;
-      uint8_t selected_temp = lv_dropdown_get_selected(userData[i].dd.dd_obj);
-      if ( selected_temp != userData[i].dd.temp_sel[preset_temp_i[i]] ) {
-        lv_dropdown_set_selected(userData[i].dd.dd_obj, preset_temp_i[i]);
-        lv_event_send(userData[i].dd.dd_obj, LV_EVENT_VALUE_CHANGED, NULL);
+      uint8_t selected_temp = lv_dropdown_get_selected(userData[i].dd_obj);
+      if ( selected_temp != userData[i].temp_sel[preset_temp_i[i]] ) {
+        lv_dropdown_set_selected(userData[i].dd_obj, preset_temp_i[i]);
+        lv_event_send(userData[i].dd_obj, LV_EVENT_VALUE_CHANGED, NULL);
         preset_temp_i[i] = 254; // reset to avoid it running again
       }
     }
@@ -1091,43 +1091,43 @@ void dropdown_event_handler(lv_event_t *e) {
   lv_obj_t *dd = lv_event_get_target(e);
 
   // set temperature by linking index to temperature selection array
-  data->set_temp = data->dd.temp_sel[lv_dropdown_get_selected(dd)];
+  data->set_temp = data->temp_sel[lv_dropdown_get_selected(dd)];
 }
 
 // CREATE TEMPERATURE SELECTION DROPDOWN MENU ///////////////////////////////////////
 void create_temperature_dropdown(lv_obj_t *parent, user_data_t *data) {
 
   // create dropdown object
-  data->dd.dd_obj = lv_dropdown_create(parent);
+  data->dd_obj = lv_dropdown_create(parent);
 
   char dd_temp_sel_str[64] = "";
 
   // create string for dynamic dropdown options
-  for ( uint8_t i = 0; i < (sizeof(data->dd.temp_sel) / sizeof(data->dd.temp_sel[0])); i++ ) {
-    /*debug*/ Serial.print("temp sel: ");Serial.println(data->dd.temp_sel[i]);
+  for ( uint8_t i = 0; i < (sizeof(data->temp_sel) / sizeof(data->temp_sel[0])); i++ ) {
+    /*debug*/ Serial.print("temp sel: ");Serial.println(data->temp_sel[i]);
     char temp_str[16] = "";
     if ( i ) {
-      snprintf(temp_str, sizeof(temp_str), "\n%2d\u00B0C", data->dd.temp_sel[i]);
+      snprintf(temp_str, sizeof(temp_str), "\n%2d\u00B0C", data->temp_sel[i]);
     }
     else {
-      snprintf(temp_str, sizeof(temp_str), "%d\u00B0C", data->dd.temp_sel[i]);
+      snprintf(temp_str, sizeof(temp_str), "%d\u00B0C", data->temp_sel[i]);
     }
     strcat(dd_temp_sel_str, temp_str);
   }
 
 
   // create dropdown from string options
-  lv_dropdown_set_options(data->dd.dd_obj,
+  lv_dropdown_set_options(data->dd_obj,
     dd_temp_sel_str);
     
   // set user data
-  lv_dropdown_set_selected(data->dd.dd_obj, 4); // default index to be displayed. value set_temp in struct
-  lv_obj_set_user_data(data->dd.dd_obj, (void *)data);
-  lv_obj_add_event_cb(data->dd.dd_obj, dropdown_event_handler, LV_EVENT_VALUE_CHANGED, data);
+  lv_dropdown_set_selected(data->dd_obj, 4); // default index to be displayed. value set_temp in struct
+  lv_obj_set_user_data(data->dd_obj, (void *)data);
+  lv_obj_add_event_cb(data->dd_obj, dropdown_event_handler, LV_EVENT_VALUE_CHANGED, data);
 
   // place roller
-  lv_obj_set_pos(data->dd.dd_obj, 235, data->y_offset - 1);
-  lv_obj_set_width(data->dd.dd_obj, 80);
+  lv_obj_set_pos(data->dd_obj, 235, data->y_offset - 1);
+  lv_obj_set_width(data->dd_obj, 80);
 }
 
 
@@ -1511,7 +1511,7 @@ void screen_touch(lv_event_t *e) {
 
 
 // CREATE STATUS LABELS ////////////////////////////////////////////////////////////
-void create_status_label(const char* label_text, bms_status_data_t *data, bool finished = false) {
+void create_status_label(const char* label_text, user_data_t *data, bool finished = false) {
 
   static uint8_t i = 0; // static variable to preserve value between function calls
 
@@ -1539,7 +1539,7 @@ void create_status_label(const char* label_text, bms_status_data_t *data, bool f
 }
 
 // REFRESH BMS STATUS DATA ////////////////////////////////////////////////////////////////////
-void refresh_bms_status_data(bms_status_data_t *data) {
+void refresh_bms_status_data(user_data_t *data) {
 
   static bool balancing_label_showing = false; // Controlling the flashing feature
 
@@ -1641,7 +1641,7 @@ void refresh_bms_status_data(bms_status_data_t *data) {
 }
 
 // CREATE BMS STATUS LABELS //////////////////////////////////////////////////////
-void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *data) {
+void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, user_data_t *data) {
   if (data) {
     data->parent = parent;
     data->y = y;
