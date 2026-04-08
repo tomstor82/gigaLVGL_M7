@@ -77,13 +77,7 @@ typedef struct {
   bool ccl_enforced;
   char dynamic_label[35];
   uint8_t y;
-} bms_status_data_t;
-
-// dropdown struct
-typedef struct {
-  lv_obj_t *dd_obj;
-  uint8_t temp_sel[7];
-} temp_dd_t;
+} bms_status_data;
 
 // define struct for function user-data
 typedef struct {
@@ -96,11 +90,25 @@ typedef struct {
   unsigned long timeout_ms;
   uint8_t dcl_limit;
   uint32_t dcl_enforced_ms;
+  bool on;
+} user_data_timed_t;
+
+// define struct for function user-data
+typedef struct {
+  lv_obj_t *button;
+  lv_obj_t *dcl_label;
+  lv_obj_t *label_obj;
+  lv_timer_t *timer;
+  lv_obj_t *dd_obj;
+  uint8_t temp_sel[7];
+  uint8_t relay_pin;
+  uint8_t y_offset;
+  uint8_t dcl_limit;
+  uint32_t dcl_enforced_ms;
   uint8_t set_temp;
   bool on;
   bool faulty_temp_disabled;
-  temp_dd_t dd;
-} user_data_t;
+} user_data_thermo_t;
 
 typedef struct {
   lv_obj_t* clock_label;
@@ -132,13 +140,12 @@ typedef struct {
 // initialise structures
 static CanMsgData canMsgData = {0};
 static bms_status_data_t bmsStatusData = {0};
-static user_data_t userData[4] = {0};
+static user_data_timed_t userDataTimed[2] = {0};
+static user_data_thermo_t userDataThermo[2] = {0};
 static clock_data_t clockData = {0};
 static msgbox_data_t msgboxData[2] = {0};
 static data_display_t dataDisplay = {0};
 static CombinedData combinedData = {0};
-
-static const uint8_t default_temps[] = {5, 17, 19, 20, 21, 22, 23};
 
 // Macro short-hands that are free
 #define CAN_RX_ID       canMsgData.rxId
@@ -252,7 +259,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 
     // INITIALISE DD STRUCT DATA
     static const uint8_t default_temps[] = {5, 17, 19, 20, 21, 22, 23}; // if size change reflect this in struct declaration
-    memcpy(data->dd.temp_sel, default_temps, sizeof(default_temps));
+    memcpy(data->temp_sel, default_temps, sizeof(default_temps));
 
     // CREATE TEMPERATURE SELECTION DROP DOWN MENU
     create_temperature_dropdown(parent, data);
@@ -2043,16 +2050,16 @@ void setup() {
   // arguments 1:obj  2:label 3:relay_pin 4:y_offset 5:dcl_limit 6:timeout_ms 7:user_data struct
 
   // Create Button 1 - CEILING HEATER
-  create_button(cont, "Ceiling Heater", RELAY2, 20, 20, 0, &userData[0]); // dcl for test max 255 uint8_t
+  create_button(cont, "Ceiling Heater", RELAY2, 20, 20, 0, &userDataThermo[0]); // dcl for test max 255 uint8_t
 
   // Create Button 2 - SHOWER HEATER
-  create_button(cont, "Shower Heater",  RELAY4, 115, 10, 0, &userData[1]);
+  create_button(cont, "Shower Heater",  RELAY4, 115, 10, 0, &userDataThermo[1]);
 
   // Create Button 3 - HOT WATER
-  create_button(cont, "Hot Water",      RELAY3, 210, 60, hot_water_interval_ms, &userData[2]);
+  create_button(cont, "Hot Water",      RELAY3, 210, 60, hot_water_interval_ms, &userDataTimed[0]);
 
   // Create Button 4 - INVERTER
-  create_button(cont, "Inverter",       RELAY1, 305, 5, inverter_startup_delay_ms, &userData[3]);
+  create_button(cont, "Inverter",       RELAY1, 305, 5, inverter_startup_delay_ms, &userDataTimed[1]);
 
   // Create Leaf Icon for Inverter Eco Mode
   lv_obj_t* leaf_icon = lv_label_create(cont);
