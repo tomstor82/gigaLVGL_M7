@@ -77,13 +77,14 @@ struct bms_status_data {
   bool ccl_enforced;
   char dynamic_label[35];
   uint8_t y;
-};
+} bms_status_data_t;
 
-// define struct for timed buttons
-struct timed_button_data {
+// define struct for function user-data
+typedef struct {
   lv_obj_t *button;
   lv_obj_t *dcl_label;
   lv_obj_t *label_obj;
+  lv_obj_t *dd_obj;
   lv_timer_t *timer;
   uint8_t relay_pin;
   uint8_t y_offset;
@@ -108,7 +109,7 @@ struct thermo_button_data {
   uint8_t set_temp;
   bool on;
   bool faulty_temp_disabled;
-};
+} user_data_t;
 
 typedef struct {
   lv_obj_t* clock_label;
@@ -145,7 +146,7 @@ static struct timed_button_data timedData[2] = {0};
 static clock_data_t clockData = {0};
 static msgbox_data_t msgboxData[2] = {0};
 static data_display_t dataDisplay = {0};
-static struct combined_data combinedData = {0};
+static CombinedData combinedData = {0};
 
 // Macro short-hands that are free
 #define CAN_RX_ID       canMsgData.rxId
@@ -209,6 +210,7 @@ bool inverter_delay = false;
 bool eco_mode = false;
 static uint8_t brightness = 70;
 uint32_t previous_touch_ms = 0;
+uint8_t dd_temp_arr[7] = { 5, 15, 17, 19, 20, 21, 22 };
 
 // for M4 messages
 static String buffer = "";
@@ -936,8 +938,8 @@ void thermostat_checker(user_data_t *data, bool reset_timer = false) {
   bool on = false;
 
   // set temperature in accordance with selection if not matching
-  if ( data->set_temp != data->temp_sel[lv_dropdown_get_selected(data->dd_obj)] ) {
-    data->set_temp = data->temp_sel[lv_dropdown_get_selected(data->dd_obj)];
+  if ( data->set_temp != dd_temp_arr[lv_dropdown_get_selected(data->dd_obj)] ) {
+    data->set_temp = dd_temp_arr[lv_dropdown_get_selected(data->dd_obj)];
   }
 
   if ( reset_timer || data->dcl_enforced_ms ) {
@@ -1037,7 +1039,7 @@ void heaters_night_mode() {
   static bool night_mode = false; // used to set temp only once allowing a manual selection override to remain
   static bool prev_daylight = false;
   static uint32_t sunset_ms = 0;
-  static uint8_t preset_temp_i[2] = {254, 254};
+  static uint8_t previous_temp_selection[2] = {254, 254};
 
   // set previous daylight detection variable
   if ( CHG_ENABLED && !prev_daylight ) {
@@ -1062,19 +1064,19 @@ void heaters_night_mode() {
   // common loop manipulating both heaters temperature selections
   for ( uint8_t i = 0; i < 2; i++ ) {
     if ( night_mode ) {
-      preset_temp_i[i] = lv_dropdown_get_selected(userData[i].dd_obj); // store set temperature
-      if ( preset_temp_i[i] > 1 ) { // if temp above index[1] e.g. 17C
+      previous_temp_selection[i] = lv_dropdown_get_selected(userData[i].dd_obj); // store set temperature
+      if ( previous_temp_selection[i] > 1 ) { // if temp above index[1] e.g. 17C
         lv_dropdown_set_selected(userData[i].dd_obj, 1);  // set temperature in dropdown menu
         lv_event_send(userData[i].dd_obj, LV_EVENT_VALUE_CHANGED, NULL);
       }
     }
-    else if ( preset_temp_i[i] != 254 ) { // using preset_temp to avoid this running every time
+    else if ( previous_temp_selection[i] != 254 ) { // using preset_temp to avoid this running every time
       sunset_ms = 0;
       uint8_t selected_temp = lv_dropdown_get_selected(userData[i].dd_obj);
-      if ( selected_temp != userData[i].temp_sel[preset_temp_i[i]] ) {
-        lv_dropdown_set_selected(userData[i].dd_obj, preset_temp_i[i]);
+      if ( selected_temp != dd_temp_arr[previous_temp_selection[i]] ) {
+        lv_dropdown_set_selected(userData[i].dd_obj, previous_temp_selection[i]);
         lv_event_send(userData[i].dd_obj, LV_EVENT_VALUE_CHANGED, NULL);
-        preset_temp_i[i] = 254; // reset to avoid it running again
+        previous_temp_selection[i] = 254; // reset to avoid it running again
       }
     }
   }
@@ -1091,7 +1093,7 @@ void dropdown_event_handler(lv_event_t *e) {
   lv_obj_t *dd = lv_event_get_target(e);
 
   // set temperature by linking index to temperature selection array
-  data->set_temp = data->temp_sel[lv_dropdown_get_selected(dd)];
+  data->set_temp = dd_temp_arr[lv_dropdown_get_selected(dd)];
 }
 
 // CREATE TEMPERATURE SELECTION DROPDOWN MENU ///////////////////////////////////////
@@ -1103,22 +1105,20 @@ void create_temperature_dropdown(lv_obj_t *parent, user_data_t *data) {
   char dd_temp_sel_str[64] = "";
 
   // create string for dynamic dropdown options
-  for ( uint8_t i = 0; i < (sizeof(data->temp_sel) / sizeof(data->temp_sel[0])); i++ ) {
-    /*debug*/ Serial.print("temp sel: ");Serial.println(data->temp_sel[i]);
+  for ( uint8_t i = 0; i < (sizeof(dd_temp_arr) / sizeof(dd_temp_arr[0])); i++ ) {
     char temp_str[16] = "";
     if ( i ) {
-      snprintf(temp_str, sizeof(temp_str), "\n%2d\u00B0C", data->temp_sel[i]);
+      snprintf(temp_str, sizeof(temp_str), "\n%2d\u00B0C", dd_temp_arr[i]);
     }
     else {
-      snprintf(temp_str, sizeof(temp_str), "%d\u00B0C", data->temp_sel[i]);
+      snprintf(temp_str, sizeof(temp_str), "%d\u00B0C", dd_temp_arr[i]);
     }
     strcat(dd_temp_sel_str, temp_str);
   }
 
 
   // create dropdown from string options
-  lv_dropdown_set_options(data->dd_obj,
-    dd_temp_sel_str);
+  lv_dropdown_set_options(data->dd_obj, dd_temp_sel_str);
     
   // set user data
   lv_dropdown_set_selected(data->dd_obj, 4); // default index to be displayed. value set_temp in struct
@@ -1127,7 +1127,6 @@ void create_temperature_dropdown(lv_obj_t *parent, user_data_t *data) {
 
   // place roller
   lv_obj_set_pos(data->dd_obj, 235, data->y_offset - 1);
-  lv_obj_set_width(data->dd_obj, 80);
 }
 
 
@@ -1209,7 +1208,7 @@ void update_temp(user_data_t *data) {
   static lv_timer_t *sensor_fault_timer = NULL;
 
   char buf[20];
-  data -> faulty_temp_disabled = false; // reset before run - used to prevent dcl_check from enabling disabled buttons
+  data->faulty_temp_disabled = false; // reset before run - used to prevent dcl_check from enabling disabled buttons
   bool sensor_fault = false;
   bool all_sensors_faulty = false;
 
@@ -1234,7 +1233,7 @@ void update_temp(user_data_t *data) {
     else {
       snprintf(buf, sizeof(buf), "----");
       all_sensors_faulty = true;
-      data -> faulty_temp_disabled = true;
+      data->faulty_temp_disabled = true;
     }
 
     // CALL FAULT LABEL MAKER FUNCTION AT INTERVALS 8 OR 5 SEC
@@ -1255,13 +1254,13 @@ void update_temp(user_data_t *data) {
     }
     else {
       snprintf(buf, sizeof(buf), "#3 --");
-      data -> faulty_temp_disabled = true;
+      data->faulty_temp_disabled = true;
     }
   }
 
   // TURN OFF BUTTON AND ADD DISABLED STATE
-  if ( data -> faulty_temp_disabled && ! lv_obj_has_state(data->button, LV_STATE_DISABLED)) {
-    if (data->on == true) {
+  if ( data->faulty_temp_disabled && !lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
+    if ( data->on == true ) {
       lv_event_send(data->button, LV_EVENT_RELEASED, NULL);
     }
     lv_obj_add_state(data->button, LV_STATE_DISABLED);
