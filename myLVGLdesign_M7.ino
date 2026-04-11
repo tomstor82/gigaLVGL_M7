@@ -33,31 +33,31 @@ LV_FONT_DECLARE(FontAwesomeSolid34_leaf); // 0xF06C
 //  ID 0x0BE BYT0:HI_CL_ID BYT1:LO_CL_ID BYT2:INT_HEATSINK BYT3+4:MIN_CELL BYT5+6:MAX_CELL
 
 // Temp and Relative Humidity data struct from M4
-struct sensor_data {
+typedef struct {
   float temp1, temp2, temp3, temp4;
   float rh1, rh2, rh3, rh4;
   float avg_temp;
   MSGPACK_DEFINE_ARRAY(temp1, temp2, temp3, temp4, rh1, rh2, rh3, rh4, avg_temp);
-};
+} SensorData;
 
 // CanData struct
-struct can_data {
+typedef struct {
   int p;
   float packU, instI, avgI, ah, hC, lC, minC, maxC, cpcty;
   uint8_t soc, hT, lT, ry, dcl, ccl, h, hCid, lCid;
   uint16_t fu, st;
   int cc;
   uint8_t hs, cu;
-};
+} CanData;
 
 // Create combined struct with sensor and can data
-struct combined_data {
-  sensor_data sensorData;
-  can_data canData;
-};
+typedef struct {
+  SensorData sensorData;
+  CanData canData;
+} CombinedData;
 
 // Can Message Data struct
-struct can_msg_data {
+typedef struct {
   // RX
   uint32_t rxId;
   uint8_t rxLen;
@@ -65,10 +65,10 @@ struct can_msg_data {
   // TX
   uint8_t txBuf[3];
   uint8_t txRetries;
-};
+} CanMsgData;
 
 // Type defined structure for bms status messages allowing it to be passed to function
-struct bms_status_data {
+typedef struct {
   lv_obj_t *parent;
   lv_obj_t *title_label;
   lv_obj_t *button;
@@ -89,21 +89,6 @@ typedef struct {
   uint8_t relay_pin;
   uint8_t y_offset;
   unsigned long timeout_ms;
-  uint8_t dcl_limit;
-  uint32_t dcl_enforced_ms;
-  bool on;
-}; 
-
-// define struct for thermostatic buttons
-struct thermo_button_data {
-  lv_obj_t *button;
-  lv_obj_t *dcl_label;
-  lv_obj_t *label_obj;
-  lv_timer_t *timer;
-  lv_obj_t *dd_obj;
-  uint8_t temp_sel[7];
-  uint8_t relay_pin;
-  uint8_t y_offset;
   uint8_t dcl_limit;
   uint32_t dcl_enforced_ms;
   uint8_t set_temp;
@@ -139,10 +124,9 @@ typedef struct {
 } data_display_t;
 
 // initialise structures
-static struct can_msg_data canMsgData = {0};
-static struct bms_status_data bmsStatusData = {0};
-static struct thermo_button_data thermoData[2] = {0};
-static struct timed_button_data timedData[2] = {0};
+static CanMsgData canMsgData = {0};
+static bms_status_data_t bmsStatusData = {0};
+static user_data_t userData[4] = {0};
 static clock_data_t clockData = {0};
 static msgbox_data_t msgboxData[2] = {0};
 static data_display_t dataDisplay = {0};
@@ -222,11 +206,11 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   pinMode(relay_pin, OUTPUT);
   digitalWrite(relay_pin, LOW); // initialise pin LOW
 
-  // SET STRUCT DATA
+  // INITIALISE STRUCT DATA
   data->relay_pin = relay_pin;
   data->y_offset = y_offset;
   data->dcl_limit = dcl_limit;
-  if (timeout_ms) data->timeout_ms = timeout_ms; // applies to timed buttons only
+  data->timeout_ms = timeout_ms;
 
   // CREATE BUTTON
   data->button = lv_btn_create(parent);
@@ -258,10 +242,6 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     // ADD EVENT HANDLER TO TEMPERATURE INDICATOR
     lv_obj_add_flag(data->label_obj, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(data->label_obj, sensor_msgbox, LV_EVENT_CLICKED, &msgboxData[1]);
-
-    // INITIALISE DD STRUCT DATA
-    static const uint8_t default_temps[] = {5, 17, 19, 20, 21, 22, 23}; // if size change reflect this in struct declaration
-    memcpy(data->temp_sel, default_temps, sizeof(default_temps));
 
     // CREATE TEMPERATURE SELECTION DROP DOWN MENU
     create_temperature_dropdown(parent, data);
@@ -1102,11 +1082,11 @@ void create_temperature_dropdown(lv_obj_t *parent, user_data_t *data) {
   // create dropdown object
   data->dd_obj = lv_dropdown_create(parent);
 
-  char dd_temp_sel_str[64] = "";
+  char dd_temp_sel_str[40] = "";
 
   // create string for dynamic dropdown options
   for ( uint8_t i = 0; i < (sizeof(dd_temp_arr) / sizeof(dd_temp_arr[0])); i++ ) {
-    char temp_str[16] = "";
+    char temp_str[8] = "";
     if ( i ) {
       snprintf(temp_str, sizeof(temp_str), "\n%2d\u00B0C", dd_temp_arr[i]);
     }
@@ -1120,13 +1100,13 @@ void create_temperature_dropdown(lv_obj_t *parent, user_data_t *data) {
   // create dropdown from string options
   lv_dropdown_set_options(data->dd_obj, dd_temp_sel_str);
     
-  // set user data
+  // set default selection and add event handler
   lv_dropdown_set_selected(data->dd_obj, 4); // default index to be displayed. value set_temp in struct
-  lv_obj_set_user_data(data->dd_obj, (void *)data);
   lv_obj_add_event_cb(data->dd_obj, dropdown_event_handler, LV_EVENT_VALUE_CHANGED, data);
 
-  // place roller
+  // place roller and adjust width
   lv_obj_set_pos(data->dd_obj, 235, data->y_offset - 1);
+  lv_obj_set_width(data->dd_obj, 80);
 }
 
 
@@ -1510,7 +1490,7 @@ void screen_touch(lv_event_t *e) {
 
 
 // CREATE STATUS LABELS ////////////////////////////////////////////////////////////
-void create_status_label(const char* label_text, user_data_t *data, bool finished = false) {
+void create_status_label(const char* label_text, bms_status_data_t *data, bool finished = false) {
 
   static uint8_t i = 0; // static variable to preserve value between function calls
 
@@ -1538,7 +1518,7 @@ void create_status_label(const char* label_text, user_data_t *data, bool finishe
 }
 
 // REFRESH BMS STATUS DATA ////////////////////////////////////////////////////////////////////
-void refresh_bms_status_data(user_data_t *data) {
+void refresh_bms_status_data(bms_status_data_t *data) {
 
   static bool balancing_label_showing = false; // Controlling the flashing feature
 
@@ -1640,7 +1620,7 @@ void refresh_bms_status_data(user_data_t *data) {
 }
 
 // CREATE BMS STATUS LABELS //////////////////////////////////////////////////////
-void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, user_data_t *data) {
+void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *data) {
   if (data) {
     data->parent = parent;
     data->y = y;
@@ -2049,16 +2029,16 @@ void setup() {
   // arguments 1:obj  2:label 3:relay_pin 4:y_offset 5:dcl_limit 6:timeout_ms 7:user_data struct
 
   // Create Button 1 - CEILING HEATER
-  create_button(cont, "Ceiling Heater", RELAY2, 20, 20, 0, &thermoData[0]); // dcl for test max 255 uint8_t
+  create_button(cont, "Ceiling Heater", RELAY2, 20, 20, 0, &userData[0]); // dcl for test max 255 uint8_t
 
   // Create Button 2 - SHOWER HEATER
-  create_button(cont, "Shower Heater",  RELAY4, 115, 10, 0, &thermoData[1]);
+  create_button(cont, "Shower Heater",  RELAY4, 115, 10, 0, &userData[1]);
 
   // Create Button 3 - HOT WATER
-  create_button(cont, "Hot Water",      RELAY3, 210, 60, hot_water_interval_ms, &timedData[0]);
+  create_button(cont, "Hot Water",      RELAY3, 210, 60, hot_water_interval_ms, &userData[2]);
 
   // Create Button 4 - INVERTER
-  create_button(cont, "Inverter",       RELAY1, 305, 5, inverter_startup_delay_ms, &timedData[1]);
+  create_button(cont, "Inverter",       RELAY1, 305, 5, inverter_startup_delay_ms, &userData[3]);
 
   // Create Leaf Icon for Inverter Eco Mode
   lv_obj_t* leaf_icon = lv_label_create(cont);
