@@ -178,7 +178,7 @@ static CombinedData combinedData = {0};
 #define CYCLES          combinedData.canData.cc
 #define HEAT_SINK       combinedData.canData.hs
 #define CUSTOM_FLAGS    combinedData.canData.cu
-#define CHG_ENABLED     (combinedData.canData.cu & 0x01) == 0x01
+#define PV_DETECT     (combinedData.canData.cu & 0x01) == 0x01
 #define CAPACITY        combinedData.canData.cpcty
 
 #define DYNAMIC_LABEL   bmsStatusData.dynamic_label
@@ -350,7 +350,7 @@ void solar_charge_manager() {
     strcpy(DYNAMIC_LABEL, "Solar OFF - No CAN communication");
   }
   // WHEN SUNLIGHT IS SENSED /*- AS EXT.CHARGE SHORTS PV NO CHARGE AMP TESTS ARE NEEDED*/
-  else if ( CHG_ENABLED ) {
+  else if ( PV_DETECT ) {
     // SYNC TIME EVERYTIME CHG SIGNAL DETECTED TO CHECK WHEN SOLAR SIGNAL IS LOST
     if ( !sunrise_ms ) {
       sunrise_ms = millis();
@@ -734,7 +734,7 @@ void power_check(lv_timer_t *timer) {
     if ( eco_mode ) {
 
       // ON if above inverter standby, solar charge or charging when above 50% soc
-      if ( !time_ms && ( WATTS > 80 || CHG_ENABLED || AVG_AMPS < -5 && SOC > 50) ) {
+      if ( !time_ms && ( WATTS > 80 || PV_DETECT || AVG_AMPS < -5 && SOC > 50) ) {
         on = true;
       }
     }
@@ -827,7 +827,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
     // INVERTER
     if ( data->relay_pin == RELAY1 ) {
       // TURN OFF MPPT IF NO CHARGE AS SOMETIMES MPPT CAUSES ISSUE DESPITE NO SOLAR DETECTED. THIS IS TO AVOID START-UP POWER SURGE
-      if ( WATTS >= 0 ) { //&& CHG_ENABLED ) {
+      if ( WATTS >= 0 ) { //&& PV_DETECT ) {
         inverter_start();
       }
       update_inverter_label(1, data);
@@ -1009,59 +1009,62 @@ void thermostat_event_handler(lv_event_t *e) {
 
 
 
+// HELPER FUNCTION FOR HEATER NIGHT MODE MANIPULATION
+void manipulate_heaters(bool night_mode) {
 
+  static uint8_t previous_dd_selection[2] = {254, 254};
 
+  // common loop manipulating both heaters temperature selections
+  for ( uint8_t i = 0; i < 2; i++ ) {
+    if ( night_mode ) {
+      previous_dd_selection[i] = lv_dropdown_get_selected(userData[i].dd_obj); // store set temperature
+      if ( previous_dd_selection[i] > 1 ) { // if temp above index[1] = 15C, let's set 15C at night
+        lv_dropdown_set_selected(userData[i].dd_obj, 1);  // set index 1 aka 15C
+        lv_event_send(userData[i].dd_obj, LV_EVENT_VALUE_CHANGED, NULL);
+      }
+    }
+    else if ( previous_dd_selection[i] != 254 ) {
+      uint8_t current_dd_selection = lv_dropdown_get_selected(userData[i].dd_obj);
+      if ( current_dd_selection != dd_temp_arr[previous_dd_selection[i]] ) {
+        lv_dropdown_set_selected(userData[i].dd_obj, previous_dd_selection[i]);
+        lv_event_send(userData[i].dd_obj, LV_EVENT_VALUE_CHANGED, NULL);
+        previous_dd_selection[i] = 254; // reset to avoid it running again
+      }
+    }
+  }
+}
 
 
 // HEATERS NIGHT MODE REDUCED TEMPERATURE - FUNCTION CALLED ONLY ONCE FOR BOTH HEATERS
 void heaters_night_mode() {
 
   static bool night_mode = false; // used to set temp only once allowing a manual selection override to remain
-  static bool prev_daylight = false;
+  static bool daylight = false;
   static uint32_t sunset_ms = 0;
-  static uint8_t previous_temp_selection[2] = {254, 254};
 
   // set previous daylight detection variable
-  if ( CHG_ENABLED && !prev_daylight ) {
-    prev_daylight = true;
+  if ( PV_DETECT && !daylight ) {
+    daylight = true;
   }
 
   // start timer at sunset - tested by previous daylight detection
-  if ( !sunset_ms && !CHG_ENABLED /*&& AVG_AMPS >= 0*/ && prev_daylight ) { // added AVG_AMPS to prevent grid/generator charge stating timer
+  if ( !sunset_ms && !PV_DETECT /*&& AVG_AMPS >= 0*/ && daylight ) { // added AVG_AMPS to prevent grid/generator charge stating timer when MPPT disabled by charge. Not needed as PV_DETECT will not be affected by gen/grid
     sunset_ms = millis(); // record time at sunset
-    prev_daylight = false;
+    daylight = false;
     return; // to prevent loop running
   }
   // set 17C 3 hours after sunset
   else if ( sunset_ms && (millis() - sunset_ms) > 3*60*60*1000 && !night_mode ) {
     night_mode = true;
+    manipulate_heaters(night_mode);
   }
   // reset temp to preselected value 9 hours after sunset or at sunrise
-  else if ( sunset_ms && ((millis() - sunset_ms) > 9*60*60*1000 || CHG_ENABLED) && night_mode ) {
+  else if ( sunset_ms && ((millis() - sunset_ms) > 9*60*60*1000 || PV_DETECT) && night_mode ) {
     night_mode = false;
-  }
-
-  // common loop manipulating both heaters temperature selections
-  for ( uint8_t i = 0; i < 2; i++ ) {
-    if ( night_mode ) {
-      previous_temp_selection[i] = lv_dropdown_get_selected(userData[i].dd_obj); // store set temperature
-      if ( previous_temp_selection[i] > 1 ) { // if temp above index[1] e.g. 17C
-        lv_dropdown_set_selected(userData[i].dd_obj, 1);  // set temperature in dropdown menu
-        lv_event_send(userData[i].dd_obj, LV_EVENT_VALUE_CHANGED, NULL);
-      }
-    }
-    else if ( previous_temp_selection[i] != 254 ) { // using preset_temp to avoid this running every time
-      sunset_ms = 0;
-      uint8_t selected_temp = lv_dropdown_get_selected(userData[i].dd_obj);
-      if ( selected_temp != dd_temp_arr[previous_temp_selection[i]] ) {
-        lv_dropdown_set_selected(userData[i].dd_obj, previous_temp_selection[i]);
-        lv_event_send(userData[i].dd_obj, LV_EVENT_VALUE_CHANGED, NULL);
-        previous_temp_selection[i] = 254; // reset to avoid it running again
-      }
-    }
+    sunset_ms = 0;
+    manipulate_heaters(night_mode);
   }
 }
-
 
 
 
@@ -1690,7 +1693,7 @@ void charge_icons_updater(data_display_t *data) {
   // CHARGE SYMBOLS
   if ( AVG_AMPS < 0 ) {
     // SHOW LIGHTENING BOLT IF PV DETECTED
-    if ( CHG_ENABLED ) {
+    if ( PV_DETECT ) {
       lv_label_set_text(data->charge_icon, "\uF0E7"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
     }
     // SHOW TWO-PIN ICON OTHERWISE
@@ -1702,7 +1705,7 @@ void charge_icons_updater(data_display_t *data) {
   // NO CHARGE
   else {
     // SHOW FLASHING SUN ICON IF PV DETECTED
-    if ( CHG_ENABLED ) {
+    if ( PV_DETECT ) {
       lv_label_set_text(data->charge_icon, "\uF185"); // sun icon
       if ( lv_obj_has_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN) ) {
         lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
