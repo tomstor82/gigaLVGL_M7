@@ -190,7 +190,7 @@ static CombinedData combinedData = {0};
 #define touch_timeout_ms 30000 // 30s before screen dimming
 
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size) int/float = 4 bytes
-bool inverter_delay = false;
+uint32_t inverter_delay_timer_ms = 0;
 bool eco_mode = false;
 static uint8_t brightness = 70;
 uint32_t previous_touch_ms = 0;
@@ -357,11 +357,11 @@ void solar_charge_manager() {
       return;
     }
     static bool previous_delay = false;
-    if ( !previous_delay && inverter_delay ) {
+    if ( !previous_delay && inverter_delay_timer_ms ) {
       previous_delay = true;
     }
     // AFTER INVERTER START DELAY
-    if ( !inverter_delay && previous_delay ) {
+    if ( !inverter_delay_timer_ms && previous_delay ) {
       // USED TO AVOID RAPID TRIGGERING OF THESE TWO STATEMENTS
       static uint32_t mppt_drain_time_ms = 0;
 
@@ -405,7 +405,7 @@ void solar_charge_manager() {
       }
     }
     // EXT. CHARGE AFTER SUNRISE OR NIGHT
-    else if ( !inverter_delay ) { // inverter_delay condition to not over-write startup label
+    else if ( !inverter_delay_timer_ms ) { // inverter_delay_timer_ms condition to not over-write startup label
       if ( AVG_AMPS < 0 && sunrise_ms ) {
         strcpy(DYNAMIC_LABEL, "Solar OFF - External Charge");
       }
@@ -433,7 +433,7 @@ void solar_charge_manager() {
 // CCL AND HIGH CELL VOLTAGE CHECK TIMER ////////////////////////////////////////////////////////////////////////////
 void ccl_check() {
 
-  if ( inverter_delay ) return;
+  if ( inverter_delay_timer_ms ) return;
 
   // OPEN CONTACTOR AT 0 CCL OR CELL APPROACHING MAX VOLTAGE
   else if ( !CCL_ENFORCED && CCL == 0 || HI_CELL_V > (MAX_CELL_V - 0.02) ) {
@@ -702,15 +702,16 @@ void close_sensor_msgbox_event_handler(lv_event_t *e) {
 
 
 void inverter_start() {
+  // if solar detected but mppt is discharging battery, best disable it as power surges happen if inverter start attempted
   if ( WATTS >= 0 && PV_DETECT ) {
     pv_contactor(false);
-    inverter_delay = true; // triggers loop function with delayed start and restart of mppt
+    inverter_delay_timer_ms = millis(); // triggers loop function with delayed start and restart of mppt
+    strcpy(DYNAMIC_LABEL, "Inverter starting");
   }
   else {
     digitalWrite(RELAY1, HIGH);
     userData[3].on = true;
   }
-  strcpy(DYNAMIC_LABEL, "Inverter starting");
 }
 
 
@@ -881,7 +882,6 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
     // INVERTER MANIPULATES BUTTONS THAT ARE ON
     if ( data->relay_pin == RELAY1 ) {
       update_inverter_label(0, data);
-      inverter_delay = false;
 
       // TURN OFF THE 3 BUTTONS THAT MAY BE ON
       for ( uint8_t i = 0; i < 3; i++ ) {
@@ -2153,20 +2153,14 @@ void loop() {
   }
 
   // 6s INVERTER DELAY AFTER MPPT DISABLED WITH 30s PAUSE BEFORE SENDING RE-ENABLE SIGNAL
-  if ( inverter_delay ) {
-    static uint32_t delay_start_ms = 0;
+  if ( inverter_delay_timer_ms ) {
 
-    if ( !delay_start_ms ) {
-      delay_start_ms = millis();
-    }
-
-    // MPPT RESTART - WAIT 30s AFTER INVERTER START
-    else if ( (millis() - delay_start_ms) > 30000 && (inverter_delay || !userData[3].on) ) {
-      delay_start_ms = 0;
-      inverter_delay = false; // stop this function executing
+    // MPPT RESTART AFTER 30s
+    if ( (millis() - inverter_delay_timer_ms) > 30000 ) {
+      inverter_delay_timer_ms = 0; // enables pv manager to restart pv relay
     }
     // INVERTER START - ALLOW MPPT 6s TO LOOSE POWER TO AVOID POWER SURGE
-    else if ( (millis() - delay_start_ms) > 6000 && !userData[3].on ) {
+    else if ( (millis() - inverter_delay_timer_ms) > 6000 && !userData[3].on ) {
       digitalWrite(RELAY1, HIGH);
       userData[3].on = true;
     }
