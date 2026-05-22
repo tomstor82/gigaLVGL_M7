@@ -29,7 +29,7 @@ LV_FONT_DECLARE(FontAwesomeSolid34_leaf); // 0xF06C
 //  ID 0x03B BYT0+1:INST_VOLT BYT2+3:INST_AMP BYT4+5:TOTAL_CAPACITY BYT6:SOC
 //  ID 0x6B2 BYT0+1:LOW_CELL BYT2+3:HIGH_CELL BYT4:HEALTH BYT5+6:CYCLES
 //  ID 0x0A9 BYT0:RELAY_STATE BYT1:CCL BYT2:DCL BYT3+4:PACK_AH BYT5+6:AVG_AMP
-//  ID 0x0BD BYT0+1:BMS_FAULTcS BYT2:HI_TMP BYT3:LO_TMP BYT4:CUSTOM_FLAGS BYT5:BMS_STATUS
+//  ID 0x0BD BYT0+1:BMS_FAULTS BYT2:HI_TMP BYT3:LO_TMP BYT4:CUSTOM_FLAGS BYT5:BMS_STATUS
 //  ID 0x0BE BYT0:HI_CL_ID BYT1:LO_CL_ID BYT2:INT_HEATSINK BYT3+4:MIN_CELL BYT5+6:MAX_CELL
 
 // Temp and Relative Humidity data struct from M4
@@ -317,14 +317,14 @@ void pv_contactor(bool enable_solar) {
   }
 
   // SET VALUE IN BUFFER ARRAY TO OPEN PV CONTACTOR - 10s DELAY
-  if ( !enable_solar && (millis() - toggle_time_ms) > 10000 && PV_ON ) {
+  if ( !enable_solar /*&& (millis() - toggle_time_ms) > 10000*/ && PV_ON ) {
     PV_ON = 0x00;
     toggle_time_ms = millis(); // Set toggle time
   }
   // SET VALUE IN BUFFER ARRAY TO CLOSE PV CONTACTOR - 1m DELAY
   else if ( enable_solar && (millis() - toggle_time_ms) > 60000 && !PV_ON ) {
     PV_ON = 0x01;
-    toggle_time_ms = millis(); // Set toggle time
+    toggle_time_ms = 0; //millis(); // Set toggle time
   }
 }
 
@@ -356,12 +356,9 @@ void solar_charge_manager() {
       sunrise_ms = millis();
       return;
     }
-    static bool previous_delay = false;
-    if ( !previous_delay && inverter_delay_timer_ms ) {
-      previous_delay = true;
-    }
+
     // AFTER INVERTER START DELAY
-    if ( !inverter_delay_timer_ms && previous_delay ) {
+    if ( !inverter_delay_timer_ms /*&& previous_delay*/) {
       // USED TO AVOID RAPID TRIGGERING OF THESE TWO STATEMENTS
       static uint32_t mppt_drain_time_ms = 0;
 
@@ -379,10 +376,9 @@ void solar_charge_manager() {
         else {
           return;
         }
-        previous_delay = false;
       }
       // TURN ON PV ARRAY 10m AFTER SUNRISE OR MPPT DRAIN, OR 5s AFTER ARDUINO STARTUP IF SUNRISE DETECTED MORE THAN 2s AGO
-      else if ( !enable_solar && ((millis() - sunrise_ms + mppt_drain_time_ms) > 600000 || (millis() < 5000 && (millis() - sunrise_ms) > 2000)) ) { // assuming millis are 0 after reboot 2000 hopefully works
+      else if ( !enable_solar && ((millis() - sunrise_ms + mppt_drain_time_ms) > 600000 || combinedData.canData.p )) { // using combinedData to decipher when Arduino has started
         enable_solar = true;
         mppt_drain_time_ms = 0;
         strcpy(DYNAMIC_LABEL, "Solar ON delay");
@@ -615,7 +611,7 @@ void close_can_msgbox_event_handler(lv_event_t *e) {
   lv_event_code_t code = lv_event_get_code(e);
   msgbox_data_t *data = (msgbox_data_t*)lv_event_get_user_data(e);
 
-  if ( code == LV_EVENT_CLICKED) {
+  if (code == LV_EVENT_CLICKED) {
     data->update_timer = false;
     lv_msgbox_close(data->msgbox);           // Delete the message box
 
@@ -688,7 +684,7 @@ void close_sensor_msgbox_event_handler(lv_event_t *e) {
   lv_event_code_t code = lv_event_get_code(e);
   msgbox_data_t *data = (msgbox_data_t*)lv_event_get_user_data(e);
 
-  if ( code == LV_EVENT_CLICKED) {
+  if (code == LV_EVENT_CLICKED) {
     data->update_timer = false;
     lv_msgbox_close(data->msgbox); // Delete the message box
 
@@ -702,8 +698,8 @@ void close_sensor_msgbox_event_handler(lv_event_t *e) {
 
 
 void inverter_start() {
-  // if solar detected but mppt is discharging battery, best disable it as power surges happen if inverter start attempted
-  if ( WATTS >= 0 && PV_DETECT ) {
+  // if mppt is or has been discharging battery recently, best disable it as power surges happen if inverter start attempted
+  if ( WATTS >= 0 && PV_DETECT ) { // using PV_DETECT insteaed of PV_ON as PV might have been tripped recently due to drain
     pv_contactor(false);
     inverter_delay_timer_ms = millis(); // triggers loop function with delayed start and restart of mppt
     strcpy(DYNAMIC_LABEL, "Inverter starting");
@@ -881,6 +877,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
 
     // INVERTER MANIPULATES BUTTONS THAT ARE ON
     if ( data->relay_pin == RELAY1 ) {
+      inverter_delay_timer_ms = 0;
       update_inverter_label(0, data);
 
       // TURN OFF THE 3 BUTTONS THAT MAY BE ON
@@ -985,8 +982,8 @@ void thermostat_checker(user_data_t *data, bool reset_timer = false) {
 void thermostat_event_handler(lv_event_t *e) {
   user_data_t *data = (user_data_t *)lv_event_get_user_data(e);
 
-  // Button ON
-  if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
+    // BUTTON ON
+    if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
 
     // start inverter if off
     if ( !lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
@@ -1002,7 +999,6 @@ void thermostat_event_handler(lv_event_t *e) {
     }
     data->on = true;
   }
-
   // Button OFF
   else {
     data->on = false;
@@ -2124,7 +2120,7 @@ void loop() {
     // DISABLE PV IF DCH CONTACTOR OPEN TO AVOID DAMAGING INVERTER FROM PV ARRAY
     if ( !(RELAYS & 0x0001) ) {
       pv_contactor(false);
-      strcpy(DYNAMIC_LABEL, "Solar OFF - Battery Contactor Open");
+      strcpy(DYNAMIC_LABEL, "Battery Discharge Contactor Open");
     }
   }
 
@@ -2154,6 +2150,11 @@ void loop() {
 
   // 6s INVERTER DELAY AFTER MPPT DISABLED WITH 30s PAUSE BEFORE SENDING RE-ENABLE SIGNAL
   if ( inverter_delay_timer_ms ) {
+
+    if ( PV_ON ) {
+      pv_contactor(false);
+      Serial.println("Had to open PV relay from loop :(");
+    }
 
     // MPPT RESTART AFTER 30s
     if ( (millis() - inverter_delay_timer_ms) > 30000 ) {
