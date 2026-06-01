@@ -88,7 +88,7 @@ typedef struct {
   lv_timer_t *timer;
   uint8_t relay_pin;
   uint8_t y_offset;
-  unsigned long timeout_ms;
+  uint32_t timeout_ms;
   uint8_t dcl_limit;
   uint32_t dcl_enforced_ms;
   uint8_t set_temp;
@@ -200,7 +200,7 @@ uint8_t dd_temp_arr[7] = { 5, 15, 17, 19, 20, 21, 22 };
 static String buffer = "";
 
 // CREATE BUTTONS /// TWO TIMERS CREATED HERE: TEMP UPDATER AND DCL CHECK
-void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, unsigned long timeout_ms, user_data_t *data) {
+void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, uint32_t timeout_ms, user_data_t *data) {
 
   // INITIALISE RELAY PINS
   pinMode(relay_pin, OUTPUT);
@@ -916,7 +916,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
 // THERMOSTAT TIMER ////////////////////////////////////////////////////////////////
 void thermostat_checker(user_data_t *data, bool reset_timer = false) {
 
-  static uint32_t thermostat_off_ms = 0;
+  //static uint32_t thermostat_off_ms = 0;
   bool on = false;
 
   // set temperature in accordance with selection if not matching
@@ -925,11 +925,11 @@ void thermostat_checker(user_data_t *data, bool reset_timer = false) {
   }
 
   if ( reset_timer || data->dcl_enforced_ms ) {
-    thermostat_off_ms = 0;
+    data->timeout_ms = 0;
     return;
   }
   // Off cycle time checker (2 min set)
-  else if ( thermostat_off_ms && (millis() - thermostat_off_ms) < 120000 ) {
+  else if ( data->timeout_ms && (millis() - data->timeout_ms) < 120000 ) {
     return;
   }
 
@@ -970,11 +970,11 @@ void thermostat_checker(user_data_t *data, bool reset_timer = false) {
   // Toggle relay and set timer
   if ( on ) {
     digitalWrite(data->relay_pin, HIGH);
-    thermostat_off_ms = 0;
+    data->timeout_ms = 0;
   }
   else {
     digitalWrite(data->relay_pin, LOW);
-    thermostat_off_ms = millis();
+    data->timeout_ms = millis();
   }
 }
 
