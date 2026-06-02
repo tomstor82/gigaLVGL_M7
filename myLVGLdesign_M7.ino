@@ -912,7 +912,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
 
 
 // THERMOSTAT TIMER ////////////////////////////////////////////////////////////////
-void thermostat_checker(user_data_t *data, bool reset_timer = false) {
+void thermostat_checker(user_data_t *data) {
 
   bool on = false;
 
@@ -921,9 +921,8 @@ void thermostat_checker(user_data_t *data, bool reset_timer = false) {
     data->set_temp = dd_temp_arr[lv_dropdown_get_selected(data->dd_obj)];
   }
 
-  if ( reset_timer || data->dcl_enforced_ms ) {
-    data->timeout_ms = 0;
-    return;
+  if ( data->dcl_enforced_ms ) {
+    on = false;
   }
   // Off cycle time checker (2 min set)
   else if ( data->timeout_ms && (millis() - data->timeout_ms) < 120000 ) {
@@ -933,22 +932,16 @@ void thermostat_checker(user_data_t *data, bool reset_timer = false) {
   // Ceiling heater thermostat ( uses 3 or 1 sensors )
   else if ( data->relay_pin == MAIN_HEATER ) {
     // need to check which sensor is working ( if none the temp updater will disable button )
-    if ( AVG_TEMP != 99.9f && AVG_TEMP < data->set_temp ) {
-      on = true;
-    }
-    else if ( TEMP1 != 99.9f && TEMP1 < data->set_temp ) {
-      on = true;
-    }
-    else if ( TEMP2 != 99.9f && TEMP2 < data->set_temp ) {
-      on = true;
-    }
-    else if ( TEMP4 != 99.9f && TEMP4 < data->set_temp ) {
-      on = true;
-    }
 
-    // Open relays when temperature is higher or equal to selected
-    else {
-      on = false;
+    float testArr[4] = {AVG_TEMP, TEMP1, TEMP2, TEMP4};
+    for ( uint8_t i = 0; i < (sizeof(testArr) / sizeof(testArr[0])); ) {
+      if (testArr[i] == 99.9f) {
+        i++;
+      }
+      else if (testArr[i] < data->set_temp) {
+        on = true;
+        break;
+      }
     }
   }
 
@@ -971,7 +964,7 @@ void thermostat_checker(user_data_t *data, bool reset_timer = false) {
   }
   else {
     digitalWrite(data->relay_pin, LOW);
-    data->timeout_ms = millis();
+    data->timeout_ms = millis(); // record off time
   }
 }
 
@@ -995,13 +988,12 @@ void thermostat_event_handler(lv_event_t *e) {
       }
     }
     data->on = true;
+    data->timeout_ms = 0;
   }
   // Button OFF
   else {
     data->on = false;
     digitalWrite(data->relay_pin, LOW);
-    // reset thermostat timer
-    thermostat_checker(data, true);
   }
 }
 
