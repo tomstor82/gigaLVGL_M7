@@ -13,10 +13,10 @@ Arduino_GigaDisplayTouch TouchDetector;
 GigaDisplayBacklight backlight;
 
 // Define relay pins
-#define RELAY1 10   // inverter
-#define RELAY2 11   // ceiling heater
-#define RELAY3 12   // water heater
-#define RELAY4 13   // shower room
+#define INVERTER      10
+#define MAIN_HEATER   11
+#define HOT_WATER     12
+#define SHOWER_HEATER 13
 
 // ADDING 4-BIT FONTS WITH ONLY NEEDED CHARACTERS FROM MONTSERRAT 34 & 20 AND FONTAWESOME_SVG_SOLID 20 & 34 (https://lvgl.io/tools/fontconverter)
 LV_FONT_DECLARE(Montserrat34_0_9_percent);
@@ -88,7 +88,7 @@ typedef struct {
   lv_timer_t *timer;
   uint8_t relay_pin;
   uint8_t y_offset;
-  uint32_t timeout_ms;
+  uint32_t timeout_ms; // inverter power check and heaters off duration timers
   uint8_t dcl_limit;
   uint32_t dcl_enforced_ms;
   uint8_t set_temp;
@@ -200,7 +200,7 @@ uint8_t dd_temp_arr[7] = { 5, 15, 17, 19, 20, 21, 22 };
 static String buffer = "";
 
 // CREATE BUTTONS /// TWO TIMERS CREATED HERE: TEMP UPDATER AND DCL CHECK
-void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, uint32_t timeout_ms, user_data_t *data) {
+void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, lv_coord_t y_offset, uint8_t dcl_limit, user_data_t *data) {
 
   // INITIALISE RELAY PINS
   pinMode(relay_pin, OUTPUT);
@@ -210,7 +210,6 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
   data->relay_pin = relay_pin;
   data->y_offset = y_offset;
   data->dcl_limit = dcl_limit;
-  data->timeout_ms = timeout_ms;
 
   // CREATE BUTTON
   data->button = lv_btn_create(parent);
@@ -229,7 +228,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     lv_obj_add_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN); // hide label initially
 
   // ADD EVENT HANDLER, LABELS AND UPDATE TIMER TO THERMOSTATIC HEATER BUTTONS
-  if ( !timeout_ms ) {
+  if ( data->relay_pin == MAIN_HEATER || data->relay_pin == SHOWER_HEATER ) {
     lv_obj_add_event_cb(data->button, thermostat_event_handler, LV_EVENT_CLICKED, data);
     data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
       lv_obj_set_width(data->label_obj, 80);
@@ -252,7 +251,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     lv_obj_add_event_cb(data->button, hot_water_inverter_event_handler, LV_EVENT_CLICKED, data);
 
     // INVERTER LABEL
-    if ( relay_pin == RELAY1 ) {
+    if ( relay_pin == INVERTER ) {
       data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
 
       // INITIALISE LABEL TEXT
@@ -477,8 +476,8 @@ void dcl_check(user_data_t *data) {
 
   // START TIMER IF INVERTER AND/OR HEATER/HOT WATER CRITERIA SATISFIED
   if ( !data->dcl_enforced_ms ) {
-    if ( data->relay_pin == RELAY1 && (AVG_AMPS > DCL || DCL < data->dcl_limit || LO_CELL_V < (MIN_CELL_V + 0.1) || !(RELAYS & 0x01) || !CAN.available()) || // inverter criteria
-         data->relay_pin != RELAY1 && (userData[3].dcl_enforced_ms || DCL < data->dcl_limit) ) {                                                              // heater/hot water criteria
+    if ( data->relay_pin == INVERTER && (AVG_AMPS > DCL || DCL < data->dcl_limit || LO_CELL_V < (MIN_CELL_V + 0.1) || !(RELAYS & 0x01) || !CAN.available()) || // inverter criteria
+         data->relay_pin != INVERTER && (userData[3].dcl_enforced_ms || DCL < data->dcl_limit) ) {                                                              // heater/hot water criteria
 
       // RECORD TIME TO ALLOW TO DISABLING AND ENABLING OF BUTTONS AND LABELS CONTINIOUSLY LATER IN FUNCTION
       data->dcl_enforced_ms = millis();
@@ -514,7 +513,7 @@ void dcl_check(user_data_t *data) {
     }
 
     // NON INVERTER LABELS ONLY SHOWING IF INVERTER NOT SHOWING TO AVOID CLUTTER
-    if ( data->relay_pin != RELAY1 ) {
+    if ( data->relay_pin != INVERTER ) {
       // SHOW LABEL
       if ( !userData[3].dcl_enforced_ms && lv_obj_has_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
         lv_obj_clear_flag(data->dcl_label, LV_OBJ_FLAG_HIDDEN);
@@ -705,7 +704,7 @@ void inverter_start() {
     strcpy(DYNAMIC_LABEL, "Inverter starting");
   }
   else {
-    digitalWrite(RELAY1, HIGH);
+    digitalWrite(INVERTER, HIGH);
     userData[3].on = true;
   }
 }
@@ -728,21 +727,20 @@ void power_check(lv_timer_t *timer) {
   // VARIABLE USED TO STOP INVERTER SLEEP MODE
   bool on = false;
 
-  // SLEEP MODE VARIABLES
-  static uint32_t time_ms = 0;
+  // SLEEP MODE VARIABLES FOR INVERTER ONLY SO OK TO BE STATIC
   static uint8_t minute_count = 0;
   static bool pre_sleep_delay = false;
   char plural[2] = "s";
   char label[15];
 
   // INVERTER CHECK
-  if ( data->relay_pin == RELAY1) {
+  if ( data->relay_pin == INVERTER ) {
 
     // IN ECO MODE CONDITIONS APPLY
     if ( eco_mode ) {
 
       // ON if above inverter standby, solar charge or charging when above 50% soc
-      if ( !time_ms && ( WATTS > 80 || PV_DETECT || AVG_AMPS < -5 && SOC > 50) ) {
+      if ( !data->timeout_ms && ( WATTS > 80 || PV_DETECT || AVG_AMPS < -5 && SOC > 50) ) {
         on = true;
       }
     }
@@ -761,36 +759,36 @@ void power_check(lv_timer_t *timer) {
   // KEEP HOT WATER/INVERTER ON, OR RESTART INVERTER IF IN SLEEP MODE
   if ( on ) {
     // CHECK IF INVERTER IS IN PRE-SLEEP OR SLEEP MODE
-    if ( data->relay_pin == RELAY1 && time_ms ) {
+    if ( data->relay_pin == INVERTER && data->timeout_ms ) {
       if ( pre_sleep_delay ) { // INVERTER IN PRE-SLEEP MODE - STOP IT
         pre_sleep_delay = false;
-        time_ms = 0;
+        data->timeout_ms = 0;
       }
       else { // INVERTER IN SLEEP MODE - WAKE-UP
         inverter_start();
         update_inverter_label(1, data);
-        time_ms = 0; // RESET SLEEP TIMER
+        data->timeout_ms = 0; // RESET SLEEP TIMER
       }
     }
     return;
   }
 
   // INVERTER SLEEP MODE
-  else if ( data->relay_pin == RELAY1 && data->on == true ) {
+  else if ( data->relay_pin == INVERTER && data->on == true ) {
 
     // INVERTER OFF AND LABEL UPDATER ALGORITHM
-    if ( !time_ms ) {
-      time_ms = millis();
+    if ( !data->timeout_ms ) {
+      data->timeout_ms = millis();
       pre_sleep_delay = true;
       return; // to prevent label being written once finished
     }
     // KEEP INVERTER ON FOR AT LEAST 40s + POWER_CHECK TIMER = 1 min
-    else if ( (millis() - time_ms) > 40000 && pre_sleep_delay ) {
-      time_ms = millis();
+    else if ( (millis() - data->timeout_ms) > 40000 && pre_sleep_delay ) {
+      data->timeout_ms = millis();
       digitalWrite(data->relay_pin, LOW);
       pre_sleep_delay = false;
     }
-    else if ( (millis() - time_ms) > ((1 + minute_count) * 60 * 1000) && minute_count < off_interval_min && ! pre_sleep_delay ) {
+    else if ( (millis() - data->timeout_ms) > ((1 + minute_count) * 60 * 1000) && minute_count < off_interval_min && ! pre_sleep_delay ) {
       minute_count++;
       if ( minute_count == 2 ) {
         strcpy(plural, "");
@@ -798,7 +796,7 @@ void power_check(lv_timer_t *timer) {
     }
     else if ( (minute_count + 1) == off_interval_min && ! pre_sleep_delay ) {
       minute_count = 0;
-      time_ms = 0;
+      data->timeout_ms = 0;
       data->on = false; // to enable inverter startup check
       lv_event_send(data->button, LV_EVENT_CLICKED, NULL);
       return; // to prevent label being written once finished
@@ -837,11 +835,10 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
       lv_timer_del( data->timer );
       data->timer = NULL;
     }
-    // CREATE TIMER THAT ONLY RUNS ONCE AND IS RESET IF NEEDED INSIDE power_check
-    data->timer = lv_timer_create(power_check, data->timeout_ms, data);
 
     // INVERTER
-    if ( data->relay_pin == RELAY1 ) {
+    if ( data->relay_pin == INVERTER ) {
+      data->timer = lv_timer_create(power_check, inverter_startup_delay_ms, data); // create timer that only runce once and is reset if needed inside power_check
       inverter_start(); // called by 2 other functions
       update_inverter_label(1, data);
     }
@@ -860,6 +857,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
           return; // exit function if inverter doesn't start
         }
       }
+      data->timer = lv_timer_create(power_check, hot_water_interval_ms, data); // create timer that only runce once and is reset if needed inside power_check
       digitalWrite(data->relay_pin, HIGH);
       data->on = true;
     }
@@ -876,7 +874,7 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
     }
 
     // INVERTER MANIPULATES BUTTONS THAT ARE ON
-    if ( data->relay_pin == RELAY1 ) {
+    if ( data->relay_pin == INVERTER ) {
       inverter_delay_timer_ms = 0;
       update_inverter_label(0, data);
 
@@ -916,7 +914,6 @@ void hot_water_inverter_event_handler(lv_event_t *e) {
 // THERMOSTAT TIMER ////////////////////////////////////////////////////////////////
 void thermostat_checker(user_data_t *data, bool reset_timer = false) {
 
-  //static uint32_t thermostat_off_ms = 0;
   bool on = false;
 
   // set temperature in accordance with selection if not matching
@@ -934,7 +931,7 @@ void thermostat_checker(user_data_t *data, bool reset_timer = false) {
   }
 
   // Ceiling heater thermostat ( uses 3 or 1 sensors )
-  else if ( data->relay_pin == RELAY2 ) {
+  else if ( data->relay_pin == MAIN_HEATER ) {
     // need to check which sensor is working ( if none the temp updater will disable button )
     if ( AVG_TEMP != 99.9f && AVG_TEMP < data->set_temp ) {
       on = true;
@@ -1037,7 +1034,7 @@ void manipulate_heaters(bool night_mode) {
 }
 
 
-// HEATERS NIGHT MODE REDUCED TEMPERATURE - FUNCTION CALLED ONLY ONCE FOR BOTH HEATERS
+// HEATERS NIGHT MODE REDUCED TEMPERATURE - COMMON FUNCTION CALLED ONLY ONCE FOR BOTH HEATERS
 void heaters_night_mode() {
 
   static bool night_mode = false; // used to set temp only once allowing a manual selection override to remain
@@ -1198,7 +1195,7 @@ void update_temp(user_data_t *data) {
   bool all_sensors_faulty = false;
 
   // LIVING ROOM CHECKING EACH SENSOR AND USING SINGLE WORKING SENSOR IF NO AVERAGE TEMPERATURE
-  if (data->relay_pin == RELAY2) {
+  if (data->relay_pin == MAIN_HEATER) {
     if (AVG_TEMP != 99.9f) {
       snprintf(buf, sizeof(buf), "%.1f\u00B0C", AVG_TEMP);
     }
@@ -2031,19 +2028,19 @@ void setup() {
   // create digital 24H clock
   //create_time_label(cont, &timeData);
 
-  // arguments 1:obj  2:label 3:relay_pin 4:y_offset 5:dcl_limit 6:timeout_ms 7:user_data struct
+  // arguments 1:parent_obj  2:label 3:relay_pin 4:y_offset 5:dcl_limit 6:user_data struct
 
   // Create Button 1 - CEILING HEATER
-  create_button(cont, "Ceiling Heater", RELAY2, 20, 20, 0, &userData[0]); // dcl for test max 255 uint8_t
+  create_button(cont, "Ceiling Heater", MAIN_HEATER, 20, 20, &userData[0]); // dcl for test max 255 uint8_t
 
   // Create Button 2 - SHOWER HEATER
-  create_button(cont, "Shower Heater",  RELAY4, 115, 10, 0, &userData[1]);
+  create_button(cont, "Shower Heater",  SHOWER_HEATER, 115, 10, &userData[1]);
 
   // Create Button 3 - HOT WATER
-  create_button(cont, "Hot Water",      RELAY3, 210, 60, hot_water_interval_ms, &userData[2]);
+  create_button(cont, "Hot Water",      HOT_WATER, 210, 60, &userData[2]);
 
   // Create Button 4 - INVERTER
-  create_button(cont, "Inverter",       RELAY1, 305, 5, inverter_startup_delay_ms, &userData[3]);
+  create_button(cont, "Inverter",       INVERTER, 305, 5, &userData[3]);
 
   // Create Leaf Icon for Inverter Eco Mode
   lv_obj_t* leaf_icon = lv_label_create(cont);
@@ -2162,7 +2159,7 @@ void loop() {
     }
     // INVERTER START - ALLOW MPPT 6s TO LOOSE POWER TO AVOID POWER SURGE
     else if ( (millis() - inverter_delay_timer_ms) > 6000 && !userData[3].on ) {
-      digitalWrite(RELAY1, HIGH);
+      digitalWrite(INVERTER, HIGH);
       userData[3].on = true;
     }
   }
