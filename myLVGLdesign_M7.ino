@@ -919,6 +919,7 @@ void thermostat_checker(user_data_t *data) {
   // set temperature in accordance with selection if not matching
   if ( data->set_temp != dd_temp_arr[lv_dropdown_get_selected(data->dd_obj)] ) {
     data->set_temp = dd_temp_arr[lv_dropdown_get_selected(data->dd_obj)];
+    data->timeout_ms = 0; // restarts countdown
   }
 
   if ( data->dcl_enforced_ms ) {
