@@ -919,7 +919,6 @@ void thermostat_checker(user_data_t *data) {
   // set temperature in accordance with selection if not matching
   if ( data->set_temp != dd_temp_arr[lv_dropdown_get_selected(data->dd_obj)] ) {
     data->set_temp = dd_temp_arr[lv_dropdown_get_selected(data->dd_obj)];
-    data->timeout_ms = 0; // restarts countdown
   }
 
   if ( data->dcl_enforced_ms ) {}
@@ -1064,6 +1063,7 @@ void dropdown_event_handler(lv_event_t *e) {
 
   // set temperature by linking index to temperature selection array
   data->set_temp = dd_temp_arr[lv_dropdown_get_selected(dd)];
+  data->timeout_ms = 0; // reset thermostat timer
 }
 
 // CREATE TEMPERATURE SELECTION DROPDOWN MENU ///////////////////////////////////////
