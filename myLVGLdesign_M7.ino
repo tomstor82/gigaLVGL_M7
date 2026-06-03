@@ -922,9 +922,8 @@ void thermostat_checker(user_data_t *data) {
     data->timeout_ms = 0; // restarts countdown
   }
 
-  if ( data->dcl_enforced_ms ) {
-    on = false;
-  }
+  if ( data->dcl_enforced_ms ) {}
+  
   // Off cycle time checker (2 min set)
   else if ( data->timeout_ms && (millis() - data->timeout_ms) < 120000 ) {
     return;
@@ -943,6 +942,7 @@ void thermostat_checker(user_data_t *data) {
         on = true;
         break;
       }
+      else break;
     }
   }
 
@@ -950,11 +950,6 @@ void thermostat_checker(user_data_t *data) {
   else {
     if ( TEMP3 != 99.9f && TEMP3 < data->set_temp ) {
       on = true;
-    }
-
-    // Open relays when temperature is higher or equal to selected
-    else {
-      on = false;
     }
   }
 
