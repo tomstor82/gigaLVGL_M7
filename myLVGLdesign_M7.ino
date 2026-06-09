@@ -73,7 +73,7 @@ typedef struct {
   lv_obj_t *title_label;
   lv_obj_t *button;
   lv_obj_t *status_label[33];
-  bool update_timer;
+  bool no_refresh;
   bool ccl_enforced;
   char dynamic_label[35];
   uint8_t y;
@@ -602,7 +602,7 @@ void can_msgbox(lv_event_t* e) {
     data->update_timer = true;
 
     // Pause BMS status data label timer as they show through msgbox
-    bmsStatusData.update_timer = false;
+    bmsStatusData.no_refresh = true;
   }
 }
 
@@ -618,7 +618,7 @@ void close_can_msgbox_event_handler(lv_event_t *e) {
     lv_obj_del(lv_event_get_current_target(e));
 
     // Resume BMS status data label timer
-    bmsStatusData.update_timer = true;
+    bmsStatusData.no_refresh = false;
   }
 }
 
@@ -967,8 +967,8 @@ void thermostat_checker(user_data_t *data) {
 void thermostat_event_handler(lv_event_t *e) {
   user_data_t *data = (user_data_t *)lv_event_get_user_data(e);
 
-    // BUTTON ON
-    if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
+  // BUTTON ON
+  if ( lv_obj_has_state(data->button, LV_STATE_CHECKED) ) {
 
     // start inverter if off
     if ( !lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
@@ -1261,10 +1261,8 @@ void update_temp(user_data_t *data) {
 
 // CLEAR BMS FLAG CAN MSG EVENT HANDLER ////////////////////////////////////////////////////////////////////
 void clear_bms_flag(lv_event_t *e) {
-  //user_data_t *data = (user_data_t *)lv_event_get_user_data(e);
-  //lv_obj_clear_state/*event_send*/(data->button, LV_STATE_CHECKED/*EVENT_VALUE_CHANGED, data*/); // clear pressed state
   CLEAR_BMS = 0x01;
-  Serial.println("Sending CAN msg to clear BMS flags");
+  Serial.println("Clear BMS signal sent");
 }
 
 
@@ -1605,7 +1603,7 @@ void refresh_bms_status_data(bms_status_data_t *data) {
     }
   }
 
-  // run the function with true argument to tell it we are finished checking bms for messages to reset function index
+  // pass true argument to say we are finished checking bms for messages to place button after messages
   create_status_label("", data, true);
 }
 
@@ -1906,7 +1904,7 @@ void combined_1s_updater(lv_timer_t *timer) {
   for (uint8_t i = 0; i < 4; i++) {
     dcl_check(&userData[i]);
   }
-  if ( bmsStatusData.update_timer ) {
+  if ( !bmsStatusData.no_refresh ) {
     refresh_bms_status_data(&bmsStatusData);
   }
 }
@@ -1932,9 +1930,9 @@ void combined_10s_updater(lv_timer_t *timer) {
 
 
 void leaf_icon_event_handler(lv_event_t* e) {
-  lv_event_code_t code = lv_event_get_code(e);
+  //lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t* obj = lv_event_get_target(e);
-  if (code == LV_EVENT_CLICKED) {
+  //if (code == LV_EVENT_CLICKED) {
     if ( !eco_mode ) {
       eco_mode = true;
       lv_obj_set_style_text_color(obj, lv_color_hex(0x1cda70), NULL);
@@ -1943,7 +1941,7 @@ void leaf_icon_event_handler(lv_event_t* e) {
       eco_mode = false;
       lv_obj_set_style_text_color(obj, lv_color_hex(0x555555), NULL);
     }
-  }
+  //}
 }
 
 
@@ -2080,28 +2078,24 @@ void loop() {
     // CONTINUALLY TRANSMIT CAN TX BUFFER AS BMS RESETS INPUTS TO 0 AFTER 1s IF NOT
     CanMsg send_msg(CanStandardId(CAN_TX_ID), sizeof(CAN_TX_BUF), CAN_TX_BUF);
     // RETRY IF SEND FAILED FOR BYTE 0 - CLEAR BMS THROUGH MPO#2
-    int const rc = CAN.write(send_msg);
+    int8_t const rc = CAN.write(send_msg);
     if (rc <= 0 && CAN_RETRIES < 3) { // if CAN.write returns 0 or lower, errors have occurred in transmission
-      if (Serial) {
+      if ( Serial ) {
         Serial.print("CAN.write(...) failed with error code ");
         Serial.println(rc);
       }
       CAN_RETRIES++;
     }
-    // STOP CLEAR_BMS MPO#2 SIGNAL IF SUCCESS OR AFTER 3 RETRIES. NOT NECCESSARY FOR PV_ON AND BLCG_ALLOWED AS THEY ARE TIMED AND LOOPED RESPECTIVELY
-    else if ( CLEAR_BMS ) {
-      CLEAR_BMS = 0x00;
-      //lv_obj_clear_state/*event_send*/(bmsStatusData.button, LV_STATE_CHECKED/*EVENT_VALUE_CHANGED, data*/); // clear pressed state
-    }
     // RESET RETRIES AND COPY TX BUFFER TO COMPARISON ARRAY TO AVOID REPEATING TRANSMISSIONS
     else {
       CAN_RETRIES = 0;
-      /*if (Serial) {
-        char report[34];
-        snprintf(report, sizeof(report), "Can.write = { 0x0%d, 0x0%d, 0x0%d }", CAN_TX_BUF[0], CAN_TX_BUF[1], CAN_TX_BUF[2]);
-        Serial.println(report);
-      }*/
+      // DEBUG
+      /*char tx_msg[32] = "";
+      snprintf(tx_msg, sizeof(tx_msg), "CAN TX msg: 0x0%d, 0x0%d, 0x0%d", CAN_TX_BUF[0], CAN_TX_BUF[1], CAN_TX_BUF[2]);
+      Serial.println(tx_msg);*/
+      if (CLEAR_BMS) CLEAR_BMS = 0x00;
     }
+
     // DISABLE PV IF DCH CONTACTOR OPEN TO AVOID DAMAGING INVERTER FROM PV ARRAY
     if ( !(RELAYS & 0x0001) ) {
       pv_contactor(false);
