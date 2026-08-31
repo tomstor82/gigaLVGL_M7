@@ -84,7 +84,8 @@ typedef struct {
   lv_obj_t *button;
   lv_obj_t *dcl_label;
   lv_obj_t *label_obj;
-  lv_obj_t *dd_obj;
+  //lv_obj_t *dd_obj;
+  lv_obj_t *spinbox_obj;
   lv_timer_t *timer;
   uint8_t relay_pin;
   uint8_t y_offset;
@@ -178,7 +179,7 @@ static CombinedData combinedData = {0};
 #define CYCLES          combinedData.canData.cc
 #define HEAT_SINK       combinedData.canData.hs
 #define CUSTOM_FLAGS    combinedData.canData.cu
-#define PV_DETECT     (combinedData.canData.cu & 0x01) == 0x01
+#define PV_DETECT       (combinedData.canData.cu & 0x01) == 0x01
 #define CAPACITY        combinedData.canData.cpcty
 
 #define DYNAMIC_LABEL   bmsStatusData.dynamic_label
@@ -194,7 +195,7 @@ uint32_t inverter_delay_timer_ms = 0;
 bool eco_mode = false;
 static uint8_t brightness = 70;
 uint32_t previous_touch_ms = 0;
-uint8_t dd_temp_arr[7] = { 5, 15, 17, 19, 20, 21, 22 };
+//uint8_t dd_temp_arr[7] = { 5, 15, 17, 19, 20, 21, 22 };
 
 // for M4 messages
 static String buffer = "";
@@ -213,7 +214,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
 
   // CREATE BUTTON
   data->button = lv_btn_create(parent);
-    lv_obj_set_pos(data->button, 10, y_offset);
+    lv_obj_set_pos(data->button, 5, y_offset);
     lv_obj_t *label = lv_label_create(data->button);
     lv_label_set_text(label, label_text);
     lv_obj_center(label);
@@ -232,7 +233,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     lv_obj_add_event_cb(data->button, thermostat_event_handler, LV_EVENT_CLICKED, data);
     data->label_obj = lv_label_create(lv_obj_get_parent(data->button));
       lv_obj_set_width(data->label_obj, 80);
-      lv_obj_set_pos(data->label_obj, 160, data->y_offset + 13);
+      lv_obj_set_pos(data->label_obj, 140, data->y_offset + 13);
       lv_obj_set_style_text_align(data->label_obj, LV_TEXT_ALIGN_CENTER, 0);
 
     // INITIALISE LABEL TEXT
@@ -243,7 +244,7 @@ void create_button(lv_obj_t *parent, const char *label_text, uint8_t relay_pin, 
     lv_obj_add_event_cb(data->label_obj, sensor_msgbox, LV_EVENT_CLICKED, &msgboxData[1]);
 
     // CREATE TEMPERATURE SELECTION DROP DOWN MENU
-    create_temperature_dropdown(parent, data);
+    create_temperature_selector(parent, data);
   }
      
   // ADD EVENT HANDLER FOR HOT WATER AND INVERTER BUTTONS
@@ -917,8 +918,11 @@ void thermostat_checker(user_data_t *data) {
   bool on = false;
 
   // set temperature in accordance with selection if not matching
-  if ( data->set_temp != dd_temp_arr[lv_dropdown_get_selected(data->dd_obj)] ) {
+  /*if ( data->set_temp != dd_temp_arr[lv_dropdown_get_selected(data->dd_obj)] ) {
     data->set_temp = dd_temp_arr[lv_dropdown_get_selected(data->dd_obj)];
+  }*/
+  if ( data->set_temp != lv_spinbox_get_value(data->spinbox_obj) ) {
+    data->set_temp = lv_spinbox_get_value(data->spinbox_obj);
   }
 
   if ( data->dcl_enforced_ms ) {}
@@ -998,24 +1002,33 @@ void thermostat_event_handler(lv_event_t *e) {
 // HELPER FUNCTION FOR HEATER NIGHT MODE MANIPULATION
 void manipulate_heaters(bool night_mode) {
 
-  static uint8_t previous_dd_selection[2] = {254, 254};
+  //static uint8_t previous_dd_selection[2] = {254, 254};
+  static uint8_t selected_temp[2] = { 254, 254 };
 
   // common loop manipulating both heaters temperature selections
   for ( uint8_t i = 0; i < 2; i++ ) {
     if ( night_mode ) {
-      previous_dd_selection[i] = lv_dropdown_get_selected(userData[i].dd_obj); // store set temperature
-      if ( previous_dd_selection[i] > 1 ) { // if temp above index[1] = 15C, let's set 15C at night
-        lv_dropdown_set_selected(userData[i].dd_obj, 1);  // set index 1 aka 15C
-        lv_event_send(userData[i].dd_obj, LV_EVENT_VALUE_CHANGED, NULL);
+      selected_temp[i] = userData[i].set_temp;
+      //previous_dd_selection[i] = lv_dropdown_get_selected(userData[i].dd_obj); // store set temperature
+      if ( selected_temp[i] > 16 ) { //previous_dd_selection[i] > 1 ) { // if temp above index[1] = 15C, let's set 15C at night
+        /*lv_dropdown_set_selected(userData[i].dd_obj, 1);  // set index 1 aka 15C
+        lv_event_send(userData[i].dd_obj, LV_EVENT_VALUE_CHANGED, NULL);*/
+        lv_spinbox_set_value(userData[i].spinbox_obj, 16);
+        userData[i].set_temp = 16;
       }
     }
-    else if ( previous_dd_selection[i] != 254 ) {
-      uint8_t current_dd_selection = lv_dropdown_get_selected(userData[i].dd_obj);
-      if ( current_dd_selection != dd_temp_arr[previous_dd_selection[i]] ) {
+    else if ( selected_temp[i] != 254 ) { //previous_dd_selection[i] != 254 ) {
+      //uint8_t current_dd_selection = lv_dropdown_get_selected(userData[i].dd_obj);
+      if ( userData[i].set_temp != selected_temp[i] ) {
+        lv_spinbox_set_value(userData[i].spinbox_obj, selected_temp[i]);
+        userData[i].set_temp = selected_temp[i];
+        selected_temp[i] = 254; // reset to avoid it running again
+      }
+      /*if ( current_dd_selection != dd_temp_arr[previous_dd_selection[i]] ) {
         lv_dropdown_set_selected(userData[i].dd_obj, previous_dd_selection[i]);
         lv_event_send(userData[i].dd_obj, LV_EVENT_VALUE_CHANGED, NULL);
         previous_dd_selection[i] = 254; // reset to avoid it running again
-      }
+      }*/
     }
   }
 }
@@ -1027,52 +1040,124 @@ void heaters_night_mode() {
   static bool night_mode = false; // used to set temp only once allowing a manual selection override to remain
   static bool daylight = false;
   static uint32_t sunset_ms = 0;
-
+  
   // set previous daylight detection variable
   if ( PV_DETECT && !daylight ) {
     daylight = true;
+    Serial.println("DEBUG: DAYLIGHT DETECTED");
   }
 
   // start timer at sunset - tested by previous daylight detection
   if ( !sunset_ms && !PV_DETECT /*&& AVG_AMPS >= 0*/ && daylight ) { // added AVG_AMPS to prevent grid/generator charge stating timer when MPPT disabled by charge. Not needed as PV_DETECT will not be affected by gen/grid
     sunset_ms = millis(); // record time at sunset
     daylight = false;
-    return; // to prevent loop running
+    //return; // to prevent loop running
+    Serial.println("DEBUG: SUNSET DETECTED AND TIME RECORDED");
   }
-  // set 17C 3 hours after sunset
-  else if ( sunset_ms && (millis() - sunset_ms) > 3*60*60*1000 && !night_mode ) {
+  // night mode 3 hours after sunset
+  else if ( sunset_ms && (millis() - sunset_ms) > (3*60*60*1000) && !night_mode ) {
     night_mode = true;
     manipulate_heaters(night_mode);
+    Serial.println("DEBUG: NIGHT MODE ON");
   }
   // reset temp to preselected value 9 hours after sunset or at sunrise
-  else if ( sunset_ms && ((millis() - sunset_ms) > 9*60*60*1000 || PV_DETECT) && night_mode ) {
+  else if ( sunset_ms && ((millis() - sunset_ms) > (9*60*60*1000) || PV_DETECT) && night_mode ) {
     night_mode = false;
     sunset_ms = 0;
     manipulate_heaters(night_mode);
+    Serial.println("DEBUG: NIGHT MODE OFF");
   }
 }
 
 
+// TEMP SELECTOR HELPER //////////////////////////////////////////////////////////////////
+void temp_sel(user_data_t *data) {
+  // set temperature by linking index to temperature selection array
+  data->set_temp = lv_spinbox_get_value(data->spinbox_obj);
+  data->timeout_ms = 0; // reset thermostat timer
+}
 
 
+// TEMPERATURE SPINBOX EVENT HANDLERS ////////////////////////////////////////////////
+static void spinbox_increment_event_cb(lv_event_t * e) {
+  user_data_t *data = (user_data_t *)lv_event_get_user_data(e);
+  lv_event_code_t code = lv_event_get_code(e);
+  if ( code == LV_EVENT_SHORT_CLICKED || code  == LV_EVENT_LONG_PRESSED_REPEAT ) {
+    lv_spinbox_increment(data->spinbox_obj);
+    temp_sel(data);
+  }
+}
+
+static void spinbox_decrement_event_cb(lv_event_t * e) {
+  user_data_t *data = (user_data_t *)lv_event_get_user_data(e);
+  lv_event_code_t code = lv_event_get_code(e);
+  if ( code == LV_EVENT_SHORT_CLICKED || code == LV_EVENT_LONG_PRESSED_REPEAT ) {
+    lv_spinbox_decrement(data->spinbox_obj);
+    temp_sel(data);
+  }
+}
 
 // TEMPERATURE DROP DOWN EVENT HANDLER ////////////////////////////////////////////////
-void dropdown_event_handler(lv_event_t *e) {
+/*void dropdown_event_handler(lv_event_t *e) {
   user_data_t *data = (user_data_t *)lv_event_get_user_data(e);
   lv_obj_t *dd = lv_event_get_target(e);
 
   // set temperature by linking index to temperature selection array
   data->set_temp = dd_temp_arr[lv_dropdown_get_selected(dd)];
   data->timeout_ms = 0; // reset thermostat timer
-}
+}*/
 
-// CREATE TEMPERATURE SELECTION DROPDOWN MENU ///////////////////////////////////////
-void create_temperature_dropdown(lv_obj_t *parent, user_data_t *data) {
+// CREATE TEMPERATURE SELECTOR ///////////////////////////////////////
+void create_temperature_selector(lv_obj_t *parent, user_data_t *data) {
 
   // create dropdown object
-  data->dd_obj = lv_dropdown_create(parent);
+  //data->dd_obj = lv_dropdown_create(parent);
 
-  char dd_temp_sel_str[40] = "";
+  // create spinbox object and buttons
+  data->spinbox_obj = lv_spinbox_create(parent);
+
+  // set spinbox values
+  lv_spinbox_set_range(data->spinbox_obj, 10, 23);
+  //lv_spinbox_set_steps(data->spinbox_obj, 1); not needed i think
+  lv_spinbox_set_digit_format(data->spinbox_obj, 2, 0);
+  lv_spinbox_set_rollover(data->spinbox_obj, false);
+  lv_obj_clear_flag(data->spinbox_obj, LV_OBJ_FLAG_CLICKABLE); // remove cursor touch
+
+  // hide number selector
+  lv_obj_set_style_text_opa(data->spinbox_obj, 0, LV_PART_CURSOR);
+  lv_obj_set_style_bg_opa(data->spinbox_obj, 0, LV_PART_CURSOR);
+  lv_obj_set_style_border_opa(data->spinbox_obj, 0, LV_PART_CURSOR);
+
+  // set startup value
+  lv_spinbox_set_value(data->spinbox_obj, 20);
+  temp_sel(data);
+
+  // place spinbox and adjust width
+  lv_obj_set_pos(data->spinbox_obj, 248 /*235*/, data->y_offset - 1);
+  lv_obj_set_width(data->spinbox_obj, 42);
+  
+  // create spinbox buttons and add event handlers
+  lv_coord_t h = 31;
+  
+  lv_obj_t *btn = lv_btn_create(parent);
+    lv_obj_set_style_radius(btn, 3, 0);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(0x555555), 0);
+    lv_obj_set_size(btn, h, h);
+    lv_obj_align_to(btn, data->spinbox_obj, LV_ALIGN_OUT_RIGHT_MID, 4, 0);
+    lv_obj_set_style_bg_img_src(btn, LV_SYMBOL_PLUS, 0);
+    lv_obj_add_event_cb(btn, spinbox_increment_event_cb, LV_EVENT_ALL, data);
+
+    btn = lv_btn_create(parent);
+    lv_obj_set_style_radius(btn, 3, 0);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(0x555555), 0);
+    lv_obj_set_size(btn, h, h);
+    lv_obj_align_to(btn, data->spinbox_obj, LV_ALIGN_OUT_LEFT_MID, -4, 0);
+    lv_obj_set_style_bg_img_src(btn, LV_SYMBOL_MINUS, 0);
+    lv_obj_add_event_cb(btn, spinbox_decrement_event_cb, LV_EVENT_ALL, data);
+
+
+
+  /*char dd_temp_sel_str[40] = "";
 
   // create string for dynamic dropdown options
   for ( uint8_t i = 0; i < (sizeof(dd_temp_arr) / sizeof(dd_temp_arr[0])); i++ ) {
@@ -1096,7 +1181,7 @@ void create_temperature_dropdown(lv_obj_t *parent, user_data_t *data) {
 
   // place roller and adjust width
   lv_obj_set_pos(data->dd_obj, 235, data->y_offset - 1);
-  lv_obj_set_width(data->dd_obj, 80);
+  lv_obj_set_width(data->dd_obj, 80);*/
 }
 
 
