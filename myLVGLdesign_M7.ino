@@ -1037,35 +1037,48 @@ void manipulate_heaters(bool night_mode) {
 // HEATERS NIGHT MODE REDUCED TEMPERATURE - COMMON FUNCTION CALLED ONLY ONCE FOR BOTH HEATERS
 void heaters_night_mode() {
 
+  /*
+   * BASE CRITERIA: HEATERS GOES OFF AFTER SUNSET IN WINTER AND BEFORE SUNSET IN SUMMER
+   * 
+   * DAY AND NIGHT DURATION FROM
+   * 
+   * 8 - 16 HRS
+   * 
+   * 8 HRS SUMMER NIGHT = HEATERS NIGHT MODE = 8HRS = NIGHT 
+   * 
+   * 16 HRS WINTER NIGHT = HEATERS NIGHT MODE = 8HRS = NIGHT +4HRS AND SUNRISE -4HRS
+   * 
+   * LOGIC: (have to measure previous days duration)
+   * 
+   * if DAYLIGHT_YESTERDAY == 16H, then night_mode starts at sunset
+   * if DAYLIGHT_YESTERDAY == 8H, then night_mode starts +4 after sunset and lasts 8H  
+   * 
+   * heaters_night_mode = TIME_OF_SUNSET + ((16 - DAYLIGHT_YESTERDAY) / 2 )
+   * 
+   */
+
   static bool night_mode = false; // used to set temp only once allowing a manual selection override to remain
-  static bool daylight = false;
   static uint32_t sunset_ms = 0;
-  
-  // set previous daylight detection variable
-  if ( PV_DETECT && !daylight ) {
-    daylight = true;
-    Serial.println("DEBUG: DAYLIGHT DETECTED");
-  }
+  static uint32_t night_ms = (12 * 60 * 60 * 1000); // first night initialised as 12H equinox
 
   // start timer at sunset - tested by previous daylight detection
-  if ( !sunset_ms && !PV_DETECT /*&& AVG_AMPS >= 0*/ && daylight ) { // added AVG_AMPS to prevent grid/generator charge stating timer when MPPT disabled by charge. Not needed as PV_DETECT will not be affected by gen/grid
+  if ( !sunset_ms && !PV_DETECT ) {
     sunset_ms = millis(); // record time at sunset
-    daylight = false;
-    //return; // to prevent loop running
-    Serial.println("DEBUG: SUNSET DETECTED AND TIME RECORDED");
   }
-  // night mode 3 hours after sunset
-  else if ( sunset_ms && (millis() - sunset_ms) > (3*60*60*1000) && !night_mode ) {
+  // sunrise detected and night duration recorded - 10m delay prevents spurious detection and no night_mode is neccessary to not reset sunset_ms before heaters night mode is finished
+  else if ( sunset_ms && (millis() - sunset_ms) > 600000 && PV_DETECT && !night_mode ) {
+    night_ms = millis() - sunset_ms;
+    sunset_ms = 0;
+  }
+  // 8 hrs after night mode or sunrise - heaters day mode
+  else if ( sunset_ms && night_mode && (((millis() - sunset_ms) > (( night_ms + 8*60*60*1000 ) / 2 )) || PV_DETECT) ) {
+    night_mode = false;
+    manipulate_heaters(night_mode);
+  }
+  // calculated time to set heaters night mode for 8 hrs
+  else if ( sunset_ms && !night_mode && (millis() - sunset_ms) > (( night_ms - 8*60*60*1000 ) / 2 ) && ((millis() - sunset_ms) < (( night_ms + 8*60*60*1000 ) / 2 )) ) {
     night_mode = true;
     manipulate_heaters(night_mode);
-    Serial.println("DEBUG: NIGHT MODE ON");
-  }
-  // reset temp to preselected value 9 hours after sunset or at sunrise
-  else if ( sunset_ms && ((millis() - sunset_ms) > (9*60*60*1000) || PV_DETECT) && night_mode ) {
-    night_mode = false;
-    sunset_ms = 0;
-    manipulate_heaters(night_mode);
-    Serial.println("DEBUG: NIGHT MODE OFF");
   }
 }
 
