@@ -1070,10 +1070,16 @@ void heaters_night_mode() {
     night_ms = millis() - sunset_ms;
     sunset_ms = 0;
   }
-  // 8 hrs after night mode or sunrise - heaters day mode
+  // 8 hrs after night mode or sunrise - heaters day mode and hot water on
   else if ( sunset_ms && night_mode && (((millis() - sunset_ms) > (( night_ms + 8*60*60*1000 ) / 2 )) || PV_DETECT) ) {
     night_mode = false;
     manipulate_heaters(night_mode);
+    // start hot water heater if inverter is on
+    if ( lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
+        lv_event_send(userData[2].button, LV_EVENT_PRESSED, NULL);
+        lv_event_send(userData[2].button, LV_EVENT_RELEASED, NULL);
+        lv_event_send(userData[2].button, LV_EVENT_CLICKED, NULL);
+    }
   }
   // calculated time to set heaters night mode for 8 hrs
   else if ( sunset_ms && !night_mode && (millis() - sunset_ms) > (( night_ms - 8*60*60*1000 ) / 2 ) && ((millis() - sunset_ms) < (( night_ms + 8*60*60*1000 ) / 2 )) ) {
@@ -1984,9 +1990,6 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
   // CREATE LABEL UPDATE TIMER
   lv_timer_create(data_display_updater, 200, data);
 }
-
-
-
 
 
 
