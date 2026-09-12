@@ -1996,6 +1996,26 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
 
 
 
+
+
+
+// SOLAR DUMP TO HOT WATER ABOVE 80% SOC WHILST CHARGING FROM PV
+void solar_dump() {
+  if ( SOC >= 80 && AVG_AMPS < -20 && PV_DETECT ) {
+    if ( !lv_obj_has_state(userData[2].button, LV_STATE_CHECKED) ) {
+      lv_event_send(userData[2].button, LV_EVENT_PRESSED, NULL);
+      lv_event_send(userData[2].button, LV_EVENT_RELEASED, NULL);
+      lv_event_send(userData[2].button, LV_EVENT_CLICKED, NULL);
+    }
+    else {
+      lv_timer_reset(userData[2].timer);
+    }
+  }
+}
+
+
+
+
 // INSTEAD OF INDIVIDUAL TIMERS I ADDED A HELPER FUNCTION TO CALL ALL 1s INTERVAL FUNCTIONS IN ONE GO - CURRENTLY 5 INDIVIDUAL TIMERS AND 16 COMBINED HERE ////////////////
 void combined_1s_updater(lv_timer_t *timer) {
   ccl_check();
@@ -2024,6 +2044,7 @@ void combined_10s_updater(lv_timer_t *timer) {
       thermostat_checker(&userData[i]);
     }
   }
+  solar_dump();
 }
 
 
