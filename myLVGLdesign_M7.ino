@@ -432,7 +432,7 @@ void ccl_check() {
   if ( inverter_delay_timer_ms ) return;
 
   // OPEN CONTACTOR AT 0 CCL OR CELL APPROACHING MAX VOLTAGE
-  else if ( !CCL_ENFORCED && CCL == 0 || HI_CELL_V > (MAX_CELL_V - 0.02) ) {
+  else if ( !CCL_ENFORCED && CCL == 0 || HI_CELL_V > (MAX_CELL_V - 0.05) ) {
     pv_contactor(false);
     strcpy(DYNAMIC_LABEL, "Solar OFF - CCL enforced");
     CCL_ENFORCED = true;
@@ -1781,13 +1781,13 @@ void charge_icons_updater(data_display_t *data) {
 
   // CHARGE SYMBOLS
   if ( AVG_AMPS < 0 ) {
-    // SHOW LIGHTENING BOLT IF PV DETECTED
+    // SHOW SUN IF PV DETECTED
     if ( PV_DETECT ) {
-      lv_label_set_text(data->charge_icon, "\uF0E7"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
+      lv_label_set_text(data->charge_icon, "\uF185"); // sun icon
     }
-    // SHOW TWO-PIN ICON OTHERWISE
+    // SHOW LIGHTENING BOLT OTHERWISE
     else {
-      lv_label_set_text(data->charge_icon, "\uF1E6"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
+      lv_label_set_text(data->charge_icon, "\uF0E7"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
     }
   }
 

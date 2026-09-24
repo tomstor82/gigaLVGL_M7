@@ -12,12 +12,13 @@ Features include
 Solar sensing disabling MPPT if insufficient solar and MPPT is draining batteries or MPPT relay flapping. Disables for 10 minutes currently.
 Power surge protection when MPPT has insufficient power to charge and inverter start, disables MPPT for 20s enabling inverter to start without issues.
 Inverter Sleep mode turning it off for 3 minutes to conserve battery.
-Charge current limit protection disabling solar if high voltage or 0 CCL from BMS
+Charge current limit protection disabling solar if high cell voltage or 0 CCL from BMS.
 Discharge current limit protection disabling buttons for low voltage, DCL from BMS or DCH relay status.
 Individual DCL limits for buttons.
 Thermostatically controlled heaters controlled by 4 dht22 sensors and DCL protected and disabled if sensors fail.
-Timer controlled hot water which also remains on if charging above a SOC threshold.
+Timer controlled hot water which also functions as solar dump above 80% SOC.
 Inverter sleep timer and also conditions like solar will keep it on.
+
 
 Message boxes for more data on dht22 sensors and BMS data with 10s refresh data interval set
 
