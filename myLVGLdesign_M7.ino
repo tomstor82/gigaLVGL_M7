@@ -1004,17 +1004,18 @@ void manipulate_heaters(bool night_mode) {
 
   //static uint8_t previous_dd_selection[2] = {254, 254};
   static uint8_t selected_temp[2] = { 254, 254 };
+  uint8_t night_temp = 17;
 
   // common loop manipulating both heaters temperature selections
   for ( uint8_t i = 0; i < 2; i++ ) {
     if ( night_mode ) {
       selected_temp[i] = userData[i].set_temp;
       //previous_dd_selection[i] = lv_dropdown_get_selected(userData[i].dd_obj); // store set temperature
-      if ( selected_temp[i] > 16 ) { //previous_dd_selection[i] > 1 ) { // if temp above index[1] = 15C, let's set 15C at night
+      if ( selected_temp[i] > night_temp ) { //previous_dd_selection[i] > 1 ) { // if temp above index[1] = 15C, let's set 15C at night
         /*lv_dropdown_set_selected(userData[i].dd_obj, 1);  // set index 1 aka 15C
         lv_event_send(userData[i].dd_obj, LV_EVENT_VALUE_CHANGED, NULL);*/
-        lv_spinbox_set_value(userData[i].spinbox_obj, 16);
-        userData[i].set_temp = 16;
+        lv_spinbox_set_value(userData[i].spinbox_obj, night_temp);
+        userData[i].set_temp = night_temp;
       }
     }
     else if ( selected_temp[i] != 254 ) { //previous_dd_selection[i] != 254 ) {
@@ -1060,6 +1061,8 @@ void heaters_night_mode() {
   static bool night_mode = false; // used to set temp only once allowing a manual selection override to remain
   static uint32_t sunset_ms = 0;
   static uint32_t night_ms = (12 * 60 * 60 * 1000); // first night initialised as 12H equinox
+  const uint8_t DAY_CALC = 7;
+  const uint8_t NIGHT_CALC = 8;
 
   // start timer at sunset - tested by previous daylight detection
   if ( !sunset_ms && !PV_DETECT ) {
@@ -1070,19 +1073,19 @@ void heaters_night_mode() {
     night_ms = millis() - sunset_ms;
     sunset_ms = 0;
   }
-  // 8 hrs after night mode or sunrise - heaters day mode and hot water on
-  else if ( sunset_ms && night_mode && (((millis() - sunset_ms) > (( night_ms + 8*60*60*1000 ) / 2 )) || PV_DETECT) ) {
+  // calculated time to set day mode and hot water on unless of course sunrise is detected
+  else if ( sunset_ms && night_mode && (((millis() - sunset_ms) > (( night_ms + DAY_CALC*60*60*1000 ) / 2 )) || PV_DETECT) ) {
     night_mode = false;
     manipulate_heaters(night_mode);
-    // start hot water heater if inverter is on
-    if ( lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) ) {
+    // start hot water heater if inverter and hot water off
+    if ( lv_obj_has_state(userData[3].button, LV_STATE_CHECKED) && !lv_obj_has_state(userData[2].button, LV_STATE_CHECKED) ) {
         lv_event_send(userData[2].button, LV_EVENT_PRESSED, NULL);
         lv_event_send(userData[2].button, LV_EVENT_RELEASED, NULL);
         lv_event_send(userData[2].button, LV_EVENT_CLICKED, NULL);
     }
   }
-  // calculated time to set heaters night mode for 8 hrs
-  else if ( sunset_ms && !night_mode && (millis() - sunset_ms) > (( night_ms - 8*60*60*1000 ) / 2 ) && ((millis() - sunset_ms) < (( night_ms + 8*60*60*1000 ) / 2 )) ) {
+  // calculated time to set heaters night mode
+  else if ( sunset_ms && !night_mode && (millis() - sunset_ms) > (( night_ms - NIGHT_CALC*60*60*1000 ) / 2 ) && ((millis() - sunset_ms) < (( night_ms + DAY_CALC*60*60*1000 ) / 2 )) ) {
     night_mode = true;
     manipulate_heaters(night_mode);
   }
@@ -2030,7 +2033,7 @@ void combined_1s_updater(lv_timer_t *timer) {
   }
 }
 
-void combined_10s_updater(lv_timer_t *timer) {
+void combined_2s_updater(lv_timer_t *timer) {
   if ( msgboxData[1].update_timer ) {
     sensor_msgbox_update_timer(&msgboxData[1]);
   }
@@ -2122,7 +2125,7 @@ void setup() {
 
   // START COMBINED TIMERS FOR CALLING UPDATER FUNCTIONS
   lv_timer_create(combined_1s_updater, 1000, NULL);
-  lv_timer_create(combined_10s_updater, 10000, NULL);
+  lv_timer_create(combined_2s_updater, 2000, NULL);
 
   // Create data display
   create_data_display(cont, &dataDisplay);
