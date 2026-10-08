@@ -347,7 +347,7 @@ void solar_charge_manager() {
 
   if ( !CAN.available() ) {
     enable_solar = false;
-    strcpy(DYNAMIC_LABEL, "Solar OFF - No CAN communication");
+    strcpy(DYNAMIC_LABEL, "Arduino: PV OFF - No BMS CAN comm");
   }
   // WHEN SUNLIGHT IS SENSED
   else if ( PV_DETECT ) {
@@ -371,7 +371,7 @@ void solar_charge_manager() {
         // ALLOW INVERTER 20s TO TURN OFF BEFORE SETTING LABEL AND DISCONNECTING SOLAR PANELS
         if ( (millis() - mppt_drain_time_ms) > 20000 ) {
           enable_solar = false;
-          strcpy(DYNAMIC_LABEL, "Solar OFF - Low PV voltage");
+          strcpy(DYNAMIC_LABEL, "Arduino: PV OFF - Weak Sunlight");
         }
         else {
           return;
@@ -381,7 +381,7 @@ void solar_charge_manager() {
       else if ( !enable_solar && ((millis() - sunrise_ms + mppt_drain_time_ms) > 600000 || combinedData.canData.p )) { // using combinedData to decipher when Arduino has started
         enable_solar = true;
         mppt_drain_time_ms = 0;
-        strcpy(DYNAMIC_LABEL, "Solar ON delay");
+        strcpy(DYNAMIC_LABEL, "Arduino: PV ON delay");
       }
     }
   }
@@ -392,7 +392,7 @@ void solar_charge_manager() {
       // within 10 seconds lets trigger mppt delay as relay flap detected
       if ( (millis() - sunrise_ms) < 10000 && enable_solar ) {
         enable_solar = false;
-        strcpy(DYNAMIC_LABEL, "Solar OFF - Sense relay flapping");
+        strcpy(DYNAMIC_LABEL, "Arduino: PV OFF - Sense relay flapping");
       }
       // SUNSET MORE THAN 10s LATER
       else {
@@ -403,10 +403,10 @@ void solar_charge_manager() {
     // EXT. CHARGE AFTER SUNRISE OR NIGHT
     else if ( !inverter_delay_timer_ms ) { // inverter_delay_timer_ms condition to not over-write startup label
       if ( AVG_AMPS < 0 && sunrise_ms ) {
-        strcpy(DYNAMIC_LABEL, "Solar OFF - External Charge");
+        strcpy(DYNAMIC_LABEL, "Arduino: PV OFF - External Charge");
       }
       else {
-        strcpy(DYNAMIC_LABEL, "Solar OFF - Night mode");
+        strcpy(DYNAMIC_LABEL, "Arduino: PV OFF - Night mode");
       }
       enable_solar = false;
     }
@@ -434,7 +434,7 @@ void ccl_check() {
   // OPEN CONTACTOR AT 0 CCL OR CELL APPROACHING MAX VOLTAGE
   else if ( !CCL_ENFORCED && CCL == 0 || HI_CELL_V > (MAX_CELL_V - 0.05) ) {
     pv_contactor(false);
-    strcpy(DYNAMIC_LABEL, "Solar OFF - CCL enforced");
+    strcpy(DYNAMIC_LABEL, "Arduino: PV OFF - CCL enforced");
     CCL_ENFORCED = true;
   }
   // WHEN CCL IS ABOVE 0 OR CELL VOLTAGE HAS DROPPED LOW ENOUGH ALLOW MPPT CONTROLLER FUNCTION CONTROL AGAIN
@@ -1628,45 +1628,44 @@ void refresh_bms_status_data(bms_status_data_t *data) {
     }
   }
   // CRITICAL CAN RX FAILURE - LESS THAN 3 TO AVOID HAVING TX SIGNALS HIDE THIS MESSAGE AS RX DATA IS 8-BYTE LONG
-  if ( CAN_RX_LEN <= 3 ) { create_status_label("Arduino - No BMS CAN data", data); flag_index++; comparator_index++; }
+  if ( CAN_RX_LEN <= 3 ) { create_status_label("Arduino: No BMS CAN comm", data); flag_index++; comparator_index++; }
 
   // BMS flags 2 bytes
-  if ( (BMS_FAULTS & 0x0100) == 0x0100 ) { create_status_label("Internal Hardware Fault", data); flag_index++; }
-  if ( (BMS_FAULTS & 0x0200) == 0x0200 ) { create_status_label("Internal Cell Comm Fault", data); flag_index++; }
-  if ( (BMS_FAULTS & 0x0400) == 0x0400 ) { create_status_label("Weak Cell Fault", data); flag_index++; }
-  if ( (BMS_FAULTS & 0x0800) == 0x0800 ) { create_status_label("Low Cell Voltage", data); flag_index++; }
-  if ( (BMS_FAULTS & 0x1000) == 0x1000 ) { create_status_label("Open Wire Fault", data); flag_index++; }
-  if ( (BMS_FAULTS & 0x2000) == 0x2000 ) { create_status_label("Current Sensor Fault", data); flag_index++; }
-  if ( (BMS_FAULTS & 0x4000) == 0x4000 ) { create_status_label("Abnormal SOC Behavior", data); flag_index++; }
-  if ( (BMS_FAULTS & 0x8000) == 0x8000 ) { create_status_label("Pack Too Hot Fault", data); flag_index++; }
-  if ( (BMS_FAULTS & 0x0001) == 0x0001 ) { create_status_label("Weak Pack Fault", data); flag_index++; }
-  if ( (BMS_FAULTS & 0x0002) == 0x0002 ) { create_status_label("External Thermistor Fault", data); flag_index++; }
-  if ( (BMS_FAULTS & 0x0004) == 0x0004 ) { create_status_label("Charge Relay Failure", data); flag_index++; }
-  if ( (BMS_FAULTS & 0x0008) == 0x0008 ) { create_status_label("Discharge Relay Fault", data); flag_index++; }
-  if ( (BMS_FAULTS & 0x0010) == 0x0010 ) { create_status_label("Safety Relay Fault", data); flag_index++; }
-  if ( (BMS_FAULTS & 0x0020) == 0x0020 ) { create_status_label("CAN communication Fault", data); flag_index++; }
-  if ( (BMS_FAULTS & 0x0040) == 0x0040 ) { create_status_label("Internal Thermistor Fault", data); flag_index++; }
-  if ( (BMS_FAULTS & 0x0080) == 0x0080 ) { create_status_label("Internal Logic Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0100) == 0x0100 ) { create_status_label("BMS: Int Hardware Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0200) == 0x0200 ) { create_status_label("BMS: Int Cell Comm Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0400) == 0x0400 ) { create_status_label("BMS: Weak Cell Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0800) == 0x0800 ) { create_status_label("BMS: Low Cell Voltage", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x1000) == 0x1000 ) { create_status_label("BMS: Open Wire Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x2000) == 0x2000 ) { create_status_label("BMS: Current Sensor Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x4000) == 0x4000 ) { create_status_label("BMS: Abnormal SOC Behavior", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x8000) == 0x8000 ) { create_status_label("BMS: Pack Too Hot Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0001) == 0x0001 ) { create_status_label("BMS: Weak Pack Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0002) == 0x0002 ) { create_status_label("BMS: Ext Thermistor Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0004) == 0x0004 ) { create_status_label("BMS: Chg Contactor Failure", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0008) == 0x0008 ) { create_status_label("BMS: Dischg Contactor Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0010) == 0x0010 ) { create_status_label("BMS: Safety Contactor Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0020) == 0x0020 ) { create_status_label("BMS: CAN comm Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0040) == 0x0040 ) { create_status_label("BMS: Int Thermistor Fault", data); flag_index++; }
+  if ( (BMS_FAULTS & 0x0080) == 0x0080 ) { create_status_label("BMS: Int Logic Fault", data); flag_index++; }
 
   // Failsafe status 2 bytes
-  if ( (BMS_STATUS & 0x0001) == 0x0001 ) { create_status_label("Voltage Failsafe", data); flag_index++; }
-  if ( (BMS_STATUS & 0x0002) == 0x0002 ) { create_status_label("Current Failsafe", data); flag_index++; }
-  if ( (BMS_STATUS & 0x0004) == 0x0004 ) { create_status_label("Relay Failsafe", data); flag_index++; }
-  if ( (BMS_STATUS & 0x0010) == 0x0010 ) { create_status_label("Charge Interlock Failsafe", data); flag_index++; }
-  if ( (BMS_STATUS & 0x0020) == 0x0020 ) { create_status_label("Thermistor B-value Table Invalid", data); flag_index++; }
-  if ( (BMS_STATUS & 0x0040) == 0x0040 ) { create_status_label("Input Power Supply Failsafe", data); flag_index++; }
-  if ( (BMS_STATUS & 0x0100) == 0x0100 ) { create_status_label("Relays Opened under Load Failsafe", data); flag_index++; }
-  if ( (BMS_STATUS & 0x1000) == 0x1000 ) { create_status_label("Polarization Model 1 Active", data); flag_index++; }
-  if ( (BMS_STATUS & 0x2000) == 0x2000 ) { create_status_label("Polarization Model 2 Active", data); flag_index++; }
-  if ( (BMS_STATUS & 0x8000) == 0x8000 ) { create_status_label("Charge Mode Activated over CANBUS", data); flag_index++; }
+  if ( (BMS_STATUS & 0x0001) == 0x0001 ) { create_status_label("BMS: Voltage Failsafe", data); flag_index++; }
+  if ( (BMS_STATUS & 0x0002) == 0x0002 ) { create_status_label("BMS: Current Failsafe", data); flag_index++; }
+  if ( (BMS_STATUS & 0x0004) == 0x0004 ) { create_status_label("BMS: Contactors Failsafe", data); flag_index++; }
+  if ( (BMS_STATUS & 0x0010) == 0x0010 ) { create_status_label("BMS: Chg Interlock Failsafe", data); flag_index++; }
+  if ( (BMS_STATUS & 0x0020) == 0x0020 ) { create_status_label("BMS: Therm B-val tbl Invalid", data); flag_index++; }
+  if ( (BMS_STATUS & 0x0040) == 0x0040 ) { create_status_label("BMS: In Pwr Supply Failsafe", data); flag_index++; }
+  if ( (BMS_STATUS & 0x0100) == 0x0100 ) { create_status_label("BMS: Open Contactor Failsafe", data); flag_index++; }
+  if ( (BMS_STATUS & 0x1000) == 0x1000 ) { create_status_label("BMS: Model 1 Polarisation", data); flag_index++; }
+  if ( (BMS_STATUS & 0x2000) == 0x2000 ) { create_status_label("BMS: Model 2 Polarisation", data); flag_index++; }
+  if ( (BMS_STATUS & 0x8000) == 0x8000 ) { create_status_label("BMS: CANBUS Activated Chg", data); flag_index++; }
 
   // Relay status 1 byte ( 2 bytes available includes mpo/mpi and charge statuses )
-  if ( !(RELAYS & 0x01) ) { create_status_label("Discharge Relay Opened", data); flag_index++; }
-  // CONTROLLED BY ARDUINO AND DISABLED IN BMS if ((RELAYS & 0x0002) == 0x0000) { create_status_label("Charge Relay Opened", data); flag_index++; }
+  if ( !(RELAYS & 0x01) ) { create_status_label("BMS: Dischg Contactor Open", data); flag_index++; }
 
   // Custom status messages
   if ( !PV_ON ) { create_status_label(DYNAMIC_LABEL, data); flag_index++; comparator_index++;}
-  if ( !lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Arduino - Discharge Disabled", data); flag_index++; comparator_index++;} // If Inverter DCL CHECK triggered
+  if ( !lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Arduino: Dischg Disabled", data); flag_index++; comparator_index++;} // If Inverter DCL CHECK triggered
 
   // Cell balancing check at end ensures higher importance messages appear above
   if ( BLCG_ACTIVE ) {
@@ -2224,7 +2223,7 @@ void loop() {
     // DISABLE PV IF DCH CONTACTOR OPEN TO AVOID DAMAGING INVERTER FROM PV ARRAY
     if ( !(RELAYS & 0x0001) ) {
       pv_contactor(false);
-      strcpy(DYNAMIC_LABEL, "Battery Discharge Contactor Open");
+      strcpy(DYNAMIC_LABEL, "Arduino: PV OFF - BMS DCL enforced");
     }
   }
 
