@@ -571,7 +571,7 @@ const char* set_can_msgbox_text() {
                  (CUSTOM_FLAGS & 0x02) == 0x02 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using MPO#1 feedback from BMS which controls both charge FETs reversed polarity
                  (RELAYS & 0x0001) == 0x0001 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using BMS relay state
                  CYCLES,
-                 HEALTH,
+                 AH / SOC / CAPACITY * 10000,
                  HEAT_SINK,
                  (AH * VOLT) / 1000.0);
 
@@ -1661,12 +1661,23 @@ void refresh_bms_status_data(bms_status_data_t *data) {
   if ( (BMS_STATUS & 0x8000) == 0x8000 ) { create_status_label("BMS: CANBUS Activated Chg", data); flag_index++; }
 
   // Relay status 1 byte ( 2 bytes available includes mpo/mpi and charge statuses )
-  if ( !(RELAYS & 0x01) ) { create_status_label("BMS: Dischg Contactor Open", data); flag_index++; }
-
+  if ( !(RELAYS & 0x01) ) {
+    create_status_label("BMS: Dischg Contactor Open", data);
+    flag_index++;
+    comparator_index++;
+  }
   // Custom status messages
-  if ( !PV_ON ) { create_status_label(DYNAMIC_LABEL, data); flag_index++; comparator_index++;}
-  if ( !lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) { create_status_label("Arduino: Dischg Disabled", data); flag_index++; comparator_index++;} // If Inverter DCL CHECK triggered
-
+  if ( !PV_ON ) {
+    create_status_label(DYNAMIC_LABEL, data);
+    flag_index++;
+    comparator_index++;
+  }
+  // If Inverter DCL CHECK triggered
+  if ( !lv_obj_has_flag(userData[3].dcl_label, LV_OBJ_FLAG_HIDDEN) ) {
+    create_status_label("Arduino: Dischg Disabled", data);
+    flag_index++;
+    comparator_index++;
+  }
   // Cell balancing check at end ensures higher importance messages appear above
   if ( BLCG_ACTIVE ) {
     if ( balancing_label_showing ) {
@@ -1689,7 +1700,7 @@ void refresh_bms_status_data(bms_status_data_t *data) {
     if ( lv_obj_has_flag(data->title_label, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(data->title_label, LV_OBJ_FLAG_HIDDEN);
     }
-    // SHOW BUTTON
+    // SHOW BUTTON IF FLAG INDEX IS NOT EQUAL TO COMPARATOR INDEX
     else if ( flag_index != comparator_index && lv_obj_has_flag(data->button, LV_OBJ_FLAG_HIDDEN) ) {
       lv_obj_clear_flag(data->button, LV_OBJ_FLAG_HIDDEN);
     }
@@ -2273,11 +2284,11 @@ void loop() {
   // ARDUINO COMMANDED CELL BALANCING FOR GRID CHARGE WHEN CELLS ARE ABOVE 3,25V WITH CELL DIFF GREATER THAN 20mV
 
   // STOP BALANCING
-  if ( BLCG_ALLOWED && (LO_CELL_V < 3.2 || (HI_CELL_V - LO_CELL_V) < 0.02) ) {
+  if ( BLCG_ALLOWED && (LO_CELL_V < 3.29 || (HI_CELL_V - LO_CELL_V) < 0.02) ) {
     BLCG_ALLOWED = 0x00; // Balancing NOT Allowed
   }
   // START BALANCING
-  else if ( !BLCG_ALLOWED && AVG_AMPS <= 0 && HI_CELL_V > 3.25 && (HI_CELL_V - LO_CELL_V) >= 0.02 ) {
+  else if ( !BLCG_ALLOWED && AVG_AMPS <= 0 && HI_CELL_V > 3.3 && (HI_CELL_V - LO_CELL_V) >= 0.02 ) {
     BLCG_ALLOWED = 0x01; // Balancing Allowed
   }
 
