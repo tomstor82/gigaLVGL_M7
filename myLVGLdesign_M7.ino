@@ -195,7 +195,7 @@ uint32_t inverter_delay_timer_ms = 0;
 bool eco_mode = false;
 static uint8_t brightness = 70;
 uint32_t previous_touch_ms = 0;
-//uint8_t dd_temp_arr[7] = { 5, 15, 17, 19, 20, 21, 22 };
+float power_movement_arr[2] = {0,0};
 
 // for M4 messages
 static String buffer = "";
@@ -544,6 +544,40 @@ void dcl_check(user_data_t *data) {
 
 
 
+// POWER MOVEMENT RECORDED - NEED TO KNOW SUNSET AND SUNRISE
+void power_movement(bool pv_detect) {
+
+  static uint8_t day_count = 1;
+  static bool zeroed = true;
+  static bool daylight = false;
+
+  if ( pv_detect && !daylight ) {
+    daylight = true;
+  }
+  else if ( !pv_detect && daylight ) {
+    daylight = false;
+  }
+
+  // update weekly average array at sunset
+  if ( !daylight && zeroed ) {
+    power_movement_arr[1] += power_movement_arr[0];
+    day_count++;
+    zeroed = false;
+  }
+  // zero daily_avg at sunrise
+  else if ( daylight ) {
+    if ( !zeroed ) {
+      power_movement_arr[0] = 0;
+      zeroed = true;
+      if ( day_count == 7 ) {
+        power_movement_arr[1] = 0;
+        day_count = 1;
+      }
+    }
+    power_movement_arr[0] += WATTS/1800;
+  }
+}
+
 
 
 
@@ -563,7 +597,9 @@ const char* set_can_msgbox_text() {
                  "Cycles                                    %3d\n"
                  "Health                                 %3d%%\n\n"
                  "BMS Heatsink                    %2d\u00B0C\n"
-                 "Energy                        %3.2f kW",
+                 "Energy                        %3.2f kW\n\n"
+                 "Daily Power Movement        %4.1f Wh\n"
+                 "Weekly Power Movement        %2.1f kWh",
                  HI_CELL_V, HI_CELL_ID,
                  LO_CELL_V, LO_CELL_ID,
                  CCL,
@@ -573,7 +609,9 @@ const char* set_can_msgbox_text() {
                  CYCLES,
                  AH / SOC / CAPACITY * 10000,
                  HEAT_SINK,
-                 (AH * VOLT) / 1000.0);
+                 (AH * VOLT) / 1000.0),
+                 power_movement_arr[0],
+                 power_movement_arr[1]/1000.0;
 
   return msgbox_text;
 }
@@ -1033,7 +1071,6 @@ void manipulate_heaters(bool night_mode) {
     }
   }
 }
-
 
 // HEATERS NIGHT MODE REDUCED TEMPERATURE - COMMON FUNCTION CALLED ONLY ONCE FOR BOTH HEATERS
 void heaters_night_mode() {
@@ -2043,7 +2080,7 @@ void combined_1s_updater(lv_timer_t *timer) {
   }
 }
 
-void combined_2s_updater(lv_timer_t *timer) {
+void combined_2s_updater(lv_timer_t *timer) { // if time interval is changed remember to change WATTS/1800 in power_movement function
   if ( msgboxData[1].update_timer ) {
     sensor_msgbox_update_timer(&msgboxData[1]);
   }
@@ -2058,6 +2095,7 @@ void combined_2s_updater(lv_timer_t *timer) {
     }
   }
   solar_dump();
+  power_movement(PV_DETECT);
 }
 
 
