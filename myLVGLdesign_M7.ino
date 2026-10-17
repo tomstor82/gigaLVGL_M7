@@ -75,7 +75,7 @@ typedef struct {
   lv_obj_t *status_label[33];
   bool no_refresh;
   bool ccl_enforced;
-  char dynamic_label[35];
+  char dynamic_label[42];
   uint8_t y;
 } bms_status_data_t;
 
@@ -138,7 +138,7 @@ static CombinedData combinedData = {0};
 #define CAN_RX_LEN      canMsgData.rxLen
 #define CAN_RX_BUF      canMsgData.rxBuf
 
-#define CAN_TX_ID       0x02
+#define CAN_TX_ID       0x01
 #define CAN_TX_BUF      canMsgData.txBuf
 #define PV_ON           canMsgData.txBuf[0]
 #define CLEAR_BMS       canMsgData.txBuf[1]
@@ -175,11 +175,11 @@ static CombinedData combinedData = {0};
 #define LO_CELL_ID      combinedData.canData.lCid
 #define BMS_FAULTS      combinedData.canData.fu
 #define BMS_STATUS      combinedData.canData.st
-#define BLCG_ACTIVE     (combinedData.canData.st & 0x0008) == 0x0008
+#define BLCG_ACTIVE     ((combinedData.canData.st & 0x0008) == 0x0008)
 #define CYCLES          combinedData.canData.cc
 #define HEAT_SINK       combinedData.canData.hs
 #define CUSTOM_FLAGS    combinedData.canData.cu
-#define PV_DETECT       (combinedData.canData.cu & 0x01) == 0x01
+#define PV_DETECT       ((combinedData.canData.cu & 0x01) == 0x01)
 #define CAPACITY        combinedData.canData.cpcty
 
 #define DYNAMIC_LABEL   bmsStatusData.dynamic_label
@@ -432,13 +432,13 @@ void ccl_check() {
   if ( inverter_delay_timer_ms ) return;
 
   // OPEN CONTACTOR AT 0 CCL OR CELL APPROACHING MAX VOLTAGE
-  else if ( !CCL_ENFORCED && CCL == 0 || HI_CELL_V > (MAX_CELL_V - 0.05) ) {
+  else if ( (!CCL_ENFORCED && CCL == 0) || HI_CELL_V > (MAX_CELL_V - 0.05) ) {
     pv_contactor(false);
     strcpy(DYNAMIC_LABEL, "Arduino: PV OFF - CCL enforced");
     CCL_ENFORCED = true;
   }
   // WHEN CCL IS ABOVE 0 OR CELL VOLTAGE HAS DROPPED LOW ENOUGH ALLOW MPPT CONTROLLER FUNCTION CONTROL AGAIN
-  else if ( CCL_ENFORCED && CCL > 0 || HI_CELL_V < (MAX_CELL_V - 0.2) ) {
+  else if ( (CCL_ENFORCED && CCL > 0) || HI_CELL_V < (MAX_CELL_V - 0.2) ) {
     CCL_ENFORCED = false;
   }
 }
@@ -477,8 +477,8 @@ void dcl_check(user_data_t *data) {
 
   // START TIMER IF INVERTER AND/OR HEATER/HOT WATER CRITERIA SATISFIED
   if ( !data->dcl_enforced_ms ) {
-    if ( data->relay_pin == INVERTER && (AVG_AMPS > DCL || DCL < data->dcl_limit || LO_CELL_V < (MIN_CELL_V + 0.1) || !(RELAYS & 0x01) || !CAN.available()) || // inverter criteria
-         data->relay_pin != INVERTER && (userData[3].dcl_enforced_ms || DCL < data->dcl_limit) ) {                                                              // heater/hot water criteria
+    if ( (data->relay_pin == INVERTER && (AVG_AMPS > DCL || DCL < data->dcl_limit || LO_CELL_V < (MIN_CELL_V + 0.1) || !(RELAYS & 0x01) || !CAN.available())) || // inverter criteria
+         (data->relay_pin != INVERTER && (userData[3].dcl_enforced_ms || DCL < data->dcl_limit)) ) {                                                              // heater/hot water criteria
 
       // RECORD TIME TO ALLOW TO DISABLING AND ENABLING OF BUTTONS AND LABELS CONTINIOUSLY LATER IN FUNCTION
       data->dcl_enforced_ms = millis();
@@ -546,36 +546,32 @@ void dcl_check(user_data_t *data) {
 
 // POWER MOVEMENT RECORDED - NEED TO KNOW SUNSET AND SUNRISE
 void power_movement(bool pv_detect) {
-
   static uint8_t day_count = 1;
-  static bool zeroed = true;
-  static bool daylight = false;
+  static bool    daylight  = false;
+  static bool    closed    = true;   // current day cycle already closed out
 
   if ( pv_detect && !daylight ) {
+    // sunrise — close out the previous 24h cycle
     daylight = true;
-  }
-  else if ( !pv_detect && daylight ) {
-    daylight = false;
-  }
-
-  // update weekly average array at sunset
-  if ( !daylight && zeroed ) {
-    power_movement_arr[1] += power_movement_arr[0];
-    day_count++;
-    zeroed = false;
-  }
-  // zero daily_avg at sunrise
-  else if ( daylight ) {
-    if ( !zeroed ) {
+    if ( !closed ) {
+      power_movement_arr[1] += power_movement_arr[0];   // snapshot completed day
       power_movement_arr[0] = 0;
-      zeroed = true;
-      if ( day_count == 7 ) {
+      closed = true;
+      day_count++;
+      if ( day_count > 7 ) {
         power_movement_arr[1] = 0;
         day_count = 1;
       }
     }
-    power_movement_arr[0] += WATTS/1800;
   }
+  else if ( !pv_detect && daylight ) {
+    // sunset — arm the sunrise close-out
+    daylight = false;
+    closed   = false;
+  }
+
+  // accumulate net battery energy continuously
+  power_movement_arr[0] += (-WATTS) / 1800.0;
 }
 
 
@@ -595,11 +591,11 @@ const char* set_can_msgbox_text() {
                  "Solar Charge                          %s\n"
                  "Discharge                               %s\n\n"
                  "Cycles                                    %3d\n"
-                 "Health                                 %3d%%\n\n"
+                 "Health                                 %3.0f%%\n\n"
                  "BMS Heatsink                    %2d\u00B0C\n"
                  "Energy                        %3.2f kW\n\n"
-                 "Daily Power Movement        %4.1f Wh\n"
-                 "Weekly Power Movement        %2.1f kWh",
+                 "Daily Net                     %+4.1f Wh\n"
+                 "Weekly Net                  %+2.1f kWh",
                  HI_CELL_V, HI_CELL_ID,
                  LO_CELL_V, LO_CELL_ID,
                  CCL,
@@ -607,11 +603,11 @@ const char* set_can_msgbox_text() {
                  (CUSTOM_FLAGS & 0x02) == 0x02 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using MPO#1 feedback from BMS which controls both charge FETs reversed polarity
                  (RELAYS & 0x0001) == 0x0001 ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE, // using BMS relay state
                  CYCLES,
-                 AH / SOC / CAPACITY * 10000,
+                 (AH / SOC / CAPACITY * 10000),
                  HEAT_SINK,
-                 (AH * VOLT) / 1000.0),
+                 ((AH * VOLT) / 1000.0),
                  power_movement_arr[0],
-                 power_movement_arr[1]/1000.0;
+                 (power_movement_arr[1]/1000.0));
 
   return msgbox_text;
 }
@@ -767,10 +763,10 @@ void power_check(lv_timer_t *timer) {
   bool on = false;
 
   // SLEEP MODE VARIABLES FOR INVERTER ONLY SO OK TO BE STATIC
-  static uint8_t minute_count = 0;
+  static int8_t minute_count = 0;
   static bool pre_sleep_delay = false;
   char plural[2] = "s";
-  char label[15];
+  char label[24];
 
   // INVERTER CHECK
   if ( data->relay_pin == INVERTER ) {
@@ -779,7 +775,7 @@ void power_check(lv_timer_t *timer) {
     if ( eco_mode ) {
 
       // ON if above inverter standby, solar charge or charging when above 50% soc
-      if ( !data->timeout_ms && ( WATTS > 80 || PV_DETECT || AVG_AMPS < -5 && SOC > 50) ) {
+      if ( !data->timeout_ms && ( WATTS > 80 || PV_DETECT || (AVG_AMPS < -5 && SOC > 50)) ) {
         on = true;
       }
     }
@@ -814,6 +810,7 @@ void power_check(lv_timer_t *timer) {
 
   // INVERTER SLEEP MODE
   else if ( data->relay_pin == INVERTER && data->on == true ) {
+    int32_t elapsed = millis() - data->timeout_ms;
 
     // INVERTER OFF AND LABEL UPDATER ALGORITHM
     if ( !data->timeout_ms ) {
@@ -827,7 +824,7 @@ void power_check(lv_timer_t *timer) {
       digitalWrite(data->relay_pin, LOW);
       pre_sleep_delay = false;
     }
-    else if ( (millis() - data->timeout_ms) > ((1 + minute_count) * 60 * 1000) && minute_count < off_interval_min && ! pre_sleep_delay ) {
+    else if ( elapsed > ((1 + minute_count) * 60 * 1000) && minute_count < off_interval_min && ! pre_sleep_delay ) {
       minute_count++;
       if ( minute_count == 2 ) {
         strcpy(plural, "");
@@ -1308,7 +1305,7 @@ void fault_label_maker(lv_timer_t *timer) {
   }
 
    // Add whitespace followed by two dashes at the end for single sensor fault
-  if ( index = 0 ) {
+  if ( index == 0 ) {
     strcat(faultMsg, " --");
   }
 
@@ -1588,7 +1585,7 @@ void retrieve_M4_data() {
 // DISPLAY BRIGHTNESS DIMMING /////////////////////////////////////////////////////////
 void dim_display() {
   // check if brightness above 0
-  brightness ? brightness-- : NULL;
+  brightness ? brightness-- : 0;
   // set brightness
   backlight.set(brightness);
 }
@@ -1769,7 +1766,7 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
 
     // Create title label with underline style (hidden initially)
     data->title_label = lv_label_create(parent);
-      lv_obj_set_style_text_decor(data->title_label, LV_TEXT_DECOR_UNDERLINE, NULL);
+      lv_obj_set_style_text_decor(data->title_label, LV_TEXT_DECOR_UNDERLINE, 0);
       lv_label_set_text(data->title_label, "System Messages");
       lv_obj_align(data->title_label, LV_ALIGN_TOP_MID, 0, y);
       lv_obj_add_flag(data->title_label, LV_OBJ_FLAG_HIDDEN);
@@ -1807,11 +1804,20 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
 
 // DATA SCREEN STATE OF CHARGE SYMBOLS ////////////////////////////////////////////////
 void charge_icons_updater(data_display_t *data) {
-  bool flashing_battery = false;
+  static bool flashing_battery = false;
+
+  // FLASH BATTERY ICON
+  if ( flashing_battery ) {
+    lv_obj_add_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
+    flashing_battery = false;
+  }
+  else {
+    lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
+  }
 
   // WHITE ABOVE 15% OR IF CHARGING
   if ( SOC > 15 || AVG_AMPS < 0 ) {
-    lv_obj_set_style_text_color(data->car_battery_icon, lv_color_white(), NULL);
+    lv_obj_set_style_text_color(data->car_battery_icon, lv_color_white(), 0);
     // FLASHING WHILST CHARGING
     if ( AVG_AMPS < 0 ) {
       flashing_battery = true;
@@ -1819,11 +1825,11 @@ void charge_icons_updater(data_display_t *data) {
   }
   // ORANGE ABOVE 10%
   else if ( SOC > 10 ) {
-    lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_ORANGE), NULL);
+    lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_ORANGE), 0);
   }
   // RED BATTERY ICON FROM SOC 10% AND LESS WITH FLASHING BELOW 5% OR IF DISCHARGE DISABLED
   else  {
-    lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_RED), NULL);
+    lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_RED), 0);
     if ( SOC < 5 || userData[3].faulty_temp_disabled ) {
       flashing_battery = true;
     }
@@ -2008,8 +2014,8 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
   data->battery_label = lv_label_create(parent);
 
   data->soc_label = lv_label_create(parent);    
-    lv_obj_set_style_text_font(data->soc_label, &Montserrat34_0_9_percent, NULL);
-    lv_obj_set_style_text_align(data->soc_label, LV_TEXT_ALIGN_CENTER, NULL);
+    lv_obj_set_style_text_font(data->soc_label, &Montserrat34_0_9_percent, 0);
+    lv_obj_set_style_text_align(data->soc_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_add_flag(data->soc_label, LV_OBJ_FLAG_CLICKABLE); // make it clickable to open msg_box
     lv_obj_add_event_cb(data->soc_label, can_msgbox, LV_EVENT_CLICKED, &msgboxData[0]); // add event handler to clicks
 
@@ -2018,14 +2024,14 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
   data->amps_label = lv_label_create(parent);
 
   data->watt_label = lv_label_create(parent);
-    lv_obj_set_style_text_font(data->watt_label, &Montserrat20_0_9_W_minus, NULL);
+    lv_obj_set_style_text_font(data->watt_label, &Montserrat20_0_9_W_minus, 0);
 
   data->charge_icon = lv_label_create(parent);
-    lv_obj_set_style_text_font(data->charge_icon, &FontAwesomeSolid20_icons, NULL);
-    lv_obj_set_style_text_color(data->charge_icon, lv_palette_main(LV_PALETTE_YELLOW), NULL);
+    lv_obj_set_style_text_font(data->charge_icon, &FontAwesomeSolid20_icons, 0);
+    lv_obj_set_style_text_color(data->charge_icon, lv_palette_main(LV_PALETTE_YELLOW), 0);
 
   data->car_battery_icon = lv_label_create(parent);
-    lv_obj_set_style_text_font(data->car_battery_icon, &FontAwesomeSolid20_icons, NULL);
+    lv_obj_set_style_text_font(data->car_battery_icon, &FontAwesomeSolid20_icons, 0);
     lv_label_set_text(data->car_battery_icon, "\uF5DF");
 
   // ALLIGN LABELS, EXCEPT WATTS AND AMPS WHICH SHIFT X-POS WITH READINGS
@@ -2108,11 +2114,11 @@ void leaf_icon_event_handler(lv_event_t* e) {
   //if (code == LV_EVENT_CLICKED) {
     if ( !eco_mode ) {
       eco_mode = true;
-      lv_obj_set_style_text_color(obj, lv_color_hex(0x1cda70), NULL);
+      lv_obj_set_style_text_color(obj, lv_color_hex(0x1cda70), 0);
     }
     else {
       eco_mode = false;
-      lv_obj_set_style_text_color(obj, lv_color_hex(0x555555), NULL);
+      lv_obj_set_style_text_color(obj, lv_color_hex(0x555555), 0);
     }
   //}
 }
@@ -2203,9 +2209,9 @@ void setup() {
 
   // Create Leaf Icon for Inverter Eco Mode
   lv_obj_t* leaf_icon = lv_label_create(cont);
-    lv_obj_set_style_text_font(leaf_icon, &FontAwesomeSolid34_leaf, NULL);
+    lv_obj_set_style_text_font(leaf_icon, &FontAwesomeSolid34_leaf, 0);
     lv_label_set_text(leaf_icon, "\uF06C");
-    lv_obj_set_style_text_color(leaf_icon, lv_color_hex(0x555555), NULL);
+    lv_obj_set_style_text_color(leaf_icon, lv_color_hex(0x555555), 0);
     lv_obj_align(leaf_icon, LV_ALIGN_BOTTOM_RIGHT, -40, -40);
     lv_obj_add_flag(leaf_icon, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(leaf_icon, leaf_icon_event_handler, LV_EVENT_CLICKED, NULL);
