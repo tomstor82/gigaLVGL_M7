@@ -478,7 +478,7 @@ void dcl_check(user_data_t *data) {
   // START TIMER IF INVERTER AND/OR HEATER/HOT WATER CRITERIA SATISFIED
   if ( !data->dcl_enforced_ms ) {
     if ( (data->relay_pin == INVERTER && (AVG_AMPS > DCL || DCL < data->dcl_limit || LO_CELL_V < (MIN_CELL_V + 0.1) || !(RELAYS & 0x01) || !CAN.available())) || // inverter criteria
-         (data->relay_pin != INVERTER && (userData[3].dcl_enforced_ms || DCL < data->dcl_limit)) ) {                                                              // heater/hot water criteria
+         (data->relay_pin != INVERTER && (userData[3].dcl_enforced_ms || DCL < data->dcl_limit || (SOC < 20 && WATTS > 0)) ) ) {                                                              // heater/hot water criteria
 
       // RECORD TIME TO ALLOW TO DISABLING AND ENABLING OF BUTTONS AND LABELS CONTINIOUSLY LATER IN FUNCTION
       data->dcl_enforced_ms = millis();
@@ -486,7 +486,7 @@ void dcl_check(user_data_t *data) {
   }
 
   // WHEN 60s HAS ELAPSED AFTER DCL ENFORCEMENT AND CRITERIA MET ENABLE BUTTONS AND HIDE LABELS AGAIN
-  else if ( (millis() - data->dcl_enforced_ms) > 60000 && (RELAYS & 0x01) && DCL > data->dcl_limit ) {
+  else if ( (millis() - data->dcl_enforced_ms) > 60000 && (RELAYS & 0x01) && DCL > data->dcl_limit && ((data->relay_pin == INVERTER && SOC > 10 && WATTS < 0) || (data->relay_pin != INVERTER && SOC > 20 && WATTS < 0)) ) {
 
     // ENABLE BUTTON
     if ( lv_obj_has_state(data->button, LV_STATE_DISABLED) ) {
@@ -594,8 +594,8 @@ const char* set_can_msgbox_text() {
                  "Health                                 %3.0f%%\n\n"
                  "BMS Heatsink                    %2d\u00B0C\n"
                  "Energy                          %2.2f kW\n\n"
-                 "Daily Net                     %5.0f Wh\n"
-                 "Weekly Net                %3.1f kWh",
+                 "Daily Net                    %5.0f Wh\n"
+                 "Weekly Net               %3.1f kWh",
                  HI_CELL_V, HI_CELL_ID,
                  LO_CELL_V, LO_CELL_ID,
                  CCL,
@@ -1818,10 +1818,10 @@ void charge_icons_updater(data_display_t *data) {
   if ( SOC > 15 || AVG_AMPS < 0 ) {
     lv_obj_set_style_text_color(data->car_battery_icon, lv_color_white(), 0);
     // FLASHING WHILST CHARGING
-    if ( AVG_AMPS < 0 ) {
+    /*if ( AVG_AMPS < 0 ) {
       flashing_battery = true;
     }
-    else flashing_battery = false;
+    else flashing_battery = false;*/
   }
   // ORANGE ABOVE 10%
   else if ( SOC > 10 ) {
@@ -1838,6 +1838,10 @@ void charge_icons_updater(data_display_t *data) {
 
   // CHARGE SYMBOLS
   if ( AVG_AMPS < 0 ) {
+    // CLEAR HIDDEN FLAG
+    if ( lv_obj_has_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN) ) {
+      lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
+    }
     // SHOW SUN IF PV DETECTED
     if ( PV_DETECT ) {
       lv_label_set_text(data->charge_icon, "\uF185"); // sun icon
@@ -1853,11 +1857,11 @@ void charge_icons_updater(data_display_t *data) {
     // SHOW FLASHING SUN ICON IF PV DETECTED
     if ( PV_DETECT ) {
       lv_label_set_text(data->charge_icon, "\uF185"); // sun icon
-      if ( lv_obj_has_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN) ) {
-        lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
+      if ( !lv_obj_has_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN) ) {
+        lv_obj_add_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
       }
       else {
-        lv_obj_add_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
       }
     }
     // NO PV DETECTED, NO ICON
