@@ -475,10 +475,14 @@ void dcl_check(user_data_t *data) {
     return;
   }
 
+  // CALCULATE NET DCL FOR DETERMINING HOW MUCH POWER CAN BE DRAWN SAFELY
+  float net_dcl = DCL;
+  if ( AVG_AMPS ) net_dcl = DCL - AVG_AMPS;
+
   // START TIMER IF INVERTER AND/OR HEATER/HOT WATER CRITERIA SATISFIED
   if ( !data->dcl_enforced_ms ) {
-    if ( (data->relay_pin == INVERTER && (AVG_AMPS > DCL || DCL < data->dcl_limit || LO_CELL_V < (MIN_CELL_V + 0.1) || !(RELAYS & 0x01) || !CAN.available())) || // inverter criteria
-         (data->relay_pin != INVERTER && (userData[3].dcl_enforced_ms || DCL < data->dcl_limit || (SOC < 20 && WATTS > 0)) ) ) {                                                              // heater/hot water criteria
+    if ( (data->relay_pin == INVERTER && (AVG_AMPS > DCL || net_dcl < data->dcl_limit || LO_CELL_V < (MIN_CELL_V + 0.1) || !(RELAYS & 0x01) || !CAN.available())) || // inverter criteria
+         (data->relay_pin != INVERTER && (userData[3].dcl_enforced_ms || DCL < data->dcl_limit /*|| (SOC < 20 && WATTS > 0)*/) ) ) {                                                              // heater/hot water criteria
 
       // RECORD TIME TO ALLOW TO DISABLING AND ENABLING OF BUTTONS AND LABELS CONTINIOUSLY LATER IN FUNCTION
       data->dcl_enforced_ms = millis();
