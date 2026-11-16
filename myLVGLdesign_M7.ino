@@ -179,7 +179,7 @@ static CombinedData combinedData = {0};
 #define CYCLES          combinedData.canData.cc
 #define HEAT_SINK       combinedData.canData.hs
 #define CUSTOM_FLAGS    combinedData.canData.cu
-#define PV_DETECT       ((combinedData.canData.cu & 0x01) == 0x01)
+#define PV_DETECT       ((combinedData.canData.cu & 0x01) == 0x01) /** feedback from BMS charge enable signal, used for solar detection **/
 #define CAPACITY        combinedData.canData.cpcty
 
 #define DYNAMIC_LABEL   bmsStatusData.dynamic_label
@@ -1853,7 +1853,7 @@ void charge_icons_updater(data_display_t *data) {
         lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_text_color(data->charge_icon, lv_palette_main(LV_PALETTE_YELLOW), 0);
         lv_label_set_text(data->charge_icon,
-        PV_DETECT ? "\uF185" : "\uF0E7");   /* sun : bolt */
+        PV_DETECT && !disable_pv ? "\uF185" : "\uF0E7");   /* sun : bolt */
     }
     else if (PV_DETECT) {
         lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
@@ -2125,9 +2125,8 @@ void combined_2s_updater(lv_timer_t *timer) { // if time interval is changed rem
 
 
 void solar_panel_icon_event_handler(lv_event_t* e) {
-  lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t* obj = lv_event_get_target(e);
-  if (code == LV_EVENT_CLICKED) {
+  if ( !disable_pv ) {
     disable_pv = true;
     lv_obj_set_style_text_color(obj, lv_color_hex(0x555555), 0);
   }
@@ -2139,18 +2138,15 @@ void solar_panel_icon_event_handler(lv_event_t* e) {
 
 
 void leaf_icon_event_handler(lv_event_t* e) {
-  //lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t* obj = lv_event_get_target(e);
-  //if (code == LV_EVENT_CLICKED) {
-    if ( !eco_mode ) {
-      eco_mode = true;
-      lv_obj_set_style_text_color(obj, lv_color_hex(0x1cda70), 0);
-    }
-    else {
-      eco_mode = false;
-      lv_obj_set_style_text_color(obj, lv_color_hex(0x555555), 0);
-    }
-  //}
+  if ( !eco_mode ) {
+    eco_mode = true;
+    lv_obj_set_style_text_color(obj, lv_color_hex(0x1cda70), 0);
+  }
+  else {
+    eco_mode = false;
+    lv_obj_set_style_text_color(obj, lv_color_hex(0x555555), 0);
+  }
 }
 
 
