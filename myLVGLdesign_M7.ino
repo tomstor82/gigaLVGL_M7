@@ -18,11 +18,11 @@ GigaDisplayBacklight backlight;
 #define HOT_WATER     12
 #define SHOWER_HEATER 13
 
-// ADDING 4-BIT FONTS WITH ONLY NEEDED CHARACTERS FROM MONTSERRAT 34 & 20 AND FONTAWESOME_SVG_SOLID 20 & 34 (https://lvgl.io/tools/fontconverter)
+// ADDING 4-BIT BBP FONTS WITH ONLY NEEDED CHARACTERS FROM MONTSERRAT SIZE 34 & 20 AND FONTAWESOME_SVG_SOLID SIZE 20 & 34 (https://lvgl.io/tools/fontconverter) /** NOTE USE RANGE NOT SYMBOLS **/
 LV_FONT_DECLARE(Montserrat34_0_9_percent);
 LV_FONT_DECLARE(Montserrat20_0_9_W_minus);
 LV_FONT_DECLARE(FontAwesomeSolid20_icons); // 0xF185, 0xF6C4, 0xF0E7, 0xF5DF  = sun, cloud covered sun, lightening and car battery
-LV_FONT_DECLARE(FontAwesomeSolid34_leaf); // 0xF06C
+LV_FONT_DECLARE(FontAwesomeSolid34_icons); // 0xF06C, 0xF5BA, = leaf, solar panel
 
 
 //  CANBUS data Identifier List
@@ -196,6 +196,7 @@ bool eco_mode = false;
 static uint8_t brightness = 70;
 uint32_t previous_touch_ms = 0;
 float power_movement_arr[2] = {0,0};
+bool disable_pv = false;
 
 // for M4 messages
 static String buffer = "";
@@ -2117,6 +2118,26 @@ void combined_2s_updater(lv_timer_t *timer) { // if time interval is changed rem
 
 
 
+
+
+
+
+
+
+void solar_panel_icon_event_handler(lv_event_t* e) {
+  lv_event_code_t code = lv_event_get_code(e);
+  lv_obj_t* obj = lv_event_get_target(e);
+  if (code == LV_EVENT_CLICKED) {
+    disable_pv = true;
+    lv_obj_set_style_text_color(obj, lv_color_hex(0x555555), 0);
+  }
+  else {
+    disable_pv = false;
+    lv_obj_set_style_text_color(obj, lv_color_hex(0xFAFAF9), 0);
+  }
+}
+
+
 void leaf_icon_event_handler(lv_event_t* e) {
   //lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t* obj = lv_event_get_target(e);
@@ -2216,9 +2237,18 @@ void setup() {
   // Create Button 4 - INVERTER
   create_button(cont, "Inverter",       INVERTER, 305, 5, &userData[3]);
 
+  // Create Solar Panel
+  lv_obj_t* solar_panel_icon = lv_label_create(cont);
+    lv_obj_set_style_text_font(solar_panel_icon, &FontAwesomeSolid34_icons, 0);
+    lv_label_set_text(solar_panel_icon, "\uF5BA");
+    lv_obj_set_style_text_color(solar_panel_icon, lv_color_hex(0xFAFAF9), 0);
+    lv_obj_align(solar_panel_icon, LV_ALIGN_RIGHT_MID, -40, 40);
+    lv_obj_add_flag(solar_panel_icon, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(solar_panel_icon, solar_panel_icon_event_handler, LV_EVENT_CLICKED, NULL);
+
   // Create Leaf Icon for Inverter Eco Mode
   lv_obj_t* leaf_icon = lv_label_create(cont);
-    lv_obj_set_style_text_font(leaf_icon, &FontAwesomeSolid34_leaf, 0);
+    lv_obj_set_style_text_font(leaf_icon, &FontAwesomeSolid34_icons, 0);
     lv_label_set_text(leaf_icon, "\uF06C");
     lv_obj_set_style_text_color(leaf_icon, lv_color_hex(0x555555), 0);
     lv_obj_align(leaf_icon, LV_ALIGN_BOTTOM_RIGHT, -40, -40);
@@ -2315,10 +2345,13 @@ void loop() {
     dim_display();
   }
 
+  // TURN OFF SOLAR IF SOLAR PANEL BUTTON PRESSED
+  if ( disable_pv ) pv_contactor(false);
+
   // 6s INVERTER DELAY AFTER MPPT DISABLED WITH 30s PAUSE BEFORE SENDING RE-ENABLE SIGNAL
   if ( inverter_delay_timer_ms ) {
 
-    if ( PV_ON ) {
+    if ( PV_ON && !disable_pv ) {
       pv_contactor(false);
       Serial.println("Had to open PV relay from loop :(");
     }
