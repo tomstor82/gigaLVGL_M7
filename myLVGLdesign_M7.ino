@@ -21,7 +21,7 @@ GigaDisplayBacklight backlight;
 // ADDING 4-BIT FONTS WITH ONLY NEEDED CHARACTERS FROM MONTSERRAT 34 & 20 AND FONTAWESOME_SVG_SOLID 20 & 34 (https://lvgl.io/tools/fontconverter)
 LV_FONT_DECLARE(Montserrat34_0_9_percent);
 LV_FONT_DECLARE(Montserrat20_0_9_W_minus);
-LV_FONT_DECLARE(FontAwesomeSolid20_icons); // 0xF185, 0xF1E6, 0xF0E7, 0xF5DF  = sun, two-pin, lightening and car battery
+LV_FONT_DECLARE(FontAwesomeSolid20_icons); // 0xF185, 0xF6C4, 0xF0E7, 0xF5DF  = sun, cloud covered sun, lightening and car battery
 LV_FONT_DECLARE(FontAwesomeSolid34_leaf); // 0xF06C
 
 
@@ -475,13 +475,13 @@ void dcl_check(user_data_t *data) {
     return;
   }
 
-  // CALCULATE NET DCL FOR DETERMINING HOW MUCH POWER CAN BE DRAWN SAFELY
+  // CALCULATE NET DCL FOR DETERMINING HOW MUCH POWER CAN BE DRAWN SAFELY IF BATTERY DISCHARGING
   float net_dcl = DCL;
   if ( AVG_AMPS ) net_dcl = DCL - AVG_AMPS;
 
   // START TIMER IF INVERTER AND/OR HEATER/HOT WATER CRITERIA SATISFIED
   if ( !data->dcl_enforced_ms ) {
-    if ( (data->relay_pin == INVERTER && (AVG_AMPS > DCL || net_dcl < data->dcl_limit || LO_CELL_V < (MIN_CELL_V + 0.1) || !(RELAYS & 0x01) || !CAN.available())) || // inverter criteria
+    if ( (data->relay_pin == INVERTER && (AVG_AMPS > DCL || net_dcl < data->dcl_limit /*|| LO_CELL_V < (MIN_CELL_V + 0.1)*/ || !(RELAYS & 0x01) || !CAN.available())) || // inverter criteria
          (data->relay_pin != INVERTER && (userData[3].dcl_enforced_ms || DCL < data->dcl_limit /*|| (SOC < 20 && WATTS > 0)*/) ) ) {                                                              // heater/hot water criteria
 
       // RECORD TIME TO ALLOW TO DISABLING AND ENABLING OF BUTTONS AND LABELS CONTINIOUSLY LATER IN FUNCTION
@@ -1043,7 +1043,7 @@ void manipulate_heaters(bool night_mode) {
 
   //static uint8_t previous_dd_selection[2] = {254, 254};
   static uint8_t selected_temp[2] = { 254, 254 };
-  uint8_t night_temp = 17;
+  uint8_t night_temp = 16;
 
   // common loop manipulating both heaters temperature selections
   for ( uint8_t i = 0; i < 2; i++ ) {
@@ -1808,72 +1808,72 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
 
 // DATA SCREEN STATE OF CHARGE SYMBOLS ////////////////////////////////////////////////
 void charge_icons_updater(data_display_t *data) {
-  static bool flashing_battery = false;
+    if (!data || !data->car_battery_icon || !data->charge_icon) return;
 
-  // FLASH BATTERY ICON
-  if ( flashing_battery && !lv_obj_has_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN) ) {
-    lv_obj_add_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
-  }
-  else if ( lv_obj_has_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN) ) {
-    lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
-  }
+    static bool battery_blink_phase = false;
 
-  // WHITE ABOVE 15% OR IF CHARGING
-  if ( SOC > 15 || AVG_AMPS < 0 ) {
-    lv_obj_set_style_text_color(data->car_battery_icon, lv_color_white(), 0);
-    // FLASHING WHILST CHARGING
-    /*if ( AVG_AMPS < 0 ) {
-      flashing_battery = true;
-    }
-    else flashing_battery = false;*/
-  }
-  // ORANGE ABOVE 10%
-  else if ( SOC > 10 ) {
-    lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_ORANGE), 0);
-  }
-  // RED BATTERY ICON FROM SOC 10% AND LESS WITH FLASHING BELOW 5% OR IF DISCHARGE DISABLED
-  else  {
-    lv_obj_set_style_text_color(data->car_battery_icon, lv_palette_main(LV_PALETTE_RED), 0);
-    if ( SOC < 5 || userData[3].faulty_temp_disabled ) {
-      flashing_battery = true;
-    }
-    else flashing_battery = false;
-  }
+    const bool charging = (AVG_AMPS < 0);
 
-  // CHARGE SYMBOLS
-  if ( AVG_AMPS < 0 ) {
-    // CLEAR HIDDEN FLAG
-    if ( lv_obj_has_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN) ) {
-      lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
-    }
-    // SHOW SUN IF PV DETECTED
-    if ( PV_DETECT ) {
-      lv_label_set_text(data->charge_icon, "\uF185"); // sun icon
-    }
-    // SHOW LIGHTENING BOLT OTHERWISE
-    else {
-      lv_label_set_text(data->charge_icon, "\uF0E7"); // \uF0E7 lightening bolt, \uF1E6 two-pin plug
-    }
-  }
+    static bool    sun_blink_phase = false;
 
-  // NO CHARGE
-  else {
-    // SHOW FLASHING SUN ICON IF PV DETECTED
-    if ( PV_DETECT ) {
-      lv_label_set_text(data->charge_icon, "\uF185"); // sun icon
-      if ( !lv_obj_has_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN) ) {
-        lv_obj_add_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
-      }
-      else {
+    static uint8_t sun_tick        = 0;
+
+    /* ---------- Battery icon: color ---------- */
+    lv_color_t batt_color;
+    bool       batt_blink;
+
+    if (SOC > 15 || charging) {
+        batt_color = lv_color_white();
+        batt_blink = false;
+    } else if (SOC > 10) {
+        batt_color = lv_palette_main(LV_PALETTE_ORANGE);
+        batt_blink = false;
+    } else {
+        batt_color = lv_palette_main(LV_PALETTE_RED);
+        batt_blink = (SOC < 5) || userData[3].faulty_temp_disabled;
+    }
+
+    lv_obj_set_style_text_color(data->car_battery_icon, batt_color, 0);
+
+    /* ---------- Battery icon: visibility (flash only for alarm) ---------- */
+    if (batt_blink) {
+        battery_blink_phase = !battery_blink_phase;
+        if (battery_blink_phase)
+            lv_obj_add_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
+        else
+            lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        battery_blink_phase = false;
+        lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    /* ---------- Charge icon ---------- */
+    if (charging) {
         lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
-      }
+        lv_obj_set_style_text_color(data->charge_icon, lv_palette_main(LV_PALETTE_YELLOW), 0);
+        lv_label_set_text(data->charge_icon,
+        PV_DETECT ? "\uF185" : "\uF0E7");   /* sun : bolt */
     }
-    // NO PV DETECTED, NO ICON
-    else {
-      lv_label_set_text(data->charge_icon, "");
+    else if (PV_DETECT) {
+        lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_text_color(data->charge_icon, lv_color_white(), 0);
+        lv_label_set_text(data->charge_icon, "\uF6C4");   /* cloud covered sun */
+        sun_tick = (sun_tick + 1) % 4;          /* 4 s cycle */
+        if (sun_tick < 2) {                     /* flash for 2 s */
+          sun_blink_phase = !sun_blink_phase;
+          if (sun_blink_phase) lv_obj_add_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
+          else                 lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
+        }
+        else {                                /* steady for 2 s */
+          sun_blink_phase = false;
+          lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
+        }
+    } else {
+        lv_label_set_text(data->charge_icon, "");
+        lv_obj_add_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
     }
-  }
 }
+
 
 // DATA SCREEN UPDATER ////////////////////////////////////////////////////////////////
 void data_display_updater(lv_timer_t *timer) {
@@ -2037,7 +2037,7 @@ void create_data_display(lv_obj_t *parent, data_display_t *data) {
 
   data->charge_icon = lv_label_create(parent);
     lv_obj_set_style_text_font(data->charge_icon, &FontAwesomeSolid20_icons, 0);
-    lv_obj_set_style_text_color(data->charge_icon, lv_palette_main(LV_PALETTE_YELLOW), 0);
+//    lv_obj_set_style_text_color(data->charge_icon, lv_palette_main(LV_PALETTE_YELLOW), 0);
 
   data->car_battery_icon = lv_label_create(parent);
     lv_obj_set_style_text_font(data->car_battery_icon, &FontAwesomeSolid20_icons, 0);
