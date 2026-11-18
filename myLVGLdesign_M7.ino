@@ -190,6 +190,11 @@ static CombinedData combinedData = {0};
 #define off_interval_min 3 // 3 minute off interval reduces standby consumption from 85Wh to around 12,5Wh -84%
 #define touch_timeout_ms 30000 // 30s before screen dimming
 
+#define SUNSET_LOCKOUT_MS   600000UL   // 10m MIN DARK BEFORE SUNRISE ACCEPTED
+#define SUNRISE_SETTLE_MS   600000UL   // 10m SETTLE BEFORE PV ENABLED
+#define DRAIN_CONFIRM_MS     20000UL   // 20s INVERTER OFF GRACE
+#define DRAIN_TRIP_W            30     // WATTS THRESHOLD TO SPOT MPPT DRAIN
+
 // global variables * 8bits=256 16bits=65536 32bits=4294967296 (millis size) int/float = 4 bytes
 uint32_t inverter_delay_timer_ms = 0;
 bool eco_mode = false;
@@ -197,6 +202,7 @@ static uint8_t brightness = 70;
 uint32_t previous_touch_ms = 0;
 float power_movement_arr[2] = {0,0};
 bool disable_pv = false;
+lv_obj_t *touch_overlay = nullptr;
 
 // for M4 messages
 static String buffer = "";
@@ -335,88 +341,78 @@ void pv_contactor(bool enable_solar) {
 
 
 
-
 // MPPT MANAGER ////////////////////////////////////////////////////////////////////////////////////////
 void solar_charge_manager() {
 
   static bool enable_solar = false;
-  static uint32_t sunrise_ms = 0;
+  static bool night = false;
+  static uint32_t timer_ms = 0;                 // TIMESTAMP: SUNRISE OR SUNSET EVENT
+  static uint32_t drain_ms = 0;                 // TIMESTAMP: MPPT DRAIN DETECTED, 0 = NO DRAIN PENDING
+  static bool boot_done = false;
 
-  // IF BATTERY CONTACTOR OPEN, CCL ENFORCED OR NO CAN COMMUNICATION, PV CONTACTOR TO REMAIN OPEN
-  if (!(RELAYS & 0x0001) || CCL_ENFORCED ) return;
+  // IF BATTERY CONTACTOR OPEN, CCL ENFORCED, NO CAN COMMUNICATION, INVERTER DELAY OR PV DISABLED RETURN
+  if (!(RELAYS & 0x0001) || CCL_ENFORCED || inverter_delay_timer_ms || disable_pv ) return;
 
 
+  // NO BMS CAN COMM - FORCE PV OFF BUT PRESERVE SUNRISE/SUNSET AND DRAIN TIMERS
   if ( !CAN.available() ) {
     enable_solar = false;
     strcpy(DYNAMIC_LABEL, "Arduino: PV OFF - No BMS CAN comm");
   }
-  // WHEN SUNLIGHT IS SENSED
-  else if ( PV_DETECT ) {
+  // WHEN SUNRISE IS SENSED AT LEAST 10m AFTER SUNSET
+  else if ( PV_DETECT && (!night || (night && (millis() - timer_ms) > SUNSET_LOCKOUT_MS)) ) {
     // SYNC TIME EVERYTIME CHG SIGNAL DETECTED TO CHECK WHEN SOLAR SIGNAL IS LOST
-    if ( !sunrise_ms ) {
-      sunrise_ms = millis();
+    if ( !timer_ms || night ) {
+      timer_ms = millis();
+      night = false;
       return;
     }
 
-    // AFTER INVERTER START DELAY
-    if ( !inverter_delay_timer_ms /*&& previous_delay*/) {
-      // USED TO AVOID RAPID TRIGGERING OF THESE TWO STATEMENTS
-      static uint32_t mppt_drain_time_ms = 0;
-
-      // IF MPPT DRAINS BATTERY WHILST INVERTER IS OFF AND PV HAS BEEN ENABLED FOR AT LEAST 30s
-      if ( WATTS > 30 && (millis() - sunrise_ms) > 30000 && !userData[3].on && enable_solar ) { // OVER 30 WATTS TO AVOID LIGHTS TRIPPING PV
-        if ( !mppt_drain_time_ms ) {
-          mppt_drain_time_ms = millis();
-          return;
-        }
-        // ALLOW INVERTER 20s TO TURN OFF BEFORE SETTING LABEL AND DISCONNECTING SOLAR PANELS
-        if ( (millis() - mppt_drain_time_ms) > 20000 ) {
-          enable_solar = false;
-          strcpy(DYNAMIC_LABEL, "Arduino: PV OFF - Weak Sunlight");
-        }
-        else {
-          return;
-        }
+    // IF MPPT DRAINS BATTERY WHILST INVERTER IS OFF AND PV HAS BEEN ENABLED FOR AT LEAST 30s
+    if ( WATTS > DRAIN_TRIP_W && !userData[3].on && (millis() - timer_ms) > 30000 && PV_ON ) { // OVER 30 WATTS TO AVOID LIGHTS TRIPPING PV
+      if ( !drain_ms ) {
+        drain_ms = millis();
+        return;
       }
-      // TURN ON PV ARRAY 10m AFTER SUNRISE OR MPPT DRAIN, OR 5s AFTER ARDUINO STARTUP IF SUNRISE DETECTED MORE THAN 2s AGO
-      else if ( !enable_solar && ((millis() - sunrise_ms + mppt_drain_time_ms) > 600000 || combinedData.canData.p )) { // using combinedData to decipher when Arduino has started
-        enable_solar = true;
-        mppt_drain_time_ms = 0;
-        strcpy(DYNAMIC_LABEL, "Arduino: PV ON delay");
-      }
-    }
-  }
-  // WHEN THERE IS NO SUN
-  else {
-    // SENSE RELAY FLAPPING
-    if ( sunrise_ms ) {
-      // within 10 seconds lets trigger mppt delay as relay flap detected
-      if ( (millis() - sunrise_ms) < 10000 && enable_solar ) {
+      // ALLOW INVERTER 20s TO TURN OFF BEFORE SETTING LABEL AND DISCONNECTING SOLAR PANELS
+      if ( (millis() - drain_ms) > DRAIN_CONFIRM_MS ) {
         enable_solar = false;
-        strcpy(DYNAMIC_LABEL, "Arduino: PV OFF - Sense relay flapping");
+        drain_ms = 0;
+        strcpy(DYNAMIC_LABEL, "Arduino: PV OFF - Weak sun");
+        pv_contactor(enable_solar);
+        return;
       }
-      // SUNSET MORE THAN 10s LATER
       else {
-        sunrise_ms = 0;
         return;
       }
     }
-    // EXT. CHARGE AFTER SUNRISE OR NIGHT
-    else if ( !inverter_delay_timer_ms ) { // inverter_delay_timer_ms condition to not over-write startup label
-      if ( AVG_AMPS < 0 && sunrise_ms ) {
-        strcpy(DYNAMIC_LABEL, "Arduino: PV OFF - External Charge");
-      }
-      else {
-        strcpy(DYNAMIC_LABEL, "Arduino: PV OFF - Night mode");
-      }
-      enable_solar = false;
+    // DRAIN CONDITION GONE BEFORE CONFIRM - RESET SO NEXT DRAIN GETS FULL TIMEOUT
+    else if ( drain_ms ) {
+      drain_ms = 0;
     }
+
+    // TURN ON PV ARRAY 10m AFTER SUNRISE, OR 5s AFTER ARDUINO STARTUP IF SUNRISE DETECTED WITHIN 5s
+    if ( !PV_ON && ( (millis() - timer_ms) > SUNRISE_SETTLE_MS || (!boot_done && (millis() - timer_ms) < 5000) ) ) {
+      enable_solar = true;
+      strcpy(DYNAMIC_LABEL, "Arduino: PV ON delay");
+    }
+    boot_done = true;
+  }
+  // NO PV DETECT, EITHER SUNSET OR FLAPPING SENSE RELAY
+  else if ( !PV_DETECT ) {
+    if ( !night && (millis() - timer_ms) > SUNSET_LOCKOUT_MS ) {
+      night = true;
+      timer_ms = millis();
+      drain_ms = 0;
+    }
+    if ( night ) strcpy(DYNAMIC_LABEL, "Arduino: PV OFF - Night mode");
+    else strcpy(DYNAMIC_LABEL, "Arduino: PV OFF - Weak sun");
+    enable_solar = false;
   }
 
   // SEND TO PV CONTACTOR CONTROLL FUNCTION
   pv_contactor(enable_solar);
 }
-
 
 
 
@@ -738,7 +734,7 @@ void close_sensor_msgbox_event_handler(lv_event_t *e) {
 
 void inverter_start() {
   // if mppt is or has been discharging battery recently, best disable it as power surges happen if inverter start attempted
-  if ( WATTS >= 0 && PV_DETECT ) { // using PV_DETECT insteaed of PV_ON as PV might have been tripped recently due to drain
+  if ( WATTS >= 0 && PV_DETECT && !disable_pv ) { // using PV_DETECT insteaed of PV_ON as PV might have been tripped recently due to drain
     pv_contactor(false);
     inverter_delay_timer_ms = millis(); // triggers loop function with delayed start and restart of mppt
     strcpy(DYNAMIC_LABEL, "Inverter starting");
@@ -1584,6 +1580,33 @@ void retrieve_M4_data() {
 
 
 
+// CREATE TOUCH OVERLAY TO AVOID CLICKING BUTTONS WHEN SCREEN IS ASLEEP /////////////////////////
+void touch_overlay_event(lv_event_t *e) {
+  lv_event_code_t code = lv_event_get_code(e);
+
+  if (code == LV_EVENT_PRESSED) {
+    previous_touch_ms = millis();
+    brightness = 70;
+    backlight.set(brightness);
+  }
+  else if (code == LV_EVENT_RELEASED) {
+    lv_obj_add_flag(touch_overlay, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+void create_touch_overlay() {
+  touch_overlay = lv_obj_create(lv_scr_act());
+  lv_obj_set_size(touch_overlay, LV_PCT(100), LV_PCT(100));
+  lv_obj_set_pos(touch_overlay, 0, 0);
+
+  lv_obj_set_style_bg_opa(touch_overlay, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(touch_overlay, 0, 0);
+  lv_obj_set_style_pad_all(touch_overlay, 0, 0);
+
+  lv_obj_add_flag(touch_overlay, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_flag(touch_overlay, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_event_cb(touch_overlay, touch_overlay_event, LV_EVENT_ALL, NULL);
+}
 
 
 
@@ -1593,15 +1616,21 @@ void dim_display() {
   brightness ? brightness-- : 0;
   // set brightness
   backlight.set(brightness);
+
+  if ( !brightness && touch_overlay != nullptr) {
+    lv_obj_clear_flag(touch_overlay, LV_OBJ_FLAG_HIDDEN);
+  }
 }
 
 // SCREEN TOUCH HANDLER FOR DISPLAY DIMMING ///////////////////////////////////////////
 void screen_touch(lv_event_t *e) {
   lv_event_code_t code = lv_event_get_code(e);
-  if ( code == LV_EVENT_CLICKED ) {
+  if ( code == LV_EVENT_PRESSED ) {
     previous_touch_ms = millis();
-    brightness = 70;
-    backlight.set(brightness);
+    if ( brightness != 70 ) {
+      brightness = 70;
+      backlight.set(brightness);
+    }
   }
 }
 
@@ -1809,70 +1838,76 @@ void create_bms_status_label(lv_obj_t *parent, lv_coord_t y, bms_status_data_t *
 
 // DATA SCREEN STATE OF CHARGE SYMBOLS ////////////////////////////////////////////////
 void charge_icons_updater(data_display_t *data) {
-    if (!data || !data->car_battery_icon || !data->charge_icon) return;
+  if (!data || !data->car_battery_icon || !data->charge_icon) return;
 
-    static bool battery_blink_phase = false;
+  const bool      CHARGING = (AVG_AMPS < 0);
+  static bool     battery_blink_phase = false;
+  static bool     sun_blink_phase = false;
+  static uint8_t  sun_tick = 0;
+  bool            batt_blink = false;
 
-    const bool charging = (AVG_AMPS < 0);
+  /* ---------- Battery icon: color ---------- */
+  lv_color_t batt_color;
 
-    static bool    sun_blink_phase = false;
+  if (SOC > 15 || CHARGING) {
+    batt_color = lv_color_white();
+    batt_blink = false;
+  }
+  else if (SOC > 10) {
+    batt_color = lv_palette_main(LV_PALETTE_ORANGE);
+    batt_blink = false;
+  }
+  else {
+    batt_color = lv_palette_main(LV_PALETTE_RED);
+    batt_blink = (SOC < 5) || userData[3].faulty_temp_disabled;
+  }
+  lv_obj_set_style_text_color(data->car_battery_icon, batt_color, 0);
 
-    static uint8_t sun_tick        = 0;
-
-    /* ---------- Battery icon: color ---------- */
-    lv_color_t batt_color;
-    bool       batt_blink;
-
-    if (SOC > 15 || charging) {
-        batt_color = lv_color_white();
-        batt_blink = false;
-    } else if (SOC > 10) {
-        batt_color = lv_palette_main(LV_PALETTE_ORANGE);
-        batt_blink = false;
-    } else {
-        batt_color = lv_palette_main(LV_PALETTE_RED);
-        batt_blink = (SOC < 5) || userData[3].faulty_temp_disabled;
+  /* ---------- Battery icon: visibility (flash only for alarm) ---------- */
+  if (batt_blink) {
+    battery_blink_phase = !battery_blink_phase;
+    if (battery_blink_phase) {
+      lv_obj_add_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
     }
-
-    lv_obj_set_style_text_color(data->car_battery_icon, batt_color, 0);
-
-    /* ---------- Battery icon: visibility (flash only for alarm) ---------- */
-    if (batt_blink) {
-        battery_blink_phase = !battery_blink_phase;
-        if (battery_blink_phase)
-            lv_obj_add_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
-        else
-            lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        battery_blink_phase = false;
-        lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
+    else {
+      lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
     }
+  }
+  else {
+    battery_blink_phase = false;
+    lv_obj_clear_flag(data->car_battery_icon, LV_OBJ_FLAG_HIDDEN);
+  }
 
-    /* ---------- Charge icon ---------- */
-    if (charging) {
-        lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_style_text_color(data->charge_icon, lv_palette_main(LV_PALETTE_YELLOW), 0);
-        lv_label_set_text(data->charge_icon,
-        PV_DETECT && !disable_pv ? "\uF185" : "\uF0E7");   /* sun : bolt */
-    }
-    else if (PV_DETECT) {
-        lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_style_text_color(data->charge_icon, lv_color_white(), 0);
-        lv_label_set_text(data->charge_icon, "\uF6C4");   /* cloud covered sun */
-        sun_tick = (sun_tick + 1) % 4;          /* 4 s cycle */
-        if (sun_tick < 2) {                     /* flash for 2 s */
-          sun_blink_phase = !sun_blink_phase;
-          if (sun_blink_phase) lv_obj_add_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
-          else                 lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
-        }
-        else {                                /* steady for 2 s */
-          sun_blink_phase = false;
-          lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
-        }
-    } else {
-        lv_label_set_text(data->charge_icon, "");
+  /* ---------- Charge icon ---------- */
+  if (CHARGING) {
+    lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_text_color(data->charge_icon, lv_palette_main(LV_PALETTE_YELLOW), 0);
+    lv_label_set_text(data->charge_icon,
+    PV_DETECT && !disable_pv ? "\uF185" : "\uF0E7");   /* sun : bolt */
+  }
+  else if (PV_DETECT) {
+    lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_text_color(data->charge_icon, lv_color_white(), 0);
+    lv_label_set_text(data->charge_icon, "\uF6C4");   /* cloud covered sun */
+    sun_tick = (sun_tick + 1) % 4;          /* 4 s cycle */
+    if (sun_tick < 2) {                     /* flash for 2 s */
+      sun_blink_phase = !sun_blink_phase;
+      if (sun_blink_phase) {
         lv_obj_add_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
+      }
+      else {
+        lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
+      }
     }
+    else {                                /* steady for 2 s */
+      sun_blink_phase = false;
+      lv_obj_clear_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  else {
+    lv_label_set_text(data->charge_icon, "");
+    lv_obj_add_flag(data->charge_icon, LV_OBJ_FLAG_HIDDEN);
+  }
 }
 
 
@@ -2126,13 +2161,16 @@ void combined_2s_updater(lv_timer_t *timer) { // if time interval is changed rem
 
 void solar_panel_icon_event_handler(lv_event_t* e) {
   lv_obj_t* obj = lv_event_get_target(e);
-  if ( !disable_pv ) {
+  lv_event_code_t code = lv_event_get_code(e);
+  if ( code == LV_EVENT_LONG_PRESSED && !disable_pv ) {
     disable_pv = true;
     lv_obj_set_style_text_color(obj, lv_color_hex(0x555555), 0);
+    strcpy(DYNAMIC_LABEL, "Solar Selected OFF");
   }
-  else {
+  else if ( code == LV_EVENT_SHORT_CLICKED && disable_pv ) {
     disable_pv = false;
     lv_obj_set_style_text_color(obj, lv_color_hex(0xFAFAF9), 0);
+    strcpy(DYNAMIC_LABEL, "Arduino: Solar ON delay");
   }
 }
 
@@ -2240,21 +2278,24 @@ void setup() {
     lv_obj_set_style_text_color(solar_panel_icon, lv_color_hex(0xFAFAF9), 0);
     lv_obj_align(solar_panel_icon, LV_ALIGN_RIGHT_MID, -40, 40);
     lv_obj_add_flag(solar_panel_icon, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(solar_panel_icon, solar_panel_icon_event_handler, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(solar_panel_icon, solar_panel_icon_event_handler, LV_EVENT_ALL, NULL);
 
   // Create Leaf Icon for Inverter Eco Mode
   lv_obj_t* leaf_icon = lv_label_create(cont);
     lv_obj_set_style_text_font(leaf_icon, &FontAwesomeSolid34_icons, 0);
     lv_label_set_text(leaf_icon, "\uF06C");
     lv_obj_set_style_text_color(leaf_icon, lv_color_hex(0x555555), 0);
-    lv_obj_align(leaf_icon, LV_ALIGN_BOTTOM_RIGHT, -40, -40);
+    lv_obj_align(leaf_icon, LV_ALIGN_BOTTOM_RIGHT, -44, -42);
     lv_obj_add_flag(leaf_icon, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(leaf_icon, leaf_icon_event_handler, LV_EVENT_CLICKED, NULL);
 
   // Create Leaf Icon label
   lv_obj_t* leaf_label = lv_label_create(cont);
     lv_label_set_text(leaf_label, "ECO mode");
-    lv_obj_align(leaf_label, LV_ALIGN_BOTTOM_RIGHT, -22, -15);
+    lv_obj_align(leaf_label, LV_ALIGN_BOTTOM_RIGHT, -26, -15);
+
+  // Create dim screen overlay for touch
+  create_touch_overlay();
 
 }
 
